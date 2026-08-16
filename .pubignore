@@ -1,0 +1,27 @@
+# Pub uses this file instead of .gitignore, so workspace-only exclusions need
+# to stay explicit here as well.
+.dart_tool/
+.packages
+build/
+coverage/
+.test_coverage.dart
+.vscode/
+.idea/
+*.iml
+*.ipr
+*.iws
+*.log
+.DS_Store
+*.swp
+*.swo
+.flutter_pruner/
+flutter_pruner.yaml
+.agent/
+.agents/
+.claude/
+.codex/
+.github/
+
+# Tests and their nested Flutter fixture remain available in the source
+# repository; they are not runtime contents of the published CLI package.
+test/

@@ -1,0 +1,114 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: Analyze and format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+
+      - name: Install dependencies
+        run: dart pub get
+
+      - name: Verify formatting
+        run: dart format --output=none --set-exit-if-changed .
+
+      - name: Analyze
+        run: dart analyze --fatal-infos
+
+  test:
+    name: Test (${{ matrix.os }}, Dart ${{ matrix.sdk }})
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        # package:analyzer ships frequent breaking changes and is pinned to the
+        # SDK, so keep the declared SDK floor on Linux alongside current stable.
+        # Run the full suite on every supported runner. This includes the
+        # mutation-safety paths (operation locking, verifier termination,
+        # quarantine/rollback, and import cleanup) rather than treating their
+        # platform branches as untested implementation detail.
+        include:
+          - os: ubuntu-latest
+            sdk: '3.9'
+          - os: ubuntu-latest
+            sdk: stable
+          - os: macos-latest
+            sdk: stable
+          - os: windows-latest
+            sdk: stable
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: ${{ matrix.sdk }}
+
+      - name: Install dependencies
+        run: dart pub get
+
+      - name: Run tests
+        run: dart test --reporter expanded
+
+  package:
+    name: Package dry run
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+
+      - name: Install dependencies
+        run: dart pub get
+
+      # This performs pub's package-content and publishability validation
+      # without uploading anything. It catches accidental internal artifacts
+      # and a broken published package surface before a release tag exists.
+      - name: Validate publishable package
+        run: dart pub publish --dry-run
+
+  smoke:
+    name: CLI smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+
+      - run: dart pub get
+
+      # The CLI must stay runnable at every commit. A tool that cannot start is
+      # worse than one with a missing feature.
+      - name: Version
+        run: dart run bin/flutter_pruner.dart --version
+
+      - name: Help
+        run: dart run bin/flutter_pruner.dart --help
+
+      - name: Scan self
+        run: dart run bin/flutter_pruner.dart scan --adapter dart --format json --output self-scan.json
+
+      - name: Reject self-scan SAFE/HIGH false positives
+        run: >-
+          jq -e
+          '.statistics.findings.byTier.SAFE == 0 and
+          .statistics.findings.byTier.HIGH == 0'
+          .flutter_pruner/reports/self-scan.json

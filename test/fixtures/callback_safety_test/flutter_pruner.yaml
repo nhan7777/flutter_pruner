@@ -1,0 +1,9 @@
+version: 1
+analysis:
+  mode: application
+target_matrix:
+  complete: true
+  targets:
+    - name: android
+      platform: android
+      entrypoint: lib/main.dart

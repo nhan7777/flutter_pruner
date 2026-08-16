@@ -1,0 +1,11 @@
+name: callback_safety_test
+description: Fixture for native and background callback reachability.
+version: 1.0.0
+publish_to: none
+
+environment:
+  sdk: ^3.9.0
+
+dependencies:
+  flutter:
+    sdk: flutter

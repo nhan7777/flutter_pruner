@@ -1,0 +1,18 @@
+name: asset_test
+description: Test fixture for AssetAdapter
+version: 1.0.0
+publish_to: none
+
+environment:
+  sdk: ^3.9.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+flutter:
+  assets:
+    - assets/used.png
+    - assets/generated.png
+    - assets/unused.png
+    - assets/icons/

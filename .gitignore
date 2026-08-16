@@ -1,0 +1,71 @@
+# Dart / Flutter
+.dart_tool/
+.packages
+build/
+
+# A CLI package published to pub.dev should commit pubspec.lock so contributors
+# and CI resolve identical dependency versions. This matters here because
+# package:analyzer breaks frequently.
+# (pubspec.lock is intentionally NOT ignored.)
+
+# IDE
+.vscode/
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# Test coverage
+coverage/
+.test_coverage.dart
+
+# Misc
+*.log
+.DS_Store
+*.swp
+*.swo
+
+# flutter_pruner run artifacts
+.flutter_pruner/
+
+# Local AI assistants and generated working files
+.ai/
+.agent/
+.agents/
+.aider/
+.amazonq/
+.augment/
+.claude/
+.cline/
+.codex/
+.continue/
+.cursor/
+.factory/
+.gemini/
+.goose/
+.junie/
+.kiro/
+.kilocode/
+.opencode/
+.qodo/
+.qoder/
+.roo/
+.serena/
+.specstory/
+.superpowers/
+.tabnine/
+.trae/
+.windsurf/
+
+# Root-level AI instruction and configuration files
+.aider.conf.yml
+.cursorrules
+.windsurfrules
+AGENTS.md
+CLAUDE.md
+GEMINI.md
+
+# GitHub Copilot local instructions; keep other .github content tracked
+.github/copilot-instructions.md
+.github/instructions/
+.github/prompts/

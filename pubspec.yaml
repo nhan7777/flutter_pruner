@@ -1,0 +1,36 @@
+name: flutter_pruner
+description: >-
+  Semantic auditor for Flutter/Dart projects. Finds unused assets, duplicate
+  files and unreachable declarations using the Dart analyzer, with confidence
+  tiers and a reversible apply workflow.
+version: 1.0.0
+repository: https://github.com/nhan7777/flutter_pruner
+issue_tracker: https://github.com/nhan7777/flutter_pruner/issues
+
+# Local dev toolchain is Dart 3.9.2 (Flutter 3.35.5). CI additionally tests
+# newer SDKs — see .github/workflows/ci.yml. Raise this floor only when a
+# feature genuinely requires it.
+environment:
+  sdk: ^3.9.0
+
+dependencies:
+  # Core semantic analysis. This is the single highest-risk dependency:
+  # package:analyzer has no public/internal API separation and ships frequent
+  # breaking changes. Keep the constraint tight and let CI catch drift.
+  analyzer: ^8.4.0
+
+  args: ^2.5.0
+  collection: ^1.19.0
+  crypto: ^3.0.5
+  glob: ^2.1.2
+  logging: ^1.2.0
+  path: ^1.9.0
+  pubspec_parse: ^1.3.0
+  yaml: ^3.1.2
+
+dev_dependencies:
+  lints: ^5.0.0
+  test: ^1.25.8
+
+executables:
+  flutter_pruner:

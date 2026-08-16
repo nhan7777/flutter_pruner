@@ -1,0 +1,23 @@
+version: 1
+
+analysis:
+  mode: package
+  public_entrypoints:
+    - lib/flutter_pruner.dart
+
+target_matrix:
+  complete: true
+  targets:
+    - name: dart-vm
+      platform: linux
+      entrypoint: lib/flutter_pruner.dart
+    - name: cli
+      platform: linux
+      entrypoint: bin/flutter_pruner.dart
+
+verification:
+  steps:
+    - id: dart-analyze
+      argv: [dart, analyze, --fatal-infos]
+    - id: dart-test
+      argv: [dart, test]

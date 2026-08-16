@@ -1,0 +1,24 @@
+name: asset_safety_test
+description: Fixture for fail-closed asset reference analysis.
+version: 1.0.0
+publish_to: none
+
+environment:
+  sdk: ^3.9.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+flutter:
+  assets:
+    - assets/getter_drift.png
+    - assets/wrapper_drift.png
+    - assets/unknown_sink.riv
+    - assets/unresolved.png
+    - assets/dynamic_unhinted.png
+    - assets/raw_getter.png
+    - assets/opaque_variable.png
+    - assets/generated_dynamic.png
+    - assets/nested_payload.mp3
+    - assets/named_payload.png
