@@ -84,18 +84,16 @@ void main() {
     expect(result.stderr, contains('diagnostic output'));
   });
 
-  test(
-    'timeout kills cleanup child and grandchild before returning',
-    () async {
-      final parentScript = File(p.join(tempDir.path, 'parent.dart'));
-      final childScript = File(p.join(tempDir.path, 'child.dart'));
-      final grandchildScript = File(p.join(tempDir.path, 'grandchild.dart'));
-      final ready = File(p.join(tempDir.path, 'grandchild-ready'));
-      final childSurvived = File(p.join(tempDir.path, 'child-survived'));
-      final grandchildSurvived = File(
-        p.join(tempDir.path, 'grandchild-survived'),
-      );
-      parentScript.writeAsStringSync(r'''
+  test('timeout kills cleanup child and grandchild before returning', () async {
+    final parentScript = File(p.join(tempDir.path, 'parent.dart'));
+    final childScript = File(p.join(tempDir.path, 'child.dart'));
+    final grandchildScript = File(p.join(tempDir.path, 'grandchild.dart'));
+    final ready = File(p.join(tempDir.path, 'grandchild-ready'));
+    final childSurvived = File(p.join(tempDir.path, 'child-survived'));
+    final grandchildSurvived = File(
+      p.join(tempDir.path, 'grandchild-survived'),
+    );
+    parentScript.writeAsStringSync(r'''
 import 'dart:io';
 
 Future<void> main(List<String> arguments) async {
@@ -106,7 +104,7 @@ Future<void> main(List<String> arguments) async {
   await Future<void>.delayed(const Duration(minutes: 1));
 }
 ''');
-      childScript.writeAsStringSync(r'''
+    childScript.writeAsStringSync(r'''
 import 'dart:io';
 
 Future<void> main(List<String> arguments) async {
@@ -120,7 +118,7 @@ Future<void> main(List<String> arguments) async {
   await Future<void>.delayed(const Duration(minutes: 1));
 }
 ''');
-      grandchildScript.writeAsStringSync(r'''
+    grandchildScript.writeAsStringSync(r'''
 import 'dart:io';
 
 Future<void> main(List<String> arguments) async {
@@ -129,32 +127,30 @@ Future<void> main(List<String> arguments) async {
 }
 ''');
 
-      final result = await ImportCleanupRunner(
-        projectRoot: tempDir.path,
-        timeout: const Duration(milliseconds: 1500),
-        maxOutputBytesPerStream: 1024,
-        dartExecutable: Platform.resolvedExecutable,
-        dartArgumentPrefix: [
-          parentScript.path,
-          childScript.path,
-          grandchildScript.path,
-          ready.path,
-          childSurvived.path,
-          grandchildSurvived.path,
-        ],
-      ).run([p.join(tempDir.path, 'lib', 'main.dart')]);
+    final result = await ImportCleanupRunner(
+      projectRoot: tempDir.path,
+      timeout: const Duration(milliseconds: 1500),
+      maxOutputBytesPerStream: 1024,
+      dartExecutable: Platform.resolvedExecutable,
+      dartArgumentPrefix: [
+        parentScript.path,
+        childScript.path,
+        grandchildScript.path,
+        ready.path,
+        childSurvived.path,
+        grandchildSurvived.path,
+      ],
+    ).run([p.join(tempDir.path, 'lib', 'main.dart')]);
 
-      expect(result.success, isFalse);
-      expect(result.timedOut, isTrue);
-      expect(result.exitCode, -1);
-      expect(result.stderr, contains('timed out after 1500ms'));
-      expect(ready.existsSync(), isTrue);
-      await Future<void>.delayed(const Duration(seconds: 3));
-      expect(childSurvived.existsSync(), isFalse);
-      expect(grandchildSurvived.existsSync(), isFalse);
-    },
-    skip: !(Platform.isLinux || Platform.isMacOS || Platform.isWindows),
-  );
+    expect(result.success, isFalse);
+    expect(result.timedOut, isTrue);
+    expect(result.exitCode, -1);
+    expect(result.stderr, contains('timed out after 1500ms'));
+    expect(ready.existsSync(), isTrue);
+    await Future<void>.delayed(const Duration(seconds: 3));
+    expect(childSurvived.existsSync(), isFalse);
+    expect(grandchildSurvived.existsSync(), isFalse);
+  }, skip: !(Platform.isLinux || Platform.isMacOS || Platform.isWindows));
 
   test('maps unconfirmed termination to recovery-required exception', () {
     final runner = ImportCleanupRunner(
