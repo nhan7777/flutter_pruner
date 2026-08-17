@@ -1168,63 +1168,73 @@ void removableUnused() {}
     timeout: const Timeout(Duration(minutes: 1)),
   );
 
-  test('later transaction regression restores every earlier commit', () async {
-    final helperFile = File(p.join(tempDir.path, 'lib', 'src', 'helper.dart'));
-    helperFile.writeAsStringSync('''
+  test(
+    'later transaction regression restores every earlier commit',
+    () async {
+      final helperFile = File(
+        p.join(tempDir.path, 'lib', 'src', 'helper.dart'),
+      );
+      helperFile.writeAsStringSync('''
 void usedFunction() {}
 
 const unsupportedOne = 1, unsupportedTwo = 2;
 
 void removableUnused() {}
 ''');
-    final independentFile = File(
-      p.join(tempDir.path, 'lib', 'src', 'independent.dart'),
-    )..writeAsStringSync('void independentlyUnused() {}\n');
-    final helperBytes = helperFile.readAsBytesSync();
-    final independentBytes = independentFile.readAsBytesSync();
-    const originalDiagnostic =
-        'error • Existing baseline • lib/src/helper.dart:1:1 • baseline_error';
-    final verifier = _QueuedVerificationRunner(tempDir, [
-      _verification(passed: false, output: originalDiagnostic),
-      _verification(passed: true),
-      _verification(passed: false, output: 'error • second transaction'),
-      _verification(passed: false, output: originalDiagnostic),
-    ]);
+      final independentFile = File(
+        p.join(tempDir.path, 'lib', 'src', 'independent.dart'),
+      )..writeAsStringSync('void independentlyUnused() {}\n');
+      final helperBytes = helperFile.readAsBytesSync();
+      final independentBytes = independentFile.readAsBytesSync();
+      const originalDiagnostic =
+          'error • Existing baseline • lib/src/helper.dart:1:1 • baseline_error';
+      final verifier = _QueuedVerificationRunner(tempDir, [
+        _verification(passed: false, output: originalDiagnostic),
+        _verification(passed: true),
+        _verification(passed: false, output: 'error • second transaction'),
+        _verification(passed: false, output: originalDiagnostic),
+      ]);
 
-    final exitCode = await FlutterPrunerCommandRunner(
-      verifierFactory: (_) => verifier,
-    ).run(['apply', '--adapter', 'dart', tempDir.path]);
+      final exitCode = await FlutterPrunerCommandRunner(
+        verifierFactory: (_) => verifier,
+      ).run(['apply', '--adapter', 'dart', tempDir.path]);
 
-    expect(exitCode, 2);
-    expect(verifier.invocationCount, 4);
-    expect(helperFile.readAsBytesSync(), helperBytes);
-    expect(independentFile.readAsBytesSync(), independentBytes);
-    final manager = QuarantineManager(tempDir);
-    final quarantine = Directory((await manager.listQuarantines()).single.path);
-    final manifest = await manager.readManifest(quarantine);
-    expect(manifest.transactions, hasLength(2));
-    expect(manifest.fullRollbackVerified, isTrue);
-    expect(
-      manifest.transactions.map((transaction) => transaction.status),
-      everyElement(QuarantineTransactionStatus.rolledBackVerified),
-    );
-    final report =
-        jsonDecode(
-              File(
-                p.join(quarantine.path, 'run-report.json'),
-              ).readAsStringSync(),
-            )
-            as Map;
-    final apply = report['apply'] as Map;
-    expect((apply['transactions'] as Map)['committed'], 0);
-    expect((apply['transactions'] as Map)['rolledBackVerified'], 2);
-    expect((apply['actions'] as Map)['committed'], 0);
-    expect(apply['sourceBytesRemoved'], 0);
-    expect(
-      (apply['findingOutcomes'] as List).map((item) => (item as Map)['status']),
-      everyElement('rejectedRecovered'),
-    );
-  }, timeout: const Timeout(Duration(minutes: 1)));
+      expect(exitCode, 2);
+      expect(verifier.invocationCount, 4);
+      expect(helperFile.readAsBytesSync(), helperBytes);
+      expect(independentFile.readAsBytesSync(), independentBytes);
+      final manager = QuarantineManager(tempDir);
+      final quarantine = Directory(
+        (await manager.listQuarantines()).single.path,
+      );
+      final manifest = await manager.readManifest(quarantine);
+      expect(manifest.transactions, hasLength(2));
+      expect(manifest.fullRollbackVerified, isTrue);
+      expect(
+        manifest.transactions.map((transaction) => transaction.status),
+        everyElement(QuarantineTransactionStatus.rolledBackVerified),
+      );
+      final report =
+          jsonDecode(
+                File(
+                  p.join(quarantine.path, 'run-report.json'),
+                ).readAsStringSync(),
+              )
+              as Map;
+      final apply = report['apply'] as Map;
+      expect((apply['transactions'] as Map)['committed'], 0);
+      expect((apply['transactions'] as Map)['rolledBackVerified'], 2);
+      expect((apply['actions'] as Map)['committed'], 0);
+      expect(apply['sourceBytesRemoved'], 0);
+      expect(
+        (apply['findingOutcomes'] as List).map(
+          (item) => (item as Map)['status'],
+        ),
+        everyElement('rejectedRecovered'),
+      );
+    },
+    timeout: const Timeout(Duration(minutes: 1)),
+  );
 
   test(
     'later transaction apply failure restores every earlier commit',
@@ -1359,9 +1369,13 @@ void removableUnused() {}
     timeout: const Timeout(Duration(minutes: 1)),
   );
 
-  test('verification outage restores every case in the atomic unit', () async {
-    final helperFile = File(p.join(tempDir.path, 'lib', 'src', 'helper.dart'));
-    helperFile.writeAsStringSync('''
+  test(
+    'verification outage restores every case in the atomic unit',
+    () async {
+      final helperFile = File(
+        p.join(tempDir.path, 'lib', 'src', 'helper.dart'),
+      );
+      helperFile.writeAsStringSync('''
 void usedFunction() {}
 
 void unusedOne() {}
@@ -1370,32 +1384,36 @@ void unusedTwo() {}
 
 void unusedThree() {}
 ''');
-    final verifier = _QueuedVerificationRunner(tempDir, [
-      _verification(passed: true),
-      _unavailableVerification(),
-      _verification(passed: true),
-    ]);
+      final verifier = _QueuedVerificationRunner(tempDir, [
+        _verification(passed: true),
+        _unavailableVerification(),
+        _verification(passed: true),
+      ]);
 
-    final exitCode = await FlutterPrunerCommandRunner(
-      verifierFactory: (_) => verifier,
-    ).run(['apply', tempDir.path]);
+      final exitCode = await FlutterPrunerCommandRunner(
+        verifierFactory: (_) => verifier,
+      ).run(['apply', tempDir.path]);
 
-    expect(exitCode, 1);
-    final manager = QuarantineManager(tempDir);
-    final quarantine = Directory((await manager.listQuarantines()).single.path);
-    final manifest = await manager.readManifest(quarantine);
-    expect(manifest.cases, hasLength(3));
-    expect(
-      manifest.cases.map((item) => item.status),
-      everyElement(QuarantineCaseStatus.rolledBack),
-    );
-    expect(manifest.transactions.single.rollbackVerified, isTrue);
+      expect(exitCode, 1);
+      final manager = QuarantineManager(tempDir);
+      final quarantine = Directory(
+        (await manager.listQuarantines()).single.path,
+      );
+      final manifest = await manager.readManifest(quarantine);
+      expect(manifest.cases, hasLength(3));
+      expect(
+        manifest.cases.map((item) => item.status),
+        everyElement(QuarantineCaseStatus.rolledBack),
+      );
+      expect(manifest.transactions.single.rollbackVerified, isTrue);
 
-    final result = helperFile.readAsStringSync();
-    for (final applyCase in manifest.cases) {
-      expect(result, contains(applyCase.findingId.split('#').last));
-    }
-  }, timeout: const Timeout(Duration(minutes: 1)));
+      final result = helperFile.readAsStringSync();
+      for (final applyCase in manifest.cases) {
+        expect(result, contains(applyCase.findingId.split('#').last));
+      }
+    },
+    timeout: const Timeout(Duration(minutes: 1)),
+  );
 
   test(
     'failed rollback verification records recovery-required findings',
@@ -1603,36 +1621,44 @@ void unusedThree() {}
     timeout: const Timeout(Duration(minutes: 1)),
   );
 
-  test('known invalid report parent is rejected before mutation', () async {
-    final helperFile = File(p.join(tempDir.path, 'lib', 'src', 'helper.dart'));
-    final originalBytes = helperFile.readAsBytesSync();
-    final blockedParent = File(p.join(tempDir.path, 'not-a-directory'))
-      ..writeAsStringSync('preserve these bytes');
-    final verifier = _AlwaysPassingVerificationRunner(tempDir);
+  test(
+    'known invalid report parent is rejected before mutation',
+    () async {
+      final helperFile = File(
+        p.join(tempDir.path, 'lib', 'src', 'helper.dart'),
+      );
+      final originalBytes = helperFile.readAsBytesSync();
+      final blockedParent = File(p.join(tempDir.path, 'not-a-directory'))
+        ..writeAsStringSync('preserve these bytes');
+      final verifier = _AlwaysPassingVerificationRunner(tempDir);
 
-    final exitCode =
-        await FlutterPrunerCommandRunner(verifierFactory: (_) => verifier).run([
-          'apply',
-          '--adapter',
-          'dart',
-          '--report-output',
-          p.join(blockedParent.path, 'apply.html'),
-          '--report-format',
-          'html',
-          tempDir.path,
-        ]);
+      final exitCode =
+          await FlutterPrunerCommandRunner(
+            verifierFactory: (_) => verifier,
+          ).run([
+            'apply',
+            '--adapter',
+            'dart',
+            '--report-output',
+            p.join(blockedParent.path, 'apply.html'),
+            '--report-format',
+            'html',
+            tempDir.path,
+          ]);
 
-    expect(exitCode, 64);
-    expect(verifier.invocationCount, 0);
-    expect(helperFile.readAsBytesSync(), originalBytes);
-    expect(blockedParent.readAsStringSync(), 'preserve these bytes');
-    expect(
-      Directory(
-        p.join(tempDir.path, '.flutter_pruner', 'quarantine'),
-      ).existsSync(),
-      isFalse,
-    );
-  }, timeout: const Timeout(Duration(minutes: 1)));
+      expect(exitCode, 64);
+      expect(verifier.invocationCount, 0);
+      expect(helperFile.readAsBytesSync(), originalBytes);
+      expect(blockedParent.readAsStringSync(), 'preserve these bytes');
+      expect(
+        Directory(
+          p.join(tempDir.path, '.flutter_pruner', 'quarantine'),
+        ).existsSync(),
+        isFalse,
+      );
+    },
+    timeout: const Timeout(Duration(minutes: 1)),
+  );
 
   test(
     'invalid legacy quarantine blocks before baseline or mutation',
@@ -1993,46 +2019,54 @@ void editedDuringDisplacement() {}
     timeout: const Timeout(Duration(minutes: 1)),
   );
 
-  test('rescan analyzer failure restores the original run bytes', () async {
-    final helperFile = File(p.join(tempDir.path, 'lib', 'src', 'helper.dart'));
-    final originalBytes = helperFile.readAsBytesSync();
-    final verifier = _AlwaysPassingVerificationRunner(tempDir);
-    late _ThrowingRescanProjectAnalyzer analyzer;
-    final runner = args.CommandRunner<int>('flutter_pruner', 'test runner')
-      ..argParser.addFlag('verbose', negatable: false)
-      ..addCommand(
-        ApplyCommand(
-          verifierFactory: (_) => verifier,
-          analyzerFactory: (project, only) {
-            analyzer = _ThrowingRescanProjectAnalyzer(
-              project: project,
-              only: only,
-            );
-            return analyzer;
-          },
-        ),
+  test(
+    'rescan analyzer failure restores the original run bytes',
+    () async {
+      final helperFile = File(
+        p.join(tempDir.path, 'lib', 'src', 'helper.dart'),
       );
+      final originalBytes = helperFile.readAsBytesSync();
+      final verifier = _AlwaysPassingVerificationRunner(tempDir);
+      late _ThrowingRescanProjectAnalyzer analyzer;
+      final runner = args.CommandRunner<int>('flutter_pruner', 'test runner')
+        ..argParser.addFlag('verbose', negatable: false)
+        ..addCommand(
+          ApplyCommand(
+            verifierFactory: (_) => verifier,
+            analyzerFactory: (project, only) {
+              analyzer = _ThrowingRescanProjectAnalyzer(
+                project: project,
+                only: only,
+              );
+              return analyzer;
+            },
+          ),
+        );
 
-    final exitCode = await runner.run([
-      'apply',
-      '--adapter',
-      'dart',
-      tempDir.path,
-    ]);
+      final exitCode = await runner.run([
+        'apply',
+        '--adapter',
+        'dart',
+        tempDir.path,
+      ]);
 
-    expect(exitCode, 70);
-    expect(analyzer.invocationCount, 2);
-    expect(verifier.invocationCount, 3);
-    expect(helperFile.readAsBytesSync(), originalBytes);
-    final manager = QuarantineManager(tempDir);
-    final quarantine = Directory((await manager.listQuarantines()).single.path);
-    final manifest = await manager.readManifest(quarantine);
-    expect(manifest.fullRollbackVerified, isTrue);
-    expect(
-      manifest.transactions.single.status,
-      QuarantineTransactionStatus.rolledBackVerified,
-    );
-  }, timeout: const Timeout(Duration(minutes: 1)));
+      expect(exitCode, 70);
+      expect(analyzer.invocationCount, 2);
+      expect(verifier.invocationCount, 3);
+      expect(helperFile.readAsBytesSync(), originalBytes);
+      final manager = QuarantineManager(tempDir);
+      final quarantine = Directory(
+        (await manager.listQuarantines()).single.path,
+      );
+      final manifest = await manager.readManifest(quarantine);
+      expect(manifest.fullRollbackVerified, isTrue);
+      expect(
+        manifest.transactions.single.status,
+        QuarantineTransactionStatus.rolledBackVerified,
+      );
+    },
+    timeout: const Timeout(Duration(minutes: 1)),
+  );
 
   test(
     'final convergence analyzer failure persists internal-error report',
@@ -2516,33 +2550,38 @@ void _selectedCanary() {}
     timeout: const Timeout(Duration(minutes: 1)),
   );
 
-  test('removes a zero-byte Dart library and its stale import', () async {
-    _writePackageConfig(tempDir);
-    File(p.join(tempDir.path, 'lib', 'src', 'helper.dart')).deleteSync();
-    final importer = File(p.join(tempDir.path, 'lib', 'main.dart'));
-    const importerContent = "import 'src/empty.dart';\n\nvoid main() {}\n";
-    importer.writeAsStringSync(importerContent);
-    final emptyLibrary = File(p.join(tempDir.path, 'lib', 'src', 'empty.dart'))
-      ..writeAsStringSync('');
+  test(
+    'removes a zero-byte Dart library and its stale import',
+    () async {
+      _writePackageConfig(tempDir);
+      File(p.join(tempDir.path, 'lib', 'src', 'helper.dart')).deleteSync();
+      final importer = File(p.join(tempDir.path, 'lib', 'main.dart'));
+      const importerContent = "import 'src/empty.dart';\n\nvoid main() {}\n";
+      importer.writeAsStringSync(importerContent);
+      final emptyLibrary = File(
+        p.join(tempDir.path, 'lib', 'src', 'empty.dart'),
+      )..writeAsStringSync('');
 
-    final exitCode = await FlutterPrunerCommandRunner(
-      verifierFactory: (_) => _AlwaysPassingVerificationRunner(tempDir),
-    ).run(['apply', '--adapter', 'dart', tempDir.path]);
+      final exitCode = await FlutterPrunerCommandRunner(
+        verifierFactory: (_) => _AlwaysPassingVerificationRunner(tempDir),
+      ).run(['apply', '--adapter', 'dart', tempDir.path]);
 
-    expect(exitCode, 0);
-    expect(emptyLibrary.existsSync(), isFalse);
-    expect(importer.readAsStringSync().trim(), 'void main() {}');
+      expect(exitCode, 0);
+      expect(emptyLibrary.existsSync(), isFalse);
+      expect(importer.readAsStringSync().trim(), 'void main() {}');
 
-    final manager = QuarantineManager(tempDir);
-    final quarantine = (await manager.listQuarantines()).single;
-    await manager.restore(
-      quarantineDir: Directory(quarantine.path),
-      runId: quarantine.runId,
-    );
-    expect(emptyLibrary.existsSync(), isTrue);
-    expect(emptyLibrary.readAsBytesSync(), isEmpty);
-    expect(importer.readAsStringSync(), importerContent);
-  }, timeout: const Timeout(Duration(minutes: 1)));
+      final manager = QuarantineManager(tempDir);
+      final quarantine = (await manager.listQuarantines()).single;
+      await manager.restore(
+        quarantineDir: Directory(quarantine.path),
+        runId: quarantine.runId,
+      );
+      expect(emptyLibrary.existsSync(), isTrue);
+      expect(emptyLibrary.readAsBytesSync(), isEmpty);
+      expect(importer.readAsStringSync(), importerContent);
+    },
+    timeout: const Timeout(Duration(minutes: 1)),
+  );
 
   test(
     'one invocation rescans and removes a newly empty imported library',
@@ -2591,48 +2630,54 @@ void _selectedCanary() {}
     timeout: const Timeout(Duration(minutes: 1)),
   );
 
-  test('verification regression rolls back an empty library group', () async {
-    _writePackageConfig(tempDir);
-    File(
-      p.join(tempDir.path, 'lib', 'src', 'helper.dart'),
-    ).writeAsStringSync('void usedFunction() {}\n');
-    final importer = File(p.join(tempDir.path, 'lib', 'api.dart'));
-    const importerContent = "import 'src/dead_library.dart';\n";
-    importer.writeAsStringSync(importerContent);
-    final deadLibrary = File(
-      p.join(tempDir.path, 'lib', 'src', 'dead_library.dart'),
-    );
-    const sourceContent = "part 'dead_library.g.dart';\n";
-    deadLibrary.writeAsStringSync(sourceContent);
-    final generated = File(
-      p.join(tempDir.path, 'lib', 'src', 'dead_library.g.dart'),
-    );
-    const generatedContent = "part of 'dead_library.dart';\n";
-    generated.writeAsStringSync(generatedContent);
-    final verifier = _QueuedVerificationRunner(tempDir, [
-      _verification(passed: true),
-      _verification(passed: false, output: 'error • group regression'),
-      _verification(passed: true),
-    ]);
+  test(
+    'verification regression rolls back an empty library group',
+    () async {
+      _writePackageConfig(tempDir);
+      File(
+        p.join(tempDir.path, 'lib', 'src', 'helper.dart'),
+      ).writeAsStringSync('void usedFunction() {}\n');
+      final importer = File(p.join(tempDir.path, 'lib', 'api.dart'));
+      const importerContent = "import 'src/dead_library.dart';\n";
+      importer.writeAsStringSync(importerContent);
+      final deadLibrary = File(
+        p.join(tempDir.path, 'lib', 'src', 'dead_library.dart'),
+      );
+      const sourceContent = "part 'dead_library.g.dart';\n";
+      deadLibrary.writeAsStringSync(sourceContent);
+      final generated = File(
+        p.join(tempDir.path, 'lib', 'src', 'dead_library.g.dart'),
+      );
+      const generatedContent = "part of 'dead_library.dart';\n";
+      generated.writeAsStringSync(generatedContent);
+      final verifier = _QueuedVerificationRunner(tempDir, [
+        _verification(passed: true),
+        _verification(passed: false, output: 'error • group regression'),
+        _verification(passed: true),
+      ]);
 
-    final exitCode = await FlutterPrunerCommandRunner(
-      verifierFactory: (_) => verifier,
-    ).run(['apply', '--adapter', 'dart', tempDir.path]);
+      final exitCode = await FlutterPrunerCommandRunner(
+        verifierFactory: (_) => verifier,
+      ).run(['apply', '--adapter', 'dart', tempDir.path]);
 
-    expect(exitCode, 2);
-    expect(verifier.invocationCount, 3);
-    expect(importer.readAsStringSync(), importerContent);
-    expect(deadLibrary.readAsStringSync(), sourceContent);
-    expect(generated.readAsStringSync(), generatedContent);
-    final manager = QuarantineManager(tempDir);
-    final quarantine = Directory((await manager.listQuarantines()).single.path);
-    final manifest = await manager.readManifest(quarantine);
-    expect(manifest.cases, hasLength(1));
-    expect(
-      manifest.cases.map((item) => item.status),
-      everyElement(QuarantineCaseStatus.rolledBack),
-    );
-  }, timeout: const Timeout(Duration(minutes: 1)));
+      expect(exitCode, 2);
+      expect(verifier.invocationCount, 3);
+      expect(importer.readAsStringSync(), importerContent);
+      expect(deadLibrary.readAsStringSync(), sourceContent);
+      expect(generated.readAsStringSync(), generatedContent);
+      final manager = QuarantineManager(tempDir);
+      final quarantine = Directory(
+        (await manager.listQuarantines()).single.path,
+      );
+      final manifest = await manager.readManifest(quarantine);
+      expect(manifest.cases, hasLength(1));
+      expect(
+        manifest.cases.map((item) => item.status),
+        everyElement(QuarantineCaseStatus.rolledBack),
+      );
+    },
+    timeout: const Timeout(Duration(minutes: 1)),
+  );
 }
 
 String _canonicalReportFailureVerificationPolicy() {
