@@ -4,7 +4,7 @@ Contributions are welcome. The architecture was designed so that adding analysis
 capability does not require touching the engine, and so that a first PR can be
 small.
 
-Flutter Pruner is `1.0.0` and solo-maintained. Built-in asset, duplicate-file,
+Flutter Pruner is `1.0.1` and solo-maintained. Built-in asset, duplicate-file,
 and Dart declaration adapters are implemented. If you want to build something
 substantial, open a draft PR or a discussion first so we do not duplicate work.
 
@@ -67,12 +67,15 @@ configuration and is read-only with respect to project source and assets.
 
 ## Read these first
 
-Two documents will save you time, and reviewers will assume you have read them:
+These documents will save you time, and reviewers will assume you have read
+the ones relevant to your change:
 
 - [graph-model.md](doc/graph-model.md) — nodes, edges, conditional reachability,
   blockers. Explains why reachability is per build target.
 - [confidence-model.md](doc/confidence-model.md) — the eight predicates gating
   `SAFE`, and why tiers rather than a score.
+- [profiling.md](doc/performance/profiling.md) — reproducible synthetic benchmarks,
+  subphase profiling, and rules for sharing results safely.
 
 ---
 

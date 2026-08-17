@@ -16,6 +16,7 @@ class AnalysisSnapshot {
     required this.adapterIds,
     required this.adapterRuns,
     required this.elapsedMicros,
+    this.findingElapsedMicros = 0,
     required this.exclusions,
   });
 
@@ -36,6 +37,9 @@ class AnalysisSnapshot {
 
   /// Total wall duration measured with a monotonic stopwatch.
   final int elapsedMicros;
+
+  /// Wall duration of graph-to-finding classification within the pass.
+  final int findingElapsedMicros;
 
   /// Tool-owned and out-of-bound paths observed during this pass.
   final PathExclusionSummary exclusions;

@@ -8,6 +8,8 @@ library;
 
 export 'src/adapters/adapter_report_definition.dart';
 export 'src/adapters/analyzer_adapter.dart';
+export 'src/adapters/dart/dart_adapter_profile.dart';
+export 'src/adapters/dart/dart_analysis_workspace.dart';
 export 'src/adapters/registry.dart';
 export 'src/apply/finding_selection.dart';
 export 'src/core/confidence/action_capability.dart';

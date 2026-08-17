@@ -1,5 +1,7 @@
 import '../adapters/adapter_report_definition.dart';
 import '../adapters/analyzer_adapter.dart';
+import '../adapters/dart/dart_adapter_profile.dart';
+import '../adapters/dart/dart_analysis_workspace.dart';
 import '../adapters/registry.dart';
 import '../core/confidence/finding_generator.dart';
 import '../core/graph/reachability_graph.dart';
@@ -10,7 +12,7 @@ import 'analysis_snapshot.dart';
 /// Builds one graph and finding set for both scan and apply.
 class ProjectAnalyzer {
   /// Creates an analyzer for [project] and an optional adapter filter.
-  ProjectAnalyzer({required this.project, Set<String>? only})
+  ProjectAnalyzer({required this.project, Set<String>? only, this.dartProfile})
     : _requestedAdapterIds = only,
       _reportingNodeSchemes = _reportingSchemes(only),
       adapters = AdapterRegistry.resolve(
@@ -23,6 +25,9 @@ class ProjectAnalyzer {
 
   /// Loaded project and declared analysis coverage.
   final ProjectContext project;
+
+  /// Optional fine-grained Dart adapter timings for benchmarks.
+  final DartAdapterProfile? dartProfile;
 
   /// Resolved adapters in dependency order.
   final List<AnalyzerAdapter> adapters;
@@ -43,6 +48,13 @@ class ProjectAnalyzer {
     final analysisStopwatch = Stopwatch()..start();
     final graph = ReachabilityGraph();
     final adapterRuns = <AdapterRunReport>[];
+    final needsDartWorkspace = adapters.any(
+      (adapter) => adapter.id == 'dart' || adapter.id == 'assets',
+    );
+    final services = AdapterServices(
+      dartWorkspace: needsDartWorkspace ? DartAnalysisWorkspace(project) : null,
+      dartProfile: dartProfile,
+    );
     for (final adapter in adapters) {
       final role =
           _requestedAdapterIds == null ||
@@ -71,7 +83,11 @@ class ProjectAnalyzer {
       final blockerCount = graph.blockers.length;
       final stopwatch = Stopwatch()..start();
       try {
-        await adapter.analyze(project, GraphBuilder(graph, adapter.id));
+        await adapter.analyzeWithServices(
+          project,
+          GraphBuilder(graph, adapter.id),
+          services,
+        );
         stopwatch.stop();
         adapterRuns.add(
           AdapterRunReport(
@@ -103,6 +119,7 @@ class ProjectAnalyzer {
         rethrow;
       }
     }
+    final findingStopwatch = Stopwatch()..start();
     final findings = const FindingGenerator().generate(
       graph: graph,
       project: project,
@@ -112,6 +129,7 @@ class ProjectAnalyzer {
           definition.adapterId: definition,
       },
     );
+    findingStopwatch.stop();
     analysisStopwatch.stop();
     return AnalysisSnapshot(
       project: project,
@@ -120,6 +138,7 @@ class ProjectAnalyzer {
       adapterIds: List.unmodifiable(adapters.map((adapter) => adapter.id)),
       adapterRuns: List.unmodifiable(adapterRuns),
       elapsedMicros: analysisStopwatch.elapsedMicroseconds,
+      findingElapsedMicros: findingStopwatch.elapsedMicroseconds,
       exclusions: project.pathPolicy.snapshot(),
     );
   }

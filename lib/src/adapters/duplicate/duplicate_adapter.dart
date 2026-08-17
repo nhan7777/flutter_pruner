@@ -7,6 +7,9 @@ import '../../core/project/project_context.dart';
 import '../adapter_report_definition.dart';
 import '../analyzer_adapter.dart';
 
+/// Computes a stable content digest for one file.
+typedef FileDigestComputer = Future<String> Function(File file);
+
 /// Detects byte-identical files by SHA-256 hash.
 ///
 /// The simplest complete adapter. Groups files by content hash and reports
@@ -32,7 +35,10 @@ import '../analyzer_adapter.dart';
 /// Detects and reports duplicate files in the project by content hash.
 class DuplicateAdapter extends AnalyzerAdapter {
   /// Creates a duplicate file detector adapter.
-  const DuplicateAdapter();
+  const DuplicateAdapter({FileDigestComputer? fileDigestComputer})
+    : _fileDigestComputer = fileDigestComputer;
+
+  final FileDigestComputer? _fileDigestComputer;
 
   @override
   String get id => 'duplicates';
@@ -161,7 +167,7 @@ class DuplicateAdapter extends AnalyzerAdapter {
     while (pending.isNotEmpty) {
       final directory = pending.removeLast();
       await for (final entity in directory.list(followLinks: false)) {
-        if (project.pathPolicy.shouldExclude(entity.path)) continue;
+        if (project.pathPolicy.shouldExcludeTraversalEntry(entity)) continue;
         if (entity is Directory) {
           pending.add(entity);
         } else if (entity is File && !_shouldExcludeFile(entity.path)) {
@@ -191,24 +197,35 @@ class DuplicateAdapter extends AnalyzerAdapter {
   }
 
   Future<Map<String, List<File>>> _groupByHash(List<File> files) async {
-    final byHash = <String, List<File>>{};
-
+    final bySize = <int, List<File>>{};
     for (final file in files) {
       try {
-        final hash = await _computeSha256(file);
-        (byHash[hash] ??= []).add(file);
-      } catch (e) {
+        final size = await file.length();
+        (bySize[size] ??= []).add(file);
+      } on FileSystemException {
         continue;
+      }
+    }
+
+    final byHash = <String, List<File>>{};
+    for (final sameSizeFiles in bySize.values) {
+      if (sameSizeFiles.length < 2) continue;
+      for (final file in sameSizeFiles) {
+        try {
+          final hash = await _computeSha256(file);
+          (byHash[hash] ??= []).add(file);
+        } on FileSystemException {
+          continue;
+        }
       }
     }
 
     return byHash;
   }
 
-  Future<String> _computeSha256(File file) async {
-    final bytes = await file.readAsBytes();
-    return sha256.convert(bytes).toString();
-  }
+  Future<String> _computeSha256(File file) async =>
+      _fileDigestComputer?.call(file) ??
+      (await sha256.bind(file.openRead()).first).toString();
 
   bool _hasPackageOwnedFile(List<File> files) {
     return files.any((f) => f.path.contains('/.pub-cache/'));

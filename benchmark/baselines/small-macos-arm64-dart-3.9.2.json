@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "profile": "small",
+  "fixture": {
+    "dartFiles": 200,
+    "dartLoc": 30000,
+    "assets": 100,
+    "graphReferenceSeeds": 5000
+  },
+  "dartVersion": "3.9.2 (stable) on macos_arm64",
+  "processors": 8,
+  "warmup": 1,
+  "iterations": 3,
+  "medianElapsedMicros": 1211647,
+  "minElapsedMicros": 1036312,
+  "maxElapsedMicros": 1792258,
+  "samples": [
+    {
+      "elapsedMicros": 1792258,
+      "nodes": 5602,
+      "edges": 5400,
+      "blockers": 0,
+      "findings": 200,
+      "adapters": {
+        "dartElapsedMicros": 1715450,
+        "duplicatesElapsedMicros": 61196
+      }
+    },
+    {
+      "elapsedMicros": 1211647,
+      "nodes": 5602,
+      "edges": 5400,
+      "blockers": 0,
+      "findings": 200,
+      "adapters": {
+        "dartElapsedMicros": 1149719,
+        "duplicatesElapsedMicros": 52864
+      }
+    },
+    {
+      "elapsedMicros": 1036312,
+      "nodes": 5602,
+      "edges": 5400,
+      "blockers": 0,
+      "findings": 200,
+      "adapters": {
+        "dartElapsedMicros": 980570,
+        "duplicatesElapsedMicros": 46402
+      }
+    }
+  ]
+}

@@ -91,8 +91,9 @@ final class AnalyzerDiagnosticCollector {
     }
 
     final diagnostics = <AnalyzerUnusedDiagnostic>[];
+    final sourceCache = <String, _SourceInfo>{};
     for (final line in const LineSplitter().convert(output)) {
-      final parsed = _parseMachineLine(line, project);
+      final parsed = _parseMachineLine(line, project, sourceCache);
       if (parsed != null) diagnostics.add(parsed);
     }
     return AnalyzerDiagnosticCollection.available(diagnostics);
@@ -101,6 +102,7 @@ final class AnalyzerDiagnosticCollector {
   AnalyzerUnusedDiagnostic? _parseMachineLine(
     String line,
     ProjectContext project,
+    Map<String, _SourceInfo> sourceCache,
   ) {
     final fields = line.split('|');
     if (fields.length < 8) return null;
@@ -121,8 +123,12 @@ final class AnalyzerDiagnosticCollector {
     }
     final file = File(path);
     if (!file.existsSync()) return null;
-    final content = file.readAsStringSync();
-    final lineInfo = LineInfo.fromContent(content);
+    final source = sourceCache.putIfAbsent(path, () {
+      final content = file.readAsStringSync();
+      return _SourceInfo(content, LineInfo.fromContent(content));
+    });
+    final content = source.content;
+    final lineInfo = source.lineInfo;
     if (lineNumber > lineInfo.lineCount) return null;
     final offset = lineInfo.getOffsetOfLine(lineNumber - 1) + columnNumber - 1;
     if (offset < 0 || offset > content.length) return null;
@@ -158,6 +164,13 @@ final class AnalyzerDiagnosticCollector {
         ? selectedPath
         : null;
   }
+}
+
+final class _SourceInfo {
+  const _SourceInfo(this.content, this.lineInfo);
+
+  final String content;
+  final LineInfo lineInfo;
 }
 
 /// Outcome of the optional lint-inclusive Dart CLI collection.

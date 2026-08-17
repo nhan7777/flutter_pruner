@@ -93,6 +93,27 @@ publish_to: none
       expect(nodes, isEmpty);
     });
 
+    test('hashes only files that collide by size', () async {
+      final project = await createProject(
+        files: {'lib/one.txt': '1', 'lib/two.txt': '22'},
+      );
+      final hashedPaths = <String>[];
+      final adapter = DuplicateAdapter(
+        fileDigestComputer: (file) async {
+          hashedPaths.add(project.relative(file.path));
+          return file.path;
+        },
+      );
+
+      await adapter.analyze(
+        project,
+        GraphBuilder(ReachabilityGraph(), 'duplicates'),
+      );
+
+      expect(hashedPaths, isNot(contains('lib/one.txt')));
+      expect(hashedPaths, isNot(contains('lib/two.txt')));
+    });
+
     test('excludes generated files', () async {
       final project = await createProject(
         files: {

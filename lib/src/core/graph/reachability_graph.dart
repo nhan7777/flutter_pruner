@@ -26,10 +26,15 @@ class ReachabilityGraph {
   final Map<String, Set<String>> _nodeContributors = {};
   final Set<GraphEdge> _edges = {};
   final Map<String, Set<GraphEdge>> _outgoing = {};
+  final Map<String, Set<GraphEdge>> _incoming = {};
   final Map<String, List<_RootRecord>> _roots = {};
   final Map<String, List<_Protection>> _protections = {};
   final List<Blocker> _blockers = [];
+  final Map<String, List<Blocker>> _blockersByNode = {};
+  final Map<Blocker, Set<String>> _nodesByBlocker = {};
   final Set<String> _conflictingNodeIds = {};
+  final Map<String, _CachedTargetAnalysis> _targetAnalysisCache = {};
+  int _mutationVersion = 0;
 
   /// All nodes, in insertion order.
   Iterable<GraphNode> get nodes => UnmodifiableMapView(_nodes).values;
@@ -64,12 +69,20 @@ class ReachabilityGraph {
     final existing = _nodes[node.id];
     if (existing == null) {
       _nodes[node.id] = frozenNode;
+      for (final blocker in _blockers) {
+        if (blocker.couldAddress(node.id)) {
+          (_blockersByNode[node.id] ??= []).add(blocker);
+          (_nodesByBlocker[blocker] ??= {}).add(node.id);
+        }
+      }
+      _markMutated();
     } else if (!_sameNodeDefinition(existing, frozenNode)) {
       if (_nodeFingerprint(frozenNode).compareTo(_nodeFingerprint(existing)) <
           0) {
         _nodes[node.id] = frozenNode;
       }
       _recordNodeConflict(node.id);
+      _markMutated();
     }
     if (producer != null) {
       _nodeOwners.putIfAbsent(node.id, () => producer);
@@ -205,6 +218,8 @@ class ReachabilityGraph {
   void addEdge(GraphEdge edge) {
     if (_edges.add(edge)) {
       (_outgoing[edge.from] ??= {}).add(edge);
+      (_incoming[edge.to] ??= {}).add(edge);
+      _markMutated();
     }
   }
 
@@ -235,6 +250,7 @@ class ReachabilityGraph {
     );
     if (!duplicate) {
       records.add(_RootRecord(reason, condition));
+      _markMutated();
     }
   }
 
@@ -244,13 +260,24 @@ class ReachabilityGraph {
   /// native callbacks, security-sensitive resources and explicit keep rules.
   void protect(String nodeId, {required String reason, String? producer}) {
     (_protections[nodeId] ??= []).add(_Protection(reason, producer));
+    _markMutated();
   }
 
   /// Records an unresolved dynamic construct.
   ///
   /// Blockers never delete anything; they only lower confidence. This asymmetry
   /// is intentional.
-  void addBlocker(Blocker blocker) => _blockers.add(blocker);
+  void addBlocker(Blocker blocker) {
+    _blockers.add(blocker);
+    final addressedNodeIds = <String>{};
+    for (final nodeId in _nodes.keys) {
+      if (!blocker.couldAddress(nodeId)) continue;
+      addressedNodeIds.add(nodeId);
+      (_blockersByNode[nodeId] ??= []).add(blocker);
+    }
+    _nodesByBlocker[blocker] = addressedNodeIds;
+    _markMutated();
+  }
 
   /// Reasons [nodeId] is protected, empty when it is not.
   List<String> protectionReasons(String nodeId) =>
@@ -261,18 +288,23 @@ class ReachabilityGraph {
   bool isProtected(String nodeId) => _protections.containsKey(nodeId);
 
   /// Blockers that could plausibly address [nodeId].
-  List<Blocker> blockersFor(String nodeId) =>
-      _blockers.where((b) => b.couldAddress(nodeId)).toList(growable: false);
+  List<Blocker> blockersFor(String nodeId) {
+    if (_nodes.containsKey(nodeId)) {
+      return List<Blocker>.unmodifiable(_blockersByNode[nodeId] ?? const []);
+    }
+    return _blockers
+        .where((blocker) => blocker.couldAddress(nodeId))
+        .toList(growable: false);
+  }
 
   /// Edges leaving [nodeId].
   Iterable<GraphEdge> outgoingFrom(String nodeId) =>
       UnmodifiableSetView(_outgoing[nodeId] ?? const {});
 
   /// Edges entering [nodeId].
-  ///
-  /// Linear in the number of edges; fine for reporting, avoid in hot loops.
+  /// Uses the incoming-edge index and is linear only in the node's in-degree.
   Iterable<GraphEdge> incomingTo(String nodeId) =>
-      _edges.where((e) => e.to == nodeId);
+      UnmodifiableSetView(_incoming[nodeId] ?? const {});
 
   /// Edges whose endpoints are not registered nodes.
   ///
@@ -309,6 +341,17 @@ class ReachabilityGraph {
   /// Traverses breadth-first from the roots that apply to [target], following
   /// only edges whose condition applies to [target].
   Set<String> reachableFor(BuildTarget target) {
+    return Set<String>.of(_analyzeTarget(target).reachable);
+  }
+
+  _CachedTargetAnalysis _analyzeTarget(BuildTarget target) {
+    final key = _targetKey(target);
+    final cached = _targetAnalysisCache[key];
+    if (cached != null && cached.mutationVersion == _mutationVersion) {
+      return cached;
+    }
+
+    final retained = _computeRetained(target);
     final reached = <String>{};
     final queue = <String>[];
 
@@ -322,7 +365,7 @@ class ReachabilityGraph {
     // confidence tiers, but their dependencies cannot be deleted
     // independently. Seed traversal from the full retention closure without
     // marking each retained seed itself reachable.
-    for (final seed in retainedFor(target)) {
+    for (final seed in retained) {
       for (final edge in outgoingFrom(seed)) {
         if (!edge.condition.appliesTo(target)) continue;
         if (reached.add(edge.to)) queue.add(edge.to);
@@ -337,7 +380,13 @@ class ReachabilityGraph {
       }
     }
 
-    return reached;
+    final analysis = _CachedTargetAnalysis(
+      mutationVersion: _mutationVersion,
+      retained: Set<String>.unmodifiable(retained),
+      reachable: Set<String>.unmodifiable(reached),
+    );
+    _targetAnalysisCache[key] = analysis;
+    return analysis;
   }
 
   /// Computes nodes that must be retained for [target].
@@ -351,7 +400,10 @@ class ReachabilityGraph {
   /// The least fixed point prevents both unsafe under-propagation (a blocker
   /// sourced from a blocked node remains active) and needless over-propagation
   /// (a blocker sourced only from a removable node stays inactive).
-  Set<String> retainedFor(BuildTarget target) {
+  Set<String> retainedFor(BuildTarget target) =>
+      Set<String>.of(_analyzeTarget(target).retained);
+
+  Set<String> _computeRetained(BuildTarget target) {
     final retained = <String>{};
     final queue = <String>[];
 
@@ -391,8 +443,8 @@ class ReachabilityGraph {
             retained.contains(sourceNodeId);
         if (!sourceIsRetained) continue;
 
-        for (final nodeId in _nodes.keys) {
-          if (blocker.couldAddress(nodeId) && retained.add(nodeId)) {
+        for (final nodeId in _nodesByBlocker[blocker] ?? const <String>{}) {
+          if (retained.add(nodeId)) {
             queue.add(nodeId);
             changed = true;
           }
@@ -401,6 +453,25 @@ class ReachabilityGraph {
     }
 
     return retained;
+  }
+
+  String _targetKey(BuildTarget target) {
+    final defines = target.dartDefines.entries.toList()
+      ..sort((left, right) => left.key.compareTo(right.key));
+    return _joinFingerprintParts([
+      target.name,
+      target.platform,
+      target.entrypoint,
+      target.flavor ?? '',
+      ...defines.map(
+        (entry) => _joinFingerprintParts([entry.key, entry.value]),
+      ),
+    ]);
+  }
+
+  void _markMutated() {
+    _mutationVersion++;
+    _targetAnalysisCache.clear();
   }
 
   /// Computes reachability across [targets], keyed by target name.
@@ -456,4 +527,16 @@ class _Protection {
 
   final String reason;
   final String? producer;
+}
+
+class _CachedTargetAnalysis {
+  const _CachedTargetAnalysis({
+    required this.mutationVersion,
+    required this.retained,
+    required this.reachable,
+  });
+
+  final int mutationVersion;
+  final Set<String> retained;
+  final Set<String> reachable;
 }

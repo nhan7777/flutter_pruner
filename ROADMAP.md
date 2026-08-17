@@ -103,7 +103,8 @@ filesystem boundaries.
 - [ ] Document a stable migration policy for future report schemas
 - [ ] Add release automation that verifies version, changelog, tag, archive,
       and hosted CI state without publishing automatically
-- [ ] Add reproducible performance benchmarks using public synthetic fixtures
+- [x] Add reproducible performance benchmarks using public synthetic fixtures
+      and document the comparison and redaction protocol
 - [ ] Improve recovery diagnostics for unsupported filesystem capabilities
 
 ## Future adapters

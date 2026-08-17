@@ -5,6 +5,20 @@ import '../core/graph/node.dart';
 import '../core/graph/reachability_graph.dart';
 import '../core/project/project_context.dart';
 import 'adapter_report_definition.dart';
+import 'dart/dart_adapter_profile.dart';
+import 'dart/dart_analysis_workspace.dart';
+
+/// Services whose lifetime spans every adapter in one project analysis pass.
+class AdapterServices {
+  /// Creates a service bundle.
+  const AdapterServices({this.dartWorkspace, this.dartProfile});
+
+  /// Shared semantic analyzer state, when a selected adapter needs Dart facts.
+  final DartAnalysisWorkspace? dartWorkspace;
+
+  /// Optional fine-grained Dart adapter timings for benchmark runs.
+  final DartAdapterProfile? dartProfile;
+}
 
 /// The plugin contract every analyzer adapter implements.
 ///
@@ -90,6 +104,16 @@ abstract class AnalyzerAdapter {
   /// when input is merely unexpected: an unparseable file should lower
   /// confidence, not abandon the run.
   Future<void> analyze(ProjectContext project, GraphBuilder graph);
+
+  /// Analyses [project] with services shared across the current adapter pass.
+  ///
+  /// Existing third-party adapters only need to implement [analyze]. Semantic
+  /// adapters can override this hook to reuse expensive project-level state.
+  Future<void> analyzeWithServices(
+    ProjectContext project,
+    GraphBuilder graph,
+    AdapterServices services,
+  ) => analyze(project, graph);
 }
 
 /// The write-side API adapters use to contribute to the graph.

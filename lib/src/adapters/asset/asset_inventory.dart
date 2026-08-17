@@ -66,6 +66,7 @@ class AssetInventory {
       if (!dir.existsSync()) return;
 
       await for (final entity in dir.list(followLinks: false)) {
+        if (project.pathPolicy.shouldExcludeTraversalEntry(entity)) continue;
         if (entity is File) {
           final basename = p.basename(entity.path);
           final logicalKey = path + basename;
@@ -243,10 +244,8 @@ class AssetInventory {
     }
   }
 
-  Future<String> _computeSha256(File file) async {
-    final bytes = await file.readAsBytes();
-    return sha256.convert(bytes).toString();
-  }
+  Future<String> _computeSha256(File file) async =>
+      (await sha256.bind(file.openRead()).first).toString();
 }
 
 /// A declared asset with its source location and metadata.

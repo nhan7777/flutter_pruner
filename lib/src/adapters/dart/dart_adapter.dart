@@ -1,11 +1,9 @@
-import 'package:analyzer/dart/analysis/analysis_context_collection.dart';
 import 'package:analyzer/dart/analysis/results.dart';
 import 'package:analyzer/dart/analysis/utilities.dart';
 import 'package:analyzer/dart/ast/ast.dart';
 import 'package:analyzer/dart/ast/visitor.dart';
 import 'package:analyzer/dart/element/element.dart';
 import 'package:analyzer/error/error.dart';
-import 'package:path/path.dart' as p;
 
 import '../../core/graph/build_condition.dart';
 import '../../core/graph/edge.dart';
@@ -17,11 +15,17 @@ import '../adapter_report_definition.dart';
 import '../analyzer_adapter.dart';
 import 'analyzer_ast_compat.dart';
 import 'analyzer_diagnostic_collector.dart';
+import 'dart_adapter_profile.dart';
+import 'dart_analysis_workspace.dart';
 import 'dart_ids.dart';
 import 'declaration_visitor.dart';
 import 'entry_point_detector.dart';
 import 'reference_collector.dart';
 import 'unresolved_reference_index.dart';
+
+/// Collects lint-inclusive analyzer diagnostics for one project.
+typedef AnalyzerDiagnosticCollectorCallback =
+    Future<AnalyzerDiagnosticCollection> Function(ProjectContext project);
 
 /// Analyzes Dart source code for unused declarations and libraries.
 ///
@@ -29,7 +33,16 @@ import 'unresolved_reference_index.dart';
 /// and cross-file references resolved through the analyzer's element model.
 class DartAdapter extends AnalyzerAdapter {
   /// Creates a Dart declaration analyzer.
-  const DartAdapter();
+  const DartAdapter({
+    AnalyzerDiagnosticCollectorCallback collectAnalyzerDiagnostics =
+        _collectDiagnosticsWithCli,
+  }) : _collectAnalyzerDiagnostics = collectAnalyzerDiagnostics;
+
+  final AnalyzerDiagnosticCollectorCallback _collectAnalyzerDiagnostics;
+
+  static Future<AnalyzerDiagnosticCollection> _collectDiagnosticsWithCli(
+    ProjectContext project,
+  ) => AnalyzerDiagnosticCollector().collect(project);
 
   @override
   String get id => 'dart';
@@ -117,11 +130,36 @@ class DartAdapter extends AnalyzerAdapter {
 
   @override
   Future<void> analyze(ProjectContext project, GraphBuilder graph) async {
-    _registerConfiguredRoots(project, graph);
+    await _analyze(project, graph, DartAnalysisWorkspace(project));
+  }
 
-    final collection = AnalysisContextCollection(
-      includedPaths: [p.normalize(p.absolute(project.root.path))],
+  @override
+  Future<void> analyzeWithServices(
+    ProjectContext project,
+    GraphBuilder graph,
+    AdapterServices services,
+  ) async {
+    await _analyze(
+      project,
+      graph,
+      services.dartWorkspace ?? DartAnalysisWorkspace(project),
+      profile: services.dartProfile,
     );
+  }
+
+  Future<void> _analyze(
+    ProjectContext project,
+    GraphBuilder graph,
+    DartAnalysisWorkspace workspace, {
+    DartAdapterProfile? profile,
+  }) async {
+    _registerConfiguredRoots(project, graph);
+    final cliDiagnosticsFuture = profile == null
+        ? _collectAnalyzerDiagnostics(project)
+        : profile.measureAsync(
+            'cliDiagnostics',
+            () => _collectAnalyzerDiagnostics(project),
+          );
 
     final entryPointDetector = EntryPointDetector(
       project: project,
@@ -133,58 +171,67 @@ class DartAdapter extends AnalyzerAdapter {
     final unresolvedReferences = <UnresolvedReferenceFact>{};
     final generatedUnresolvedReferences = <UnresolvedReferenceFact>{};
 
-    for (final context in collection.contexts) {
-      for (final filePath in context.contextRoot.analyzedFiles()) {
-        if (!filePath.endsWith('.dart')) continue;
-        final isModeled = DartIds.isModeledProjectPath(project, filePath);
-        final isGenerated = DartIds.isGeneratedProjectPath(project, filePath);
-        if (!isModeled && !isGenerated) {
-          continue;
-        }
+    final dartFiles =
+        profile?.measure('fileEnumeration', () => workspace.dartFiles) ??
+        workspace.dartFiles;
+    for (final filePath in dartFiles) {
+      final isModeled = DartIds.isModeledProjectPath(project, filePath);
+      final isGenerated = DartIds.isGeneratedProjectPath(project, filePath);
+      if (!isModeled && !isGenerated) {
+        continue;
+      }
 
-        final library = await context.currentSession.getResolvedLibrary(
-          filePath,
+      final library = profile == null
+          ? await workspace.resolveLibrary(filePath)
+          : await profile.measureAsync(
+              'resolveLibrary',
+              () => workspace.resolveLibrary(filePath),
+            );
+
+      if (library is ResolvedLibraryResult) {
+        _collectConditionalDirectivePaths(
+          project,
+          library,
+          conditionalDirectivePaths,
         );
+      }
 
-        if (library is ResolvedLibraryResult) {
-          _collectConditionalDirectivePaths(
-            project,
-            library,
-            conditionalDirectivePaths,
-          );
-        }
-
-        if (!isModeled) {
-          _recordGeneratedLibrary(
-            project,
-            graph,
-            library,
-            filePath,
-            generatedUnresolvedReferences,
-          );
-          continue;
-        }
-
-        if (library is NotLibraryButPartResult) continue;
-        if (library is! ResolvedLibraryResult) {
-          graph.addBlocker(
-            reason: 'analyzer could not resolve a Dart library',
-            location: filePath,
-          );
-          continue;
-        }
-
-        modeledPaths.addAll(library.units.map((unit) => unit.path));
-
-        await _analyzeLibrary(
+      if (!isModeled) {
+        _recordGeneratedLibrary(
           project,
           graph,
           library,
-          entryPointDetector,
-          unresolvedReferenceIndex,
-          unresolvedReferences,
+          filePath,
           generatedUnresolvedReferences,
         );
+        continue;
+      }
+
+      if (library is NotLibraryButPartResult) continue;
+      if (library is! ResolvedLibraryResult) {
+        graph.addBlocker(
+          reason: 'analyzer could not resolve a Dart library',
+          location: filePath,
+        );
+        continue;
+      }
+
+      modeledPaths.addAll(library.units.map((unit) => unit.path));
+
+      Future<void> analyzeLibrary() => _analyzeLibrary(
+        project,
+        graph,
+        library,
+        entryPointDetector,
+        unresolvedReferenceIndex,
+        unresolvedReferences,
+        generatedUnresolvedReferences,
+        profile: profile,
+      );
+      if (profile == null) {
+        await analyzeLibrary();
+      } else {
+        await profile.measureAsync('analyzeLibrary', analyzeLibrary);
       }
     }
 
@@ -218,7 +265,12 @@ class DartAdapter extends AnalyzerAdapter {
 
     _addEmptyFiles(project, graph, modeledPaths);
 
-    final cliDiagnostics = await AnalyzerDiagnosticCollector().collect(project);
+    final cliDiagnostics = profile == null
+        ? await cliDiagnosticsFuture
+        : await profile.measureAsync(
+            'cliDiagnosticsWait',
+            () => cliDiagnosticsFuture,
+          );
     if (!cliDiagnostics.available) {
       graph.addBlocker(
         reason:
@@ -396,8 +448,9 @@ class DartAdapter extends AnalyzerAdapter {
     EntryPointDetector entryPointDetector,
     UnresolvedReferenceIndex unresolvedReferenceIndex,
     Set<UnresolvedReferenceFact> unresolvedReferences,
-    Set<UnresolvedReferenceFact> generatedUnresolvedReferences,
-  ) async {
+    Set<UnresolvedReferenceFact> generatedUnresolvedReferences, {
+    DartAdapterProfile? profile,
+  }) async {
     final libraryElement = library.element;
     final libraryId = DartIds.library(project, libraryElement);
 
@@ -531,9 +584,22 @@ class DartAdapter extends AnalyzerAdapter {
         libraryId: libraryId,
       );
 
-      unit.unit.visitChildren(visitor);
+      if (profile == null) {
+        unit.unit.visitChildren(visitor);
+      } else {
+        profile.measure('declarationVisitor', () {
+          unit.unit.visitChildren(visitor);
+        });
+      }
 
-      await _addUnusedDiagnostics(project, graph, unit);
+      if (profile == null) {
+        await _addUnusedDiagnostics(project, graph, unit);
+      } else {
+        await profile.measureAsync(
+          'sessionDiagnostics',
+          () => _addUnusedDiagnostics(project, graph, unit),
+        );
+      }
 
       // Create import edges from LibraryFragment
       final libraryFragment = libraryElement.firstFragment;
@@ -595,8 +661,18 @@ class DartAdapter extends AnalyzerAdapter {
         libraryId: libraryId,
         location: unit.path,
       );
-      unresolvedReferenceIndex.indexUnit(unit.unit, unit.path);
-      collector.visitLibrary(unit.unit);
+      if (profile == null) {
+        unresolvedReferenceIndex.indexUnit(unit.unit, unit.path);
+        collector.visitLibrary(unit.unit);
+      } else {
+        profile.measure(
+          'unresolvedReferenceIndex',
+          () => unresolvedReferenceIndex.indexUnit(unit.unit, unit.path),
+        );
+        profile.measure('referenceVisitor', () {
+          collector.visitLibrary(unit.unit);
+        });
+      }
       unresolvedReferences.addAll(collector.unresolvedReferences);
 
       final analysisErrors = unit.diagnostics

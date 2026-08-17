@@ -7,6 +7,25 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+### Added
+
+- Added deterministic synthetic performance-fixture generation, repeatable JSON
+  benchmarks, and opt-in Dart-adapter subphase profiling.
+- Exposed shared adapter services and the Dart analysis workspace for adapter
+  authors that need to reuse project-level semantic state.
+
+### Changed
+
+- Reused one analyzer workspace across Dart and asset analysis and overlapped
+  lint-inclusive CLI diagnostics with semantic graph construction.
+- Indexed incoming graph edges and blockers, and cached target reachability
+  until the next graph mutation.
+- Grouped duplicate candidates by size before streaming SHA-256, streamed asset
+  inventory hashing, reduced repeated path-policy filesystem calls, and cached
+  diagnostic source metadata.
+- Redacted benchmark project paths by default; local paths are emitted only
+  after explicitly passing `--include-project-path`.
+
 ## [1.0.1] - 2026-08-17
 
 ### Changed

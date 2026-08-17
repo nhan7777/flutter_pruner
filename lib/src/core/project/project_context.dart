@@ -226,9 +226,12 @@ class ProjectContext {
     for (final dir in const ['lib', 'bin', 'test']) {
       final directory = Directory(resolve(dir));
       if (!directory.existsSync()) continue;
-      for (final entity in directory.listSync(recursive: true)) {
+      for (final entity in directory.listSync(
+        recursive: true,
+        followLinks: false,
+      )) {
         if (entity is! File) continue;
-        if (pathPolicy.shouldExclude(entity.path)) continue;
+        if (pathPolicy.shouldExcludeTraversalEntry(entity)) continue;
         if (!entity.path.endsWith('.dart')) continue;
         if (p.split(entity.path).any((s) => s.startsWith('.'))) continue;
         result.add(entity);

@@ -1,12 +1,11 @@
-import 'package:analyzer/dart/analysis/analysis_context_collection.dart';
 import 'package:analyzer/dart/analysis/results.dart';
 import 'package:analyzer/dart/ast/ast.dart';
 import 'package:analyzer/dart/ast/visitor.dart';
-import 'package:path/path.dart' as p;
 
 import '../../core/graph/evidence.dart';
 import '../../core/project/project_context.dart';
 import '../dart/analyzer_ast_compat.dart';
+import '../dart/dart_analysis_workspace.dart';
 import '../dart/dart_ids.dart';
 import 'asset_inventory.dart';
 import 'asset_sink_registry.dart';
@@ -34,46 +33,37 @@ class AssetReferenceResolver {
   static const AssetSinkRegistry _sinks = AssetSinkRegistry();
 
   /// Analyzes all Dart files in the project to find asset references.
-  Future<void> analyzeProject() async {
-    final collection = AnalysisContextCollection(
-      includedPaths: [p.normalize(p.absolute(project.root.path))],
-    );
+  Future<void> analyzeProject({DartAnalysisWorkspace? workspace}) async {
+    final analysisWorkspace = workspace ?? DartAnalysisWorkspace(project);
     final units = <String, ResolvedUnitResult>{};
 
-    for (final context in collection.contexts) {
-      final analyzedFiles = context.contextRoot.analyzedFiles().toList()
-        ..sort();
-      for (final filePath in analyzedFiles) {
-        if (!filePath.endsWith('.dart')) continue;
-        if (project.pathPolicy.shouldExclude(filePath)) continue;
-        try {
-          final result = await context.currentSession.getResolvedLibrary(
-            filePath,
-          );
-          if (result is ResolvedLibraryResult) {
-            for (final unit in result.units) {
-              units[unit.path] = unit;
-            }
-          } else if (result is! NotLibraryButPartResult) {
-            blockers.add(
-              BlockerInfo(
-                reason: 'analyzer could not resolve an asset consumer library',
-                location: project.relative(filePath),
-                affectedNamespace: 'asset:${project.packageName}/',
-                affectedNodeIds: const {},
-              ),
-            );
+    for (final filePath in analysisWorkspace.dartFiles) {
+      if (project.pathPolicy.shouldExclude(filePath)) continue;
+      try {
+        final result = await analysisWorkspace.resolveLibrary(filePath);
+        if (result is ResolvedLibraryResult) {
+          for (final unit in result.units) {
+            units[unit.path] = unit;
           }
-        } catch (error) {
+        } else if (result is! NotLibraryButPartResult) {
           blockers.add(
             BlockerInfo(
-              reason: 'analyzer failed while resolving asset consumers',
+              reason: 'analyzer could not resolve an asset consumer library',
               location: project.relative(filePath),
               affectedNamespace: 'asset:${project.packageName}/',
               affectedNodeIds: const {},
             ),
           );
         }
+      } catch (error) {
+        blockers.add(
+          BlockerInfo(
+            reason: 'analyzer failed while resolving asset consumers',
+            location: project.relative(filePath),
+            affectedNamespace: 'asset:${project.packageName}/',
+            affectedNodeIds: const {},
+          ),
+        );
       }
     }
 

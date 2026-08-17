@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter_pruner/flutter_pruner.dart';
+import 'package:flutter_pruner/src/adapters/dart/analyzer_diagnostic_collector.dart';
 import 'package:flutter_pruner/src/adapters/dart/dart_adapter.dart';
 import 'package:flutter_pruner/src/core/confidence/finding_generator.dart';
 import 'package:path/path.dart' as p;
@@ -77,6 +78,30 @@ void main() {
   }
 
   group('DartAdapter', () {
+    test('starts CLI diagnostics before semantic graph construction', () async {
+      await createProject({
+        'pubspec.yaml': '''
+name: test_app
+publish_to: none
+environment:
+  sdk: ^3.9.0
+''',
+        'lib/main.dart': 'void main() {}',
+      });
+
+      final graph = ReachabilityGraph();
+      final adapter = DartAdapter(
+        collectAnalyzerDiagnostics: (project) async {
+          expect(graph.nodeCount, 0);
+          return const AnalyzerDiagnosticCollection.skipped();
+        },
+      );
+
+      await adapter.analyze(project, GraphBuilder(graph, 'dart'));
+
+      expect(graph.nodeCount, greaterThan(0));
+    });
+
     test(
       'conditional imports and exports downgrade a declared-complete project',
       () async {

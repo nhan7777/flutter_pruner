@@ -81,9 +81,24 @@ class ProjectPathPolicy {
   bool shouldExclude(String path) {
     final normalized = p.normalize(p.absolute(path));
     final reason = _reasonFor(normalized);
-    if (reason == null) return false;
-    (_observedByReason[reason] ??= {}).add(normalized);
-    return true;
+    return _record(normalized, reason);
+  }
+
+  /// Fast path for entries produced by a traversal using `followLinks: false`.
+  ///
+  /// The traversal already supplies the entity type and cannot descend through
+  /// a symlink, so repeating `typeSync` and canonical resolution for every
+  /// ordinary file would add syscalls without strengthening the boundary.
+  bool shouldExcludeTraversalEntry(FileSystemEntity entity) {
+    final normalized = p.normalize(p.absolute(entity.path));
+    final lexicalReason = _lexicalReason(normalized);
+    if (lexicalReason != null) return _record(normalized, lexicalReason);
+    if (entity is Link) return _record(normalized, 'symlink');
+    if (entity is Directory &&
+        _excludedDirectoryNames.contains(p.basename(normalized))) {
+      return _record(normalized, 'directory:${p.basename(normalized)}');
+    }
+    return false;
   }
 
   /// Clears observations before a fresh analysis pass.
@@ -102,7 +117,8 @@ class ProjectPathPolicy {
   }
 
   String? _reasonFor(String normalized) {
-    if (!_isWithinRoot(normalized)) return 'outside-project';
+    final lexicalReason = _lexicalReason(normalized);
+    if (lexicalReason != null) return lexicalReason;
 
     final type = FileSystemEntity.typeSync(normalized, followLinks: false);
     if (type == FileSystemEntityType.link) return 'symlink';
@@ -120,6 +136,17 @@ class ProjectPathPolicy {
       }
     }
 
+    final basename = p.basename(normalized);
+    if (_excludedDirectoryNames.contains(basename) &&
+        type == FileSystemEntityType.directory) {
+      return 'directory:$basename';
+    }
+    return null;
+  }
+
+  String? _lexicalReason(String normalized) {
+    if (!_isWithinRoot(normalized)) return 'outside-project';
+
     for (final excluded in _additionalExcludedPaths) {
       if (normalized == excluded || p.isWithin(excluded, normalized)) {
         return 'run-output';
@@ -135,15 +162,18 @@ class ProjectPathPolicy {
     }
 
     final basename = p.basename(normalized);
-    if (_excludedDirectoryNames.contains(basename) &&
-        type == FileSystemEntityType.directory) {
-      return 'directory:$basename';
-    }
     if (_excludedFileNames.contains(basename)) return 'tool-file:$basename';
-    if (basename.startsWith('.flutter_pruner')) {
+    if (basename.startsWith('.flutter_pruner') &&
+        !_excludedDirectoryNames.contains(basename)) {
       return 'tool-file:flutter-pruner';
     }
     return null;
+  }
+
+  bool _record(String normalized, String? reason) {
+    if (reason == null) return false;
+    (_observedByReason[reason] ??= {}).add(normalized);
+    return true;
   }
 
   bool _isWithinRoot(String path) =>

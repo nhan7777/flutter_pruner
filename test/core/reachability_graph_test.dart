@@ -653,5 +653,22 @@ void main() {
       expect(graph.incomingTo('target'), hasLength(2));
       expect(graph.outgoingFrom('caller_one'), hasLength(2));
     });
+
+    test('cached target analysis is invalidated by graph mutations', () {
+      final graph = ReachabilityGraph()
+        ..addNode(_node('root'))
+        ..addNode(_node('first'))
+        ..addNode(_node('second'))
+        ..addRoot('root', reason: 'entrypoint')
+        ..addEdge(_edge('root', 'first'));
+
+      expect(graph.reachableFor(_android), equals({'root', 'first'}));
+      expect(graph.retainedFor(_android), equals({'root', 'first'}));
+
+      graph.addEdge(_edge('first', 'second'));
+
+      expect(graph.reachableFor(_android), equals({'root', 'first', 'second'}));
+      expect(graph.retainedFor(_android), equals({'root', 'first', 'second'}));
+    });
   });
 }
