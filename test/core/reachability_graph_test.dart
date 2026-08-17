@@ -405,6 +405,54 @@ void main() {
       expect(graph.blockersFor('di:app:Api@real'), isEmpty);
     });
 
+    test('exact duplicate blockers collapse before graph indexing', () {
+      final first = Blocker(
+        producer: 'dart',
+        reason: 'unresolved semantic reference',
+        location: 'lib/example.dart',
+        affectedNodeIds: {'candidate_b', 'candidate_a'},
+      );
+      final graph = ReachabilityGraph()
+        ..addNode(_node('candidate_a'))
+        ..addNode(_node('candidate_b'))
+        ..addBlocker(first)
+        ..addBlocker(
+          Blocker(
+            producer: 'dart',
+            reason: 'unresolved semantic reference',
+            location: 'lib/example.dart',
+            affectedNodeIds: {'candidate_a', 'candidate_b'},
+          ),
+        );
+
+      expect(graph.blockers, [same(first)]);
+      expect(graph.blockersFor('candidate_a'), [same(first)]);
+      expect(
+        graph.retainedFor(_android),
+        containsAll({'candidate_a', 'candidate_b'}),
+      );
+    });
+
+    test('dedup identity cannot confuse node ids containing commas', () {
+      final graph = ReachabilityGraph()
+        ..addBlocker(
+          Blocker(
+            producer: 'dart',
+            reason: 'unresolved semantic reference',
+            affectedNodeIds: {'a,b', 'c'},
+          ),
+        )
+        ..addBlocker(
+          Blocker(
+            producer: 'dart',
+            reason: 'unresolved semantic reference',
+            affectedNodeIds: {'a', 'b,c'},
+          ),
+        );
+
+      expect(graph.blockers, hasLength(2));
+    });
+
     test('snapshots id scope before caller mutation', () {
       final affectedNodeIds = <String>{'blocked_candidate'};
       final blocker = Blocker(

@@ -1,5 +1,7 @@
 import '../core/confidence/confidence.dart';
 import '../core/confidence/finding.dart';
+import '../core/graph/blocker_identity.dart';
+import '../core/graph/evidence.dart';
 import '../core/graph/node.dart';
 import '../core/graph/reachability_graph.dart';
 import '../core/project/project_context.dart';
@@ -50,21 +52,14 @@ class AnalysisSnapshot {
     required AnalysisPassPurpose purpose,
     int? round,
   }) {
-    final activeBlockers = <String, String>{};
+    final activeBlockers = <BlockerIdentity, String>{};
+    final seenBlockers = <Blocker>{};
     final affectedFindingIds = <String>{};
     for (final finding in findings) {
       if (finding.blockers.isNotEmpty) affectedFindingIds.add(finding.node.id);
       for (final blocker in finding.blockers) {
-        final affectedIds = blocker.affectedNodeIds.toList()..sort();
-        final key = [
-          blocker.producer,
-          blocker.reason,
-          blocker.location ?? '',
-          blocker.sourceNodeId ?? '',
-          blocker.affectedNamespace ?? '',
-          affectedIds.join(','),
-        ].join('\u0000');
-        activeBlockers[key] = blocker.producer;
+        if (!seenBlockers.add(blocker)) continue;
+        activeBlockers[BlockerIdentity(blocker)] = blocker.producer;
       }
     }
     final blockersByProducer = <String, int>{};

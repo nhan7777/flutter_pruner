@@ -5,6 +5,7 @@ import 'package:flutter_pruner/src/cli/formatters/json_formatter.dart';
 import 'package:flutter_pruner/src/core/confidence/confidence.dart';
 import 'package:flutter_pruner/src/core/confidence/finding.dart';
 import 'package:flutter_pruner/src/core/graph/build_condition.dart';
+import 'package:flutter_pruner/src/core/graph/evidence.dart';
 import 'package:flutter_pruner/src/core/graph/node.dart';
 import 'package:flutter_pruner/src/core/project/target_matrix.dart';
 import 'package:flutter_pruner/src/reporting/run_report.dart';
@@ -133,9 +134,43 @@ void main() {
     expect(finding['title'], 'duplicate');
     expect(((finding['node'] as Map)['projectRelativeOrigin']), 'assets/a.png');
   });
+
+  test('v3 deduplicates blocker identities and streams deterministically', () {
+    final first = Blocker(
+      producer: 'dart',
+      reason: 'unresolved semantic reference',
+      location: 'lib/example.dart',
+      affectedNodeIds: {'dart:test/b', 'dart:test/a'},
+    );
+    final duplicate = Blocker(
+      producer: 'dart',
+      reason: 'unresolved semantic reference',
+      location: 'lib/example.dart',
+      affectedNodeIds: {'dart:test/a', 'dart:test/b'},
+    );
+    final report = _report(blockers: [first, first, duplicate]);
+    const formatter = JsonFormatter();
+
+    final rendered = formatter.format(report);
+    final streamed = StringBuffer();
+    formatter.writeTo(report, streamed);
+    final output = jsonDecode(rendered) as Map;
+
+    expect(rendered, streamed.toString());
+    expect(rendered, isNot(contains('\n')));
+    expect(formatter.format(report), rendered);
+    expect((output['blockers'] as Map), hasLength(1));
+    expect(
+      ((output['findings'] as List).single as Map)['blockerIds'],
+      hasLength(1),
+    );
+  });
 }
 
-RunReport _report({bool withApplyOutcome = false}) {
+RunReport _report({
+  bool withApplyOutcome = false,
+  List<Blocker> blockers = const [],
+}) {
   final finding = Finding(
     ruleId: 'PRN-DUP-001',
     node: GraphNode(
@@ -159,6 +194,7 @@ RunReport _report({bool withApplyOutcome = false}) {
       noPublicApiRisk: true,
       hasDeterministicInverse: false,
     ),
+    blockers: blockers,
     reportingAdapterId: 'duplicates',
     sourceBytes: 4,
   );

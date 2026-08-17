@@ -62,6 +62,8 @@ ProjectAnalyzer
 | Analyzer workspace | Dart and asset adapters share one workspace and resolution cache | Resolution failures still create blockers |
 | CLI diagnostics | Starts before semantic analysis and is awaited before findings are finalized | Lint-only diagnostics remain available; failure still blocks |
 | Graph queries | Incoming edges and blockers are indexed; target analysis is cached until mutation | Public query results remain immutable snapshots |
+| Blocker propagation | Exact duplicate facts collapse before indexing; source-scoped blockers activate from a work queue | Dedup compares every safety field and retained closure remains a least fixed point |
+| JSON reports | Stable blocker IDs are cached, blocker/finding projections are lazy, and JSON is compact | Schema v3 fields, blocker IDs, ordering, and fail-closed evidence remain unchanged |
 | Duplicate hashing | Files are grouped by size before streaming SHA-256 | Only byte-identical files share a digest group |
 | Asset hashing | File content is streamed | Digest semantics are unchanged |
 | Path traversal | Cheap lexical exclusions precede expensive filesystem work | Canonical boundary checks remain fail closed |

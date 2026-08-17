@@ -19,7 +19,7 @@ void main() {
         output,
         contains('<script id="report-data" type="application/json">'),
       );
-      expect(output, contains('"version": 3'));
+      expect(output, contains('"version":3'));
       expect(output, contains(r'Closing \u003c/script\u003e \u0026 safe'));
       expect(output, isNot(contains('</script><img')));
       expect(output, contains('Copy command'));
@@ -55,7 +55,7 @@ void main() {
       _report(confidence: Confidence.safe),
     );
 
-    expect(output, contains('"confidence": "SAFE"'));
+    expect(output, contains('"confidence":"SAFE"'));
     expect(
       output,
       contains("const tiers = ['SAFE', 'HIGH', 'REVIEW', 'PROTECTED'];"),
@@ -211,7 +211,7 @@ void main() {
   test('treats dangling roots as unhealthy in interactive and fallback views', () {
     final output = const HtmlFormatter().format(_report(danglingRoots: 1));
 
-    expect(output, contains('"danglingRoots": 1'));
+    expect(output, contains('"danglingRoots":1'));
     expect(output, contains('danglingRoots === 0'));
     expect(
       output,

@@ -1,5 +1,6 @@
 import 'package:collection/collection.dart';
 
+import 'blocker_identity.dart';
 import 'build_condition.dart';
 import 'edge.dart';
 import 'evidence.dart';
@@ -30,7 +31,9 @@ class ReachabilityGraph {
   final Map<String, List<_RootRecord>> _roots = {};
   final Map<String, List<_Protection>> _protections = {};
   final List<Blocker> _blockers = [];
+  final Set<BlockerIdentity> _blockerIdentities = {};
   final Map<String, List<Blocker>> _blockersByNode = {};
+  final Map<String, List<Blocker>> _blockersBySourceNode = {};
   final Map<Blocker, Set<String>> _nodesByBlocker = {};
   final Set<String> _conflictingNodeIds = {};
   final Map<String, _CachedTargetAnalysis> _targetAnalysisCache = {};
@@ -268,7 +271,13 @@ class ReachabilityGraph {
   /// Blockers never delete anything; they only lower confidence. This asymmetry
   /// is intentional.
   void addBlocker(Blocker blocker) {
+    final identity = BlockerIdentity(blocker);
+    if (!_blockerIdentities.add(identity)) return;
     _blockers.add(blocker);
+    final sourceNodeId = blocker.sourceNodeId;
+    if (sourceNodeId != null) {
+      (_blockersBySourceNode[sourceNodeId] ??= []).add(blocker);
+    }
     final addressedNodeIds = <String>{};
     for (final nodeId in _nodes.keys) {
       if (!blocker.couldAddress(nodeId)) continue;
@@ -406,9 +415,17 @@ class ReachabilityGraph {
   Set<String> _computeRetained(BuildTarget target) {
     final retained = <String>{};
     final queue = <String>[];
+    final activatedBlockers = <Blocker>{};
 
     void retain(String nodeId) {
       if (retained.add(nodeId)) queue.add(nodeId);
+    }
+
+    void activate(Blocker blocker) {
+      if (!activatedBlockers.add(blocker)) return;
+      for (final nodeId in _nodesByBlocker[blocker] ?? const <String>{}) {
+        retain(nodeId);
+      }
     }
 
     for (final entry in _roots.entries) {
@@ -420,35 +437,22 @@ class ReachabilityGraph {
       retain(nodeId);
     }
 
-    var changed = true;
-    while (changed) {
-      changed = false;
-
-      while (queue.isNotEmpty) {
-        final current = queue.removeLast();
-        for (final edge in outgoingFrom(current)) {
-          if (!edge.condition.appliesTo(target)) continue;
-          if (retained.add(edge.to)) {
-            queue.add(edge.to);
-            changed = true;
-          }
-        }
+    for (final blocker in _blockers) {
+      final sourceNodeId = blocker.sourceNodeId;
+      if (sourceNodeId == null || !_nodes.containsKey(sourceNodeId)) {
+        activate(blocker);
       }
+    }
 
-      for (final blocker in _blockers) {
-        final sourceNodeId = blocker.sourceNodeId;
-        final sourceIsRetained =
-            sourceNodeId == null ||
-            !_nodes.containsKey(sourceNodeId) ||
-            retained.contains(sourceNodeId);
-        if (!sourceIsRetained) continue;
-
-        for (final nodeId in _nodesByBlocker[blocker] ?? const <String>{}) {
-          if (retained.add(nodeId)) {
-            queue.add(nodeId);
-            changed = true;
-          }
-        }
+    while (queue.isNotEmpty) {
+      final current = queue.removeLast();
+      for (final edge in outgoingFrom(current)) {
+        if (!edge.condition.appliesTo(target)) continue;
+        retain(edge.to);
+      }
+      for (final blocker
+          in _blockersBySourceNode[current] ?? const <Blocker>[]) {
+        activate(blocker);
       }
     }
 

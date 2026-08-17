@@ -9,6 +9,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- Made JSON v3 output compact and lazy, cached stable blocker IDs across
+  findings, deduplicated exact blocker facts before graph indexing, and changed
+  blocker retention to a source-indexed work queue.
 - Made HIGH classification check its manual-risk allowlist explicitly and
   strengthened duplicate planning tests so review-only findings cannot enter a
   removal plan even if an upstream tier is malformed.
@@ -18,6 +21,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- Added a deterministic blocker-fan-out benchmark for JSON report construction,
+  serialization time, and output size.
 - Added a redacted three-project scan/dry-run safety replay and an executable
   median JSON-report overhead gate for release readiness.
 

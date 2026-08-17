@@ -102,6 +102,11 @@ Each file finding also includes `projectRelativeOrigin` for stable comparisons.
 Verifier stdout, stderr, environment variables and raw command arguments are not
 persisted in the report.
 
+JSON is emitted in compact form because blocker-to-finding relationships can be
+large. Field order and blocker-registry key order are deterministic, and exact
+duplicate blocker facts share one stable registry entry and one ID per finding.
+Use `jq` or another JSON viewer when an indented local view is needed.
+
 ## Status and exit code
 
 | Status | Exit | Meaning |

@@ -41,6 +41,12 @@ the fail-closed safety model and are covered by regression tests.
 - JSON v3 report construction and serialization are measured separately from
   analysis. `--max-report-overhead-percent` makes the median overhead ceiling an
   executable release gate.
+- JSON v3 caches each stable blocker ID once, lazily projects the sorted blocker
+  registry and findings during encoding, and omits presentation whitespace.
+  A dedicated synthetic benchmark reproduces high blocker-to-finding fan-out.
+- Exact duplicate blockers are discarded before graph indexing. Retention uses
+  a source-node work queue instead of rescanning every blocker at each fixed-
+  point iteration; missing-source blockers remain unconditionally active.
 - Concurrent lint diagnostics: the lint-inclusive `dart analyze` process starts
   before semantic graph construction and is awaited before diagnostic nodes are
   committed. This preserves the fail-closed lint contract while overlapping

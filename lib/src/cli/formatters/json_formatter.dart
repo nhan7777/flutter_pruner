@@ -1,3 +1,4 @@
+import 'dart:collection';
 import 'dart:convert';
 
 import 'package:crypto/crypto.dart';
@@ -7,6 +8,7 @@ import '../../adapters/adapter_report_definition.dart';
 import '../../apply/mode_apply_policy.dart';
 import '../../core/confidence/confidence.dart';
 import '../../core/confidence/finding.dart';
+import '../../core/graph/blocker_identity.dart';
 import '../../core/graph/evidence.dart';
 import '../../core/graph/node.dart';
 import '../../core/project/analysis_mode.dart';
@@ -25,8 +27,21 @@ class JsonFormatter implements ReportFormatter {
 
   @override
   String format(RunReport report) {
+    final buffer = StringBuffer();
+    writeTo(report, buffer);
+    return buffer.toString();
+  }
+
+  /// Writes compact JSON directly to [sink] without first creating one large
+  /// intermediate string.
+  void writeTo(RunReport report, StringSink sink) {
     final output = version == 2 ? _serializeV2(report) : _serializeV3(report);
-    return const JsonEncoder.withIndent('  ').convert(output);
+    final encoder = const JsonEncoder().startChunkedConversion(
+      StringConversionSink.fromStringSink(sink),
+    );
+    encoder
+      ..add(output)
+      ..close();
   }
 
   Map<String, Object?> _serializeV3(RunReport report) {
@@ -34,20 +49,33 @@ class JsonFormatter implements ReportFormatter {
       for (final definition in report.adapterReportDefinitions)
         definition.adapterId: definition,
     };
-    final blockerRegistry = <String, Map<String, Object?>>{};
-    final blockerIdsByFinding = <String, List<String>>{};
+    final blockerIdsByObject = Map<Blocker, String>.identity();
+    final blockerIdsByCanonicalKey = <String, String>{};
+    final blockerRegistry = <String, Blocker>{};
     for (final finding in report.findings) {
-      final ids = <String>[];
       for (final blocker in finding.blockers) {
-        final id = _blockerId(blocker);
-        ids.add(id);
-        blockerRegistry[id] = _serializeBlocker(blocker);
+        final cachedId = blockerIdsByObject[blocker];
+        if (cachedId != null) continue;
+        final canonicalKey = blockerCanonicalKey(blocker);
+        final id = blockerIdsByCanonicalKey.putIfAbsent(
+          canonicalKey,
+          () => _blockerId(canonicalKey),
+        );
+        blockerIdsByObject[blocker] = id;
+        blockerRegistry[id] = blocker;
       }
-      blockerIdsByFinding[finding.node.id] = ids;
     }
-    final sortedBlockers = Map.fromEntries(
-      blockerRegistry.entries.toList()..sort((a, b) => a.key.compareTo(b.key)),
-    );
+    final sortedBlockerIds = blockerRegistry.keys.toList()..sort();
+
+    List<String> blockerIdsFor(Finding finding) {
+      final ids = <String>[];
+      final seen = <String>{};
+      for (final blocker in finding.blockers) {
+        final id = blockerIdsByObject[blocker]!;
+        if (seen.add(id)) ids.add(id);
+      }
+      return ids;
+    }
 
     return {
       'version': RunReport.schemaVersion,
@@ -109,7 +137,10 @@ class JsonFormatter implements ReportFormatter {
               }
             : _serializeExclusions(report.analysisPasses.last),
       },
-      'blockers': sortedBlockers,
+      'blockers': _LazyJsonMap(sortedBlockerIds, (id) {
+        final blocker = blockerRegistry[id];
+        return blocker == null ? null : _serializeBlocker(blocker);
+      }),
       'diagnostics': report.diagnostics
           .map(
             (diagnostic) => {
@@ -138,17 +169,18 @@ class JsonFormatter implements ReportFormatter {
         },
       if (report.quarantinePath != null)
         'quarantine': {'path': report.quarantinePath},
-      'findings': report.findings
-          .map(
-            (finding) => _serializeFindingV3(
-              finding,
-              report.projectRoot,
-              blockerIdsByFinding[finding.node.id] ?? const [],
-              adapterDefinitions[finding.reportingAdapterId],
-              report.analysisMode,
-            ),
-          )
-          .toList(),
+      'findings': _LazyJsonList<Map<String, Object?>>(report.findings.length, (
+        index,
+      ) {
+        final finding = report.findings[index];
+        return _serializeFindingV3(
+          finding,
+          report.projectRoot,
+          blockerIdsFor(finding),
+          adapterDefinitions[finding.reportingAdapterId],
+          report.analysisMode,
+        );
+      }),
     };
   }
 
@@ -698,20 +730,60 @@ class JsonFormatter implements ReportFormatter {
     return origin.toString();
   }
 
-  String _blockerId(Blocker blocker) {
-    final affectedIds = blocker.affectedNodeIds.toList()..sort();
-    final canonical = [
-      blocker.producer,
-      blocker.reason,
-      blocker.location ?? '',
-      blocker.sourceNodeId ?? '',
-      blocker.affectedNamespace ?? '',
-      affectedIds.join(','),
-    ].join('\u0000');
-    return 'blocker-${sha256.convert(utf8.encode(canonical)).toString().substring(0, 16)}';
-  }
+  String _blockerId(String canonicalKey) =>
+      'blocker-${sha256.convert(utf8.encode(canonicalKey)).toString().substring(0, 16)}';
 
   Map<String, int> _sortedMap(Map<String, int> input) => Map.fromEntries(
     input.entries.toList()..sort((a, b) => a.key.compareTo(b.key)),
   );
+}
+
+final class _LazyJsonList<E> extends ListBase<E> {
+  _LazyJsonList(this._length, this._valueAt);
+
+  final int _length;
+  final E Function(int index) _valueAt;
+
+  @override
+  int get length => _length;
+
+  @override
+  set length(int value) => throw UnsupportedError('immutable JSON projection');
+
+  @override
+  E operator [](int index) {
+    RangeError.checkValidIndex(index, this);
+    return _valueAt(index);
+  }
+
+  @override
+  void operator []=(int index, E value) {
+    throw UnsupportedError('immutable JSON projection');
+  }
+}
+
+final class _LazyJsonMap extends MapBase<String, Object?> {
+  _LazyJsonMap(this._keys, this._valueForKey);
+
+  final List<String> _keys;
+  final Object? Function(String key) _valueForKey;
+
+  @override
+  Object? operator [](Object? key) => key is String ? _valueForKey(key) : null;
+
+  @override
+  void operator []=(String key, Object? value) {
+    throw UnsupportedError('immutable JSON projection');
+  }
+
+  @override
+  void clear() => throw UnsupportedError('immutable JSON projection');
+
+  @override
+  Iterable<String> get keys => _keys;
+
+  @override
+  Object? remove(Object? key) {
+    throw UnsupportedError('immutable JSON projection');
+  }
 }

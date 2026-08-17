@@ -49,6 +49,21 @@ dart run benchmark/scan_benchmark.dart \
   --max-report-overhead-percent 10
 ```
 
+Use the dedicated synthetic fan-out benchmark when blocker relationships, not
+project analysis, dominate report cost:
+
+```bash
+dart run benchmark/json_report_benchmark.dart \
+  --findings 500 \
+  --blockers 1000 \
+  --warmup 1 \
+  --iterations 3
+```
+
+It constructs no source fixture and emits only aggregate counts, elapsed
+samples, and report bytes. Keep findings, unique blockers, and
+`blockerFindingLinks` identical when comparing serializer revisions.
+
 Generate a synthetic profile outside the repository, then benchmark it:
 
 ```bash
