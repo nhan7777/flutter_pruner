@@ -15,6 +15,7 @@ import '../../core/project/project_context.dart';
 import '../../core/project/target_matrix.dart';
 import '../adapter_report_definition.dart';
 import '../analyzer_adapter.dart';
+import 'analyzer_ast_compat.dart';
 import 'analyzer_diagnostic_collector.dart';
 import 'dart_ids.dart';
 import 'declaration_visitor.dart';
@@ -672,7 +673,7 @@ class DartAdapter extends AnalyzerAdapter {
     };
     for (final diagnostic in diagnostics) {
       final code = AnalyzerDiagnosticCollector.normalizeCode(
-        diagnostic.diagnosticCode.uniqueName,
+        diagnostic.diagnosticCode.lowerCaseUniqueName,
       );
       if (code == 'undefined_named_parameter' &&
           _hasResolvedNamedParameterTarget(unit, diagnostic)) {
@@ -695,7 +696,7 @@ class DartAdapter extends AnalyzerAdapter {
     // ignore: deprecated_member_use
     AnalysisError diagnostic,
   ) {
-    final finder = _NamedExpressionAtOffsetFinder(diagnostic.offset);
+    final finder = _NamedArgumentAtOffsetFinder(diagnostic.offset);
     unit.accept(finder);
     AstNode? current = finder.match;
     while (current != null) {
@@ -722,7 +723,7 @@ class DartAdapter extends AnalyzerAdapter {
     if (errors is! ErrorsResult) return;
     for (final diagnostic in errors.diagnostics) {
       final code = AnalyzerDiagnosticCollector.normalizeCode(
-        diagnostic.diagnosticCode.uniqueName,
+        diagnostic.diagnosticCode.lowerCaseUniqueName,
       );
       if (!AnalyzerDiagnosticCollector.supportedCodes.contains(code)) continue;
       final location = unit.lineInfo.getLocation(diagnostic.offset);
@@ -774,19 +775,22 @@ class DartAdapter extends AnalyzerAdapter {
   }
 }
 
-final class _NamedExpressionAtOffsetFinder extends RecursiveAstVisitor<void> {
-  _NamedExpressionAtOffsetFinder(this.offset);
+final class _NamedArgumentAtOffsetFinder extends RecursiveAstVisitor<void> {
+  _NamedArgumentAtOffsetFinder(this.offset);
 
   final int offset;
-  NamedExpression? match;
+  AstNode? match;
 
   @override
-  void visitNamedExpression(NamedExpression node) {
-    if (match == null &&
-        node.offset <= offset &&
-        offset < node.offset + node.length) {
-      match = node;
+  void visitArgumentList(ArgumentList node) {
+    for (final argument in node.arguments) {
+      if (match == null &&
+          isAnalyzerNamedArgument(argument) &&
+          argument.offset <= offset &&
+          offset < argument.offset + argument.length) {
+        match = argument;
+      }
     }
-    super.visitNamedExpression(node);
+    super.visitArgumentList(node);
   }
 }

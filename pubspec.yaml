@@ -1,9 +1,8 @@
 name: flutter_pruner
 description: >-
-  Semantic auditor for Flutter/Dart projects. Finds unused assets, duplicate
-  files and unreachable declarations using the Dart analyzer, with confidence
-  tiers and a reversible apply workflow.
-version: 1.0.0
+  Safety-first semantic auditor for Dart and Flutter. Finds unreachable
+  declarations, unused assets, and duplicate files with reversible cleanup.
+version: 1.0.1
 repository: https://github.com/nhan7777/flutter_pruner
 issue_tracker: https://github.com/nhan7777/flutter_pruner/issues
 
@@ -17,7 +16,7 @@ dependencies:
   # Core semantic analysis. This is the single highest-risk dependency:
   # package:analyzer has no public/internal API separation and ships frequent
   # breaking changes. Keep the constraint tight and let CI catch drift.
-  analyzer: ^8.4.0
+  analyzer: '>=12.1.0 <15.0.0'
 
   args: ^2.5.0
   collection: ^1.19.0

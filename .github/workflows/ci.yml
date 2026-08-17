@@ -64,6 +64,22 @@ jobs:
       - name: Run tests
         run: dart test --reporter expanded
 
+  dependency-bounds:
+    name: Dependency lower bounds
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: '3.9'
+
+      - name: Resolve declared lower bounds
+        run: dart pub downgrade
+
+      - name: Analyze lower bounds
+        run: dart analyze --fatal-infos
+
   package:
     name: Package dry run
     runs-on: ubuntu-latest

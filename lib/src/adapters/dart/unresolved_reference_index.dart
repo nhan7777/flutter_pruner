@@ -5,6 +5,7 @@ import 'package:analyzer/dart/ast/visitor.dart';
 import 'package:analyzer/dart/element/element.dart';
 
 import '../../core/project/project_context.dart';
+import 'analyzer_ast_compat.dart';
 import 'dart_ids.dart';
 
 /// A conservative project-wide symbol index for unresolved references.
@@ -121,13 +122,21 @@ final class _UnresolvedReferenceIndexVisitor extends RecursiveAstVisitor<void> {
 
   @override
   void visitClassDeclaration(ClassDeclaration node) {
-    _indexType(node.name.lexeme, node.declaredFragment, node.members);
+    _indexType(
+      node.namePart.typeName.lexeme,
+      node.declaredFragment,
+      node.body.members,
+    );
     super.visitClassDeclaration(node);
   }
 
   @override
   void visitEnumDeclaration(EnumDeclaration node) {
-    _indexType(node.name.lexeme, node.declaredFragment, node.members);
+    _indexType(
+      node.namePart.typeName.lexeme,
+      node.declaredFragment,
+      node.body.members,
+    );
     super.visitEnumDeclaration(node);
   }
 
@@ -140,20 +149,26 @@ final class _UnresolvedReferenceIndexVisitor extends RecursiveAstVisitor<void> {
 
   @override
   void visitMixinDeclaration(MixinDeclaration node) {
-    _indexType(node.name.lexeme, node.declaredFragment, node.members);
+    _indexType(node.name.lexeme, node.declaredFragment, node.body.members);
     super.visitMixinDeclaration(node);
   }
 
   @override
   void visitExtensionTypeDeclaration(ExtensionTypeDeclaration node) {
-    _indexType(node.name.lexeme, node.declaredFragment, node.members);
+    _indexType(
+      analyzerExtensionTypeName(node),
+      node.declaredFragment,
+      node.body.members,
+    );
     super.visitExtensionTypeDeclaration(node);
   }
 
   @override
   void visitExtensionDeclaration(ExtensionDeclaration node) {
     final name = node.name?.lexeme;
-    if (name != null) _indexType(name, node.declaredFragment, node.members);
+    if (name != null) {
+      _indexType(name, node.declaredFragment, node.body.members);
+    }
     super.visitExtensionDeclaration(node);
   }
 

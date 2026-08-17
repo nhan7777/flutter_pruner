@@ -6,6 +6,7 @@ import 'package:path/path.dart' as p;
 
 import '../../core/graph/evidence.dart';
 import '../../core/project/project_context.dart';
+import '../dart/analyzer_ast_compat.dart';
 import '../dart/dart_ids.dart';
 import 'asset_inventory.dart';
 import 'asset_sink_registry.dart';
@@ -146,7 +147,12 @@ class _AssetVisitor extends RecursiveAstVisitor<void> {
   void _checkAssetInvocation(MethodInvocation node) {
     final arguments = node.argumentList.arguments;
     if (AssetReferenceResolver._sinks.isMethodInvocation(node)) {
-      if (arguments.isNotEmpty) _resolveAssetArgument(arguments.first, node);
+      if (arguments.isNotEmpty) {
+        _resolveAssetArgument(
+          analyzerArgumentExpression(arguments.first),
+          node,
+        );
+      }
       return;
     }
     _checkUnrecognizedAssetConsumer(
@@ -160,7 +166,12 @@ class _AssetVisitor extends RecursiveAstVisitor<void> {
   void _checkAssetConstructor(InstanceCreationExpression node) {
     final arguments = node.argumentList.arguments;
     if (AssetReferenceResolver._sinks.isInstanceCreation(node)) {
-      if (arguments.isNotEmpty) _resolveAssetArgument(arguments.first, node);
+      if (arguments.isNotEmpty) {
+        _resolveAssetArgument(
+          analyzerArgumentExpression(arguments.first),
+          node,
+        );
+      }
       return;
     }
     _checkUnrecognizedAssetConsumer(
@@ -172,14 +183,15 @@ class _AssetVisitor extends RecursiveAstVisitor<void> {
   }
 
   void _checkUnrecognizedAssetConsumer(
-    NodeList<Expression> arguments,
+    Iterable<AstNode> arguments,
     AstNode context, {
     required bool looksLikeAssetConsumer,
   }) {
     for (final argument in arguments) {
-      final provenance = evaluator.expressionProvenance(argument);
+      final expression = analyzerArgumentExpression(argument);
+      final provenance = evaluator.expressionProvenance(expression);
       if (!provenance.complete) {
-        _blockUnknownAssetArgument(argument, context);
+        _blockUnknownAssetArgument(expression, context);
         continue;
       }
       final affectedNodeIds = <String>{};
@@ -199,7 +211,7 @@ class _AssetVisitor extends RecursiveAstVisitor<void> {
         continue;
       }
       if (looksLikeAssetConsumer) {
-        _blockUnknownAssetArgument(argument, context);
+        _blockUnknownAssetArgument(expression, context);
       }
     }
   }

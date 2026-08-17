@@ -1,6 +1,9 @@
 # Analyzer API Guide for Contributors
 
-This guide documents the correct patterns for working with `package:analyzer` 8.4.1+ in flutter_pruner adapters. If you're building adapters that analyze Dart code semantically (like DartAdapter, future FontAdapter, RouteAdapter), read this first.
+This guide documents the correct patterns for working with the supported
+`package:analyzer` 12.1–14.x range in flutter_pruner adapters. If you're
+building adapters that analyze Dart code semantically (like DartAdapter,
+future FontAdapter, RouteAdapter), read this first.
 
 ---
 
@@ -17,7 +20,8 @@ This guide documents the correct patterns for working with `package:analyzer` 8.
 
 ## Element2/Fragment API Overview
 
-Analyzer 8.x uses the **Element2/Fragment API**. The navigation hierarchy is:
+The supported analyzer versions use the **Element2/Fragment API**. The
+navigation hierarchy is:
 
 ```
 Element (semantic info) → Fragment (source bridge) → LibraryFragment → Source → Uri
@@ -509,7 +513,7 @@ dart analyze test/fixtures/dart_declarations/
 
 ## References
 
-- **Analyzer package:** `~/.pub-cache/hosted/pub.dev/analyzer-8.4.1/`
+- **Analyzer package:** `~/.pub-cache/hosted/pub.dev/analyzer-<version>/`
 - **Element API:** `lib/dart/element/element.dart`
 - **AST API:** `lib/dart/ast/ast.dart`
 - **DartAdapter implementation:** `lib/src/adapters/dart/`
@@ -522,12 +526,12 @@ If you encounter analyzer API issues:
 
 1. Read the installed analyzer source directly:
    ```bash
-   cat ~/.pub-cache/hosted/pub.dev/analyzer-8.4.1/lib/dart/element/element.dart | less
+   less ~/.pub-cache/hosted/pub.dev/analyzer-*/lib/dart/element/element.dart
    ```
 
 2. Check analyzer CHANGELOG for breaking changes:
    ```bash
-   cat ~/.pub-cache/hosted/pub.dev/analyzer-8.4.1/CHANGELOG.md | less
+   less ~/.pub-cache/hosted/pub.dev/analyzer-*/CHANGELOG.md
    ```
 
 3. Look at DartAdapter implementation as reference:

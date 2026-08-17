@@ -7,6 +7,7 @@ import '../../core/graph/edge.dart';
 import '../../core/graph/evidence.dart';
 import '../../core/project/project_context.dart';
 import '../analyzer_adapter.dart';
+import 'analyzer_ast_compat.dart';
 import 'dart_ids.dart';
 import 'unresolved_reference_index.dart';
 
@@ -72,8 +73,7 @@ class ReferenceCollector extends RecursiveAstVisitor<void> {
 
     final parent = node.parent;
     final isNonRuntimeSyntax =
-        parent is LibraryIdentifier ||
-        parent is LibraryDirective ||
+        node.thisOrAncestorOfType<LibraryDirective>() != null ||
         node.thisOrAncestorOfType<CommentReference>() != null;
     if (isNonRuntimeSyntax) return;
 
@@ -82,7 +82,7 @@ class ReferenceCollector extends RecursiveAstVisitor<void> {
       final isHandledByParent =
           parent is NamedType ||
           parent is ConstructorName ||
-          (parent is Label && parent.parent is NamedExpression) ||
+          (parent is Label && isAnalyzerNamedArgument(parent.parent)) ||
           _isAssignmentTargetOwnedByParent(node);
       if (!node.inDeclarationContext() && !isHandledByParent) {
         _recordUnresolved(node);
@@ -564,7 +564,10 @@ class ReferenceCollector extends RecursiveAstVisitor<void> {
     }
 
     final argument = node.argumentList.arguments[boundary.argumentIndex];
-    final targets = _callbackValues.resolve(argument, project);
+    final targets = _callbackValues.resolve(
+      analyzerArgumentExpression(argument),
+      project,
+    );
     for (final nodeId in targets.nodeIds) {
       graph.addRoot(
         nodeId,
@@ -719,9 +722,6 @@ final class _CallbackValueResolver {
     int depth,
   ) {
     if (depth >= _maxDepth) return const _CallbackTargets.unresolved();
-    if (expression is NamedExpression) {
-      return _resolve(expression.expression, project, visiting, depth + 1);
-    }
     if (expression is ParenthesizedExpression) {
       return _resolve(expression.expression, project, visiting, depth + 1);
     }
@@ -898,17 +898,22 @@ final class _CallbackDefinitionCollector extends RecursiveAstVisitor<void> {
 
   void _recordArguments(
     ExecutableElement? executable,
-    NodeList<Expression> arguments,
+    Iterable<AstNode> arguments,
   ) {
     if (executable == null) return;
     final parameters = executable.formalParameters;
     var positionalIndex = 0;
     for (final argument in arguments) {
       FormalParameterElement? parameter;
-      Expression value = argument;
-      if (argument is NamedExpression) {
-        parameter = argument.element;
-        value = argument.expression;
+      final value = analyzerArgumentExpression(argument);
+      final namedArgument = analyzerNamedArgumentName(argument);
+      if (namedArgument != null) {
+        for (final candidate in parameters) {
+          if (candidate.isNamed && candidate.name == namedArgument) {
+            parameter = candidate;
+            break;
+          }
+        }
       } else {
         while (positionalIndex < parameters.length &&
             !parameters[positionalIndex].isPositional) {

@@ -3,6 +3,7 @@ import 'package:analyzer/dart/analysis/utilities.dart';
 import 'package:analyzer/dart/ast/ast.dart';
 import 'package:analyzer/error/error.dart';
 
+import '../adapters/dart/analyzer_ast_compat.dart';
 import '../core/project/project_context.dart';
 
 /// Removes specific declarations from Dart source files.
@@ -121,11 +122,11 @@ class DeclarationRemover {
         return declaration;
       }
       if (declaration is ClassDeclaration &&
-          declaration.name.lexeme == targetName) {
+          declaration.namePart.typeName.lexeme == targetName) {
         return declaration;
       }
       if (declaration is EnumDeclaration &&
-          declaration.name.lexeme == targetName) {
+          declaration.namePart.typeName.lexeme == targetName) {
         return declaration;
       }
       if (declaration is MixinDeclaration &&
@@ -137,7 +138,7 @@ class DeclarationRemover {
         return declaration;
       }
       if (declaration is ExtensionTypeDeclaration &&
-          declaration.name.lexeme == targetName) {
+          analyzerExtensionTypeName(declaration) == targetName) {
         return declaration;
       }
       if (declaration is GenericTypeAlias &&

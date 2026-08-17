@@ -139,16 +139,25 @@ class _FlutterGenFieldVisitor extends RecursiveAstVisitor<void> {
     final owner = node.thisOrAncestorOfType<ClassDeclaration>();
     if (owner != null && _isAssetContainer(owner)) {
       registerAccessor(
-        FlutterGenIndex._astKey(path, owner.name.lexeme, node.name.lexeme),
+        FlutterGenIndex._astKey(
+          path,
+          owner.namePart.typeName.lexeme,
+          node.name.lexeme,
+        ),
       );
     }
     final logicalKey = _assetLiteral(node.initializer);
     if (owner != null &&
         logicalKey != null &&
         inventory.assets.containsKey(logicalKey)) {
-      add(FlutterGenIndex._astKey(path, owner.name.lexeme, node.name.lexeme), [
-        logicalKey,
-      ]);
+      add(
+        FlutterGenIndex._astKey(
+          path,
+          owner.namePart.typeName.lexeme,
+          node.name.lexeme,
+        ),
+        [logicalKey],
+      );
     }
     super.visitVariableDeclaration(node);
   }
@@ -164,7 +173,7 @@ class _FlutterGenFieldVisitor extends RecursiveAstVisitor<void> {
     if (owner != null && _isAssetContainer(owner)) {
       final key = FlutterGenIndex._astKey(
         path,
-        owner.name.lexeme,
+        owner.namePart.typeName.lexeme,
         node.name.lexeme,
       );
       registerAccessor(key);
@@ -191,7 +200,7 @@ class _FlutterGenFieldVisitor extends RecursiveAstVisitor<void> {
   }
 
   bool _isAssetContainer(ClassDeclaration owner) =>
-      owner.name.lexeme.contains('Assets');
+      owner.namePart.typeName.lexeme.contains('Assets');
 }
 
 class _AssetLiteralCollector extends RecursiveAstVisitor<void> {
@@ -246,7 +255,11 @@ class _FlutterGenCollectionVisitor extends RecursiveAstVisitor<void> {
     if (collector.logicalKeys.isNotEmpty) {
       changed =
           add(
-            FlutterGenIndex._astKey(path, owner.name.lexeme, node.name.lexeme),
+            FlutterGenIndex._astKey(
+              path,
+              owner.namePart.typeName.lexeme,
+              node.name.lexeme,
+            ),
             collector.logicalKeys,
           ) ||
           changed;
