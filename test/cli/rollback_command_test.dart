@@ -349,6 +349,7 @@ void main() {
         if (project.existsSync()) project.deleteSync(recursive: true);
       }
     },
+    timeout: const Timeout(Duration(minutes: 1)),
   );
 
   test('rollback falls back to the legacy project quarantine', () async {

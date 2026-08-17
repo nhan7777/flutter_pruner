@@ -124,72 +124,15 @@ void main() {
     },
   );
 
-  test('clean refuses pending and recovery-required transactions', () async {
-    final project = Directory.systemTemp.createTempSync(
-      'quarantine_command_test_',
-    );
-    try {
-      File(
-        p.join(project.path, 'pubspec.yaml'),
-      ).writeAsStringSync('name: quarantine_test\n');
-      final manager = QuarantineManager(project);
+  test(
+    'clean refuses a pending transaction',
+    () => _expectCleanRefusal(recoveryRequired: false),
+  );
 
-      for (final recoveryRequired in [false, true]) {
-        final suffix = recoveryRequired ? 'recovery' : 'pending';
-        final runId = '$suffix-run';
-        final caseId = '$suffix-case';
-        final transactionId = '$suffix-transaction';
-        final source = File(p.join(project.path, 'lib', '$suffix.dart'));
-        source.parent.createSync(recursive: true);
-        source.writeAsStringSync('void $suffix() {}\n');
-        final quarantine = await manager.createCaseQuarantine(
-          runId: runId,
-          verificationPolicyHash: 'test-policy',
-        );
-        await manager.beginTransaction(
-          quarantineDir: quarantine,
-          transactionId: transactionId,
-          round: 1,
-          componentId: suffix,
-          findingIds: ['$suffix-finding'],
-          caseIds: [caseId],
-        );
-        await manager.beginCase(
-          quarantineDir: quarantine,
-          caseId: caseId,
-          findingId: '$suffix-finding',
-          file: source,
-          operationType: QuarantineOperationType.declaration,
-          transactionId: transactionId,
-        );
-        if (recoveryRequired) {
-          await manager.requireTransactionRecovery(
-            quarantineDir: quarantine,
-            transactionId: transactionId,
-            reason: 'injected interruption',
-          );
-        }
-
-        final result = await Process.run(Platform.resolvedExecutable, [
-          p.join(Directory.current.path, 'bin', 'flutter_pruner.dart'),
-          'quarantine',
-          'clean',
-          '--project',
-          project.path,
-          runId,
-        ]);
-
-        expect(result.exitCode, 1, reason: suffix);
-        expect(
-          result.stderr,
-          contains('active, recovery-required, or unrolled'),
-        );
-        expect(quarantine.existsSync(), isTrue);
-      }
-    } finally {
-      if (project.existsSync()) project.deleteSync(recursive: true);
-    }
-  });
+  test(
+    'clean refuses a recovery-required transaction',
+    () => _expectCleanRefusal(recoveryRequired: true),
+  );
 
   test(
     'clean refuses a committed transaction that still owns rollback',
@@ -338,4 +281,65 @@ void main() {
       }
     },
   );
+}
+
+Future<void> _expectCleanRefusal({required bool recoveryRequired}) async {
+  final project = Directory.systemTemp.createTempSync(
+    'quarantine_command_test_',
+  );
+  try {
+    File(
+      p.join(project.path, 'pubspec.yaml'),
+    ).writeAsStringSync('name: quarantine_test\n');
+    final manager = QuarantineManager(project);
+    final suffix = recoveryRequired ? 'recovery' : 'pending';
+    final runId = '$suffix-run';
+    final caseId = '$suffix-case';
+    final transactionId = '$suffix-transaction';
+    final source = File(p.join(project.path, 'lib', '$suffix.dart'));
+    source.parent.createSync(recursive: true);
+    source.writeAsStringSync('void $suffix() {}\n');
+    final quarantine = await manager.createCaseQuarantine(
+      runId: runId,
+      verificationPolicyHash: 'test-policy',
+    );
+    await manager.beginTransaction(
+      quarantineDir: quarantine,
+      transactionId: transactionId,
+      round: 1,
+      componentId: suffix,
+      findingIds: ['$suffix-finding'],
+      caseIds: [caseId],
+    );
+    await manager.beginCase(
+      quarantineDir: quarantine,
+      caseId: caseId,
+      findingId: '$suffix-finding',
+      file: source,
+      operationType: QuarantineOperationType.declaration,
+      transactionId: transactionId,
+    );
+    if (recoveryRequired) {
+      await manager.requireTransactionRecovery(
+        quarantineDir: quarantine,
+        transactionId: transactionId,
+        reason: 'injected interruption',
+      );
+    }
+
+    final result = await Process.run(Platform.resolvedExecutable, [
+      p.join(Directory.current.path, 'bin', 'flutter_pruner.dart'),
+      'quarantine',
+      'clean',
+      '--project',
+      project.path,
+      runId,
+    ]);
+
+    expect(result.exitCode, 1, reason: suffix);
+    expect(result.stderr, contains('active, recovery-required, or unrolled'));
+    expect(quarantine.existsSync(), isTrue);
+  } finally {
+    if (project.existsSync()) project.deleteSync(recursive: true);
+  }
 }

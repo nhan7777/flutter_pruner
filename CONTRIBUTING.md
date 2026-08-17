@@ -127,6 +127,10 @@ Only changes to Flutter Pruner's built-ins belong in the `builtIn` initializer.
 
 ## Code style
 
+The canonical repository formatter is Dart 3.13.0, pinned by CI so a future
+stable formatter release cannot create unrelated churn. Dart 3.9 remains the
+supported runtime floor and is tested separately.
+
 ```bash
 dart format --output=none --set-exit-if-changed .
 dart analyze         # must be clean; --fatal-infos in CI
@@ -217,10 +221,11 @@ dart analyze
 dart test
 ```
 
-CI runs format/analyze, package dry-run, a CLI smoke test, and the full suite on
-the Dart 3.9 floor and `stable` Linux, plus `stable` macOS and Windows. The
-matrix is configured to catch `package:analyzer` and platform-process breakage;
-do not describe a platform as verified until its hosted job has executed.
+CI runs format/analyze with the pinned canonical SDK, package dry-run, a CLI
+smoke test, and the full suite on the Dart 3.9 floor and `stable` Linux, plus
+`stable` macOS and Windows. The matrix is configured to catch
+`package:analyzer` and platform-process breakage; do not describe a platform as
+verified until its hosted job has executed.
 
 Review looks for:
 

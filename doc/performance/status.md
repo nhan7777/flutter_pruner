@@ -38,6 +38,9 @@ the fail-closed safety model and are covered by regression tests.
 - Benchmark output redacts the analyzed project path by default. Contributors
   must opt in with `--include-project-path` for local-only troubleshooting and
   must not publish that output unchanged.
+- JSON v3 report construction and serialization are measured separately from
+  analysis. `--max-report-overhead-percent` makes the median overhead ceiling an
+  executable release gate.
 - Concurrent lint diagnostics: the lint-inclusive `dart analyze` process starts
   before semantic graph construction and is awaited before diagnostic nodes are
   committed. This preserves the fail-closed lint contract while overlapping

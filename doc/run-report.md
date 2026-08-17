@@ -249,3 +249,6 @@ jq -e '.summary.safe == 0 and .summary.high == 0' path/to/app/.flutter_pruner/re
 
 V2 preserves the historical selectors and ambiguous `totalSourceBytes` only for
 compatibility. New integrations should use v3 typed measurements.
+
+See the [report schema migration policy](report-schema-migration.md) for the
+additive-change rules, compatibility window, and removal requirements.

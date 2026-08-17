@@ -4,8 +4,12 @@ import 'dart:io';
 import 'package:args/args.dart';
 import 'package:flutter_pruner/src/adapters/dart/dart_adapter_profile.dart';
 import 'package:flutter_pruner/src/analysis/project_analyzer.dart';
+import 'package:flutter_pruner/src/cli/formatters/json_formatter.dart';
 import 'package:flutter_pruner/src/core/graph/build_condition.dart';
 import 'package:flutter_pruner/src/core/project/project_context.dart';
+import 'package:flutter_pruner/src/reporting/run_recorder.dart';
+import 'package:flutter_pruner/src/reporting/run_report.dart';
+import 'package:flutter_pruner/src/version.dart';
 import 'package:path/path.dart' as p;
 import 'package:yaml/yaml.dart';
 
@@ -17,6 +21,7 @@ Future<void> main(List<String> arguments) async {
     ..addFlag('ignore-project-config', negatable: false)
     ..addFlag('include-project-path', negatable: false)
     ..addFlag('profile', negatable: false)
+    ..addOption('max-report-overhead-percent')
     ..addMultiOption('only');
   final options = parser.parse(arguments);
   final iterations = int.parse(options.option('iterations')!);
@@ -34,6 +39,16 @@ Future<void> main(List<String> arguments) async {
   final onlyValues = options.multiOption('only');
   final only = onlyValues.isEmpty ? null : onlyValues.toSet();
   final profile = options.flag('profile');
+  final maxReportOverheadPercent = switch (options.option(
+    'max-report-overhead-percent',
+  )) {
+    final String value => double.parse(value),
+    null => null,
+  };
+  if (maxReportOverheadPercent != null &&
+      (!maxReportOverheadPercent.isFinite || maxReportOverheadPercent < 0)) {
+    throw ArgumentError('max report overhead percent must be non-negative');
+  }
 
   for (var index = 0; index < warmup; index++) {
     await ProjectAnalyzer(project: project, only: only).analyze();
@@ -42,14 +57,41 @@ Future<void> main(List<String> arguments) async {
   final samples = <Map<String, Object?>>[];
   for (var index = 0; index < iterations; index++) {
     final dartProfile = profile ? DartAdapterProfile() : null;
-    final snapshot = await ProjectAnalyzer(
+    final analyzer = ProjectAnalyzer(
       project: project,
       only: only,
       dartProfile: dartProfile,
-    ).analyze();
+    );
+    final snapshot = await analyzer.analyze();
+    final reportStopwatch = Stopwatch()..start();
+    final recorder = RunRecorder(
+      command: RunCommand.scan,
+      requestedAdapters: snapshot.adapterIds,
+      toolVersion: packageVersion,
+    )..registerAdapterReportDefinitions(analyzer.adapterReportDefinitions);
+    recorder.addAnalysisPass(
+      snapshot.toPassReport(
+        id: 'analysis-001',
+        purpose: AnalysisPassPurpose.initial,
+      ),
+    );
+    final report = recorder.finish(
+      project: project,
+      status: RunStatus.completed,
+      exitCode: 0,
+      findings: snapshot.findings,
+    );
+    final renderedReport = const JsonFormatter().format(report);
+    reportStopwatch.stop();
+    final reportOverheadPercent = snapshot.elapsedMicros == 0
+        ? 0.0
+        : reportStopwatch.elapsedMicroseconds * 100 / snapshot.elapsedMicros;
     samples.add({
       'elapsedMicros': snapshot.elapsedMicros,
       'findingElapsedMicros': snapshot.findingElapsedMicros,
+      'reportElapsedMicros': reportStopwatch.elapsedMicroseconds,
+      'reportBytes': utf8.encode(renderedReport).length,
+      'reportOverheadPercent': reportOverheadPercent,
       'nodes': snapshot.graph.nodeCount,
       'edges': snapshot.graph.edgeCount,
       'blockers': snapshot.graph.blockers.length,
@@ -71,6 +113,13 @@ Future<void> main(List<String> arguments) async {
 
   final elapsed =
       samples.map((sample) => sample['elapsedMicros']! as int).toList()..sort();
+  final reportOverhead =
+      samples
+          .map((sample) => sample['reportOverheadPercent']! as double)
+          .toList()
+        ..sort();
+  final medianReportOverheadPercent =
+      reportOverhead[reportOverhead.length ~/ 2];
   stdout.writeln(
     const JsonEncoder.withIndent('  ').convert({
       'schemaVersion': 1,
@@ -85,9 +134,19 @@ Future<void> main(List<String> arguments) async {
       'medianElapsedMicros': elapsed[elapsed.length ~/ 2],
       'minElapsedMicros': elapsed.first,
       'maxElapsedMicros': elapsed.last,
+      'medianReportOverheadPercent': medianReportOverheadPercent,
+      'maxReportOverheadPercent': reportOverhead.last,
       'samples': samples,
     }),
   );
+  if (maxReportOverheadPercent != null &&
+      medianReportOverheadPercent > maxReportOverheadPercent) {
+    stderr.writeln(
+      'Report overhead ${medianReportOverheadPercent.toStringAsFixed(2)}% '
+      'exceeds ${maxReportOverheadPercent.toStringAsFixed(2)}%.',
+    );
+    exitCode = 2;
+  }
 }
 
 Future<ProjectContext> _loadProject(

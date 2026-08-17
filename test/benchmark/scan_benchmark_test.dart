@@ -48,6 +48,8 @@ environment:
           '0',
           '--iterations',
           '1',
+          '--max-report-overhead-percent',
+          '100',
         ],
         workingDirectory: Directory.current.path,
         stdoutEncoding: utf8,
@@ -61,6 +63,11 @@ environment:
           jsonDecode(result.stdout as String) as Map<String, Object?>;
       expect(output['project'], '<redacted>');
       expect(output['projectPathIncluded'], isFalse);
+      expect(output['medianReportOverheadPercent'], isA<num>());
+      final sample = (output['samples'] as List).single as Map;
+      expect(sample['reportElapsedMicros'], isA<int>());
+      expect(sample['reportBytes'], greaterThan(0));
+      expect(sample['reportOverheadPercent'], isA<num>());
     } finally {
       project.deleteSync(recursive: true);
     }

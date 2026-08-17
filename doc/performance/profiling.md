@@ -38,6 +38,17 @@ Profiling adds Stopwatch bookkeeping and is intended for bottleneck diagnosis,
 not release thresholds. Use an ordinary non-profiled run for before/after wall
 time comparisons.
 
+Every ordinary benchmark sample also measures JSON v3 report construction and
+serialization as `reportElapsedMicros`, `reportBytes`, and
+`reportOverheadPercent`. A release gate can enforce a median ceiling:
+
+```bash
+dart run benchmark/scan_benchmark.dart \
+  --project /tmp/flutter_pruner_perf_small \
+  --iterations 3 \
+  --max-report-overhead-percent 10
+```
+
 Generate a synthetic profile outside the repository, then benchmark it:
 
 ```bash

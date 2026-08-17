@@ -12,11 +12,20 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Made HIGH classification check its manual-risk allowlist explicitly and
   strengthened duplicate planning tests so review-only findings cannot enter a
   removal plan even if an upstream tier is malformed.
+- Pinned the canonical formatter/analyzer CI job to Dart 3.13.0 while retaining
+  moving-stable compatibility tests, and gave subprocess-heavy recovery tests
+  enough isolation or time to remain reliable under concurrent suite load.
+
+### Added
+
+- Added a redacted three-project scan/dry-run safety replay and an executable
+  median JSON-report overhead gate for release readiness.
 
 ### Documentation
 
 - Added the version 1 project-configuration schema, coverage assertions, and
   mandatory verification contract.
+- Added report-schema migration and V1 release-readiness policies.
 
 ## [1.1.0] - 2026-08-17
 

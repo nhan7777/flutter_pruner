@@ -100,7 +100,7 @@ filesystem boundaries.
 
 ### Release and operations
 
-- [ ] Document a stable migration policy for future report schemas
+- [x] Document a stable migration policy for future report schemas
 - [ ] Add release automation that verifies version, changelog, tag, archive,
       and hosted CI state without publishing automatically
 - [x] Add reproducible performance benchmarks using public synthetic fixtures

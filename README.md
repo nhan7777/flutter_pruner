@@ -328,6 +328,8 @@ mode values are `application`, `package` and `package-internal`; the old
 | [Confidence model](doc/confidence-model.md) | Safety gates and confidence tiers |
 | [Project configuration](doc/flutter_pruner.yaml.md) | Config schema, coverage and verification policy |
 | [Run reports](doc/run-report.md) | JSON v3, HTML and CI selectors |
+| [Report schema migrations](doc/report-schema-migration.md) | Compatibility and deprecation policy |
+| [Release readiness](doc/release-readiness.md) | Replay, real-project and performance gates |
 | [Performance profiling](doc/performance/profiling.md) | Synthetic fixtures, benchmarks and privacy rules |
 | [Verified Flutter facts](doc/flutter-facts.md) | Framework assumptions and primary sources |
 | [Contributor guide](CONTRIBUTING.md) | Development setup and pull requests |
