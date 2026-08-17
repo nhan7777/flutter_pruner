@@ -1,18 +1,121 @@
 # Flutter Pruner
 
-> Find dead Dart code and unused Flutter assets with semantic reachability,
-> then remove only what the configured safety policy allows.
+<p align="center">
+  <img
+    src="doc/images/flutter_pruner_banner.png"
+    alt="Flutter Pruner — semantic cleanup for Flutter and Dart projects"
+    width="100%"
+  >
+</p>
 
-[![CI](https://github.com/nhan7777/flutter_pruner/actions/workflows/ci.yml/badge.svg)](https://github.com/nhan7777/flutter_pruner/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+<p align="center">
+  <a href="https://pub.dev/packages/flutter_pruner"><img src="https://img.shields.io/pub/v/flutter_pruner.svg?logo=dart&amp;logoColor=white" alt="pub package"></a>
+  <a href="https://pub.dev/packages/flutter_pruner/score"><img src="https://img.shields.io/pub/points/flutter_pruner?logo=dart&amp;logoColor=white" alt="pub points"></a>
+  <a href="https://pub.dev/packages/flutter_pruner"><img src="https://img.shields.io/pub/likes/flutter_pruner?logo=dart&amp;logoColor=white" alt="pub likes"></a>
+</p>
 
-Flutter Pruner is a cleanup CLI for Flutter and Dart projects. It connects Dart
-declarations, libraries and assets in one graph, classifies every finding by
-confidence, and provides an apply workflow with byte snapshots and verified
-rollback.
+<p align="center">
+  <a href="https://github.com/nhan7777/flutter_pruner/actions/workflows/ci.yml"><img src="https://github.com/nhan7777/flutter_pruner/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://pub.dev/publishers/nhanlee.dev"><img src="https://img.shields.io/badge/publisher-nhanlee.dev-0175C2?logo=dart&amp;logoColor=white" alt="verified publisher: nhanlee.dev"></a>
+  <a href="https://dart.dev/"><img src="https://img.shields.io/badge/Dart-%5E3.9.0-0175C2?logo=dart&amp;logoColor=white" alt="Dart SDK 3.9 or newer"></a>
+  <a href="https://github.com/nhan7777/flutter_pruner/actions/workflows/ci.yml"><img src="https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-5C6BC0" alt="tested on Linux, macOS and Windows"></a>
+  <a href="analysis_options.yaml"><img src="https://img.shields.io/badge/analysis-strict-0175C2?logo=dart&amp;logoColor=white" alt="strict Dart analysis"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/nhan7777/flutter_pruner" alt="License"></a>
+</p>
 
-Version `1.0.0` establishes the public API compatibility baseline. Start from a
-clean Git worktree and review the dry-run before using it on production code.
+<p align="center">
+  <a href="https://github.com/nhan7777/flutter_pruner/stargazers"><img src="https://img.shields.io/github/stars/nhan7777/flutter_pruner?logo=github" alt="GitHub stars"></a>
+  <a href="https://github.com/nhan7777/flutter_pruner/issues"><img src="https://img.shields.io/github/issues/nhan7777/flutter_pruner?logo=github" alt="open GitHub issues"></a>
+  <a href="https://github.com/nhan7777/flutter_pruner/commits/main"><img src="https://img.shields.io/github/last-commit/nhan7777/flutter_pruner?logo=github" alt="last commit"></a>
+</p>
+
+<p align="center">
+  <strong>Safety-first semantic cleanup for Dart and Flutter.</strong><br>
+  Find unreachable Dart declarations, unused Flutter assets and byte-identical
+  duplicates, then apply only what the configured safety policy allows.
+</p>
+
+<p align="center">
+  <a href="#quick-start">Quick start</a> ·
+  <a href="#what-it-finds">What it finds</a> ·
+  <a href="#safety-model">Safety model</a> ·
+  <a href="#reports">Reports</a> ·
+  <a href="#documentation-and-support">Documentation</a>
+</p>
+
+Flutter Pruner connects Dart declarations, libraries and assets in one semantic
+graph. Every finding receives an evidence-backed confidence tier, while the
+apply workflow adds planning, byte snapshots, quarantine and verified rollback.
+
+> **Safety first:** start from a clean Git worktree. `scan` and
+> `apply --dry-run` do not change project sources or assets; `scan` does write a
+> report under `.flutter_pruner/`. Only run `apply` after reviewing its plan and
+> the [documented boundaries](#important-boundaries).
+
+## Quick start
+
+Flutter Pruner requires Dart SDK 3.9 or newer.
+
+### Install the CLI
+
+```bash
+dart pub global activate flutter_pruner
+```
+
+If `flutter_pruner` is not found, add Pub's executable directory to your
+[`PATH`](https://dart.dev/tools/pub/cmd/pub-global#running-a-script-from-your-path).
+In environments where a global executable is unavailable, such as CI, use:
+
+```bash
+dart pub global run flutter_pruner:flutter_pruner <command>
+```
+
+### Run the safe workflow
+
+From the root of the Flutter or Dart project you want to analyze:
+
+```bash
+# 1. Detect the project and create .flutter_pruner/config.yaml
+flutter_pruner init
+
+# 2. Analyze without changing project sources or assets
+flutter_pruner scan
+
+# 3. Preview the eligible plan without applying it
+flutter_pruner apply --dry-run
+
+# 4. Apply only the findings authorized by the configured mode
+flutter_pruner apply
+```
+
+| Step | Purpose | Project sources/assets |
+|---|---|---|
+| `init` | Declare project type, targets, entrypoints and verification | Unchanged |
+| `scan` | Build the graph, classify findings and save a report | Unchanged |
+| `apply --dry-run` | Validate and preview the eligible plan | Unchanged |
+| `apply` | Quarantine originals, mutate, rescan and verify | May change |
+
+The `init` wizard never marks target coverage complete by inference; completeness
+is an explicit project-owner assertion. Reusable packages default to a
+non-actionable open-world mode, so their dry-run and apply commands stay blocked
+until an appropriate local boundary is explicitly configured.
+
+To work from another directory, add `--project path/to/project` to any command.
+
+Upgrade or uninstall the global executable with:
+
+```bash
+dart pub global activate flutter_pruner
+dart pub global deactivate flutter_pruner
+```
+
+## What it finds
+
+| Area | Detection | Apply policy |
+|---|---|---|
+| Dart | Unreachable top-level declarations and empty libraries | Confidence and mode controlled |
+| Assets | Exact references and assets unreachable from live Dart code | Confidence and mode controlled |
+| Duplicates | Byte-identical files grouped with SHA-256 | Review only |
 
 ## Why Flutter Pruner
 
@@ -30,99 +133,9 @@ clean Git worktree and review the dry-run before using it on production code.
 - **Audit-ready output.** Completed scans and handled apply outcomes save a
   structured report; HTML reports are self-contained and work offline.
 
-Flutter Pruner currently analyzes:
+## Safety model
 
-| Area | What it finds | Apply support |
-|---|---|---|
-| Dart | Unreachable top-level declarations and empty libraries | Policy-controlled |
-| Assets | Exact asset references and assets unreachable from live Dart code | Policy-controlled |
-| Duplicates | Byte-identical files using SHA-256 | Review only |
-
-## Installation
-
-Flutter Pruner requires Dart SDK 3.9 or newer.
-
-### macOS
-
-```bash
-dart pub global activate flutter_pruner
-```
-
-Add Pub's executable directory to `~/.zshrc`:
-
-```bash
-export PATH="$HOME/.pub-cache/bin:$PATH"
-```
-
-Then reload the shell with `source ~/.zshrc`.
-
-### Ubuntu
-
-```bash
-dart pub global activate flutter_pruner
-```
-
-Add Pub's executable directory to `~/.bashrc`:
-
-```bash
-export PATH="$HOME/.pub-cache/bin:$PATH"
-```
-
-Then reload the shell with `source ~/.bashrc`.
-
-### Windows
-
-Run in PowerShell:
-
-```powershell
-dart pub global activate flutter_pruner
-```
-
-Open **Environment Variables**, edit the user `Path`, and add:
-
-```text
-%LOCALAPPDATA%\Pub\Cache\bin
-```
-
-### Upgrade and uninstall
-
-Upgrade:
-
-```bash
-dart pub global activate flutter_pruner
-```
-
-Uninstall:
-
-```bash
-dart pub global deactivate flutter_pruner
-```
-
-## Quick start
-
-Run the workflow from your Flutter or Dart project root:
-
-```bash
-# 1. Detect the project and create .flutter_pruner/config.yaml
-flutter_pruner init
-
-# 2. Analyze without changing source files or assets
-flutter_pruner scan
-
-# 3. For actionable application/package-internal configs, preview the plan
-flutter_pruner apply --dry-run
-
-# 4. Apply findings authorized by the configured mode
-flutter_pruner apply
-```
-
-The `init` wizard asks about project type, build targets, public entrypoints and
-verification commands. It never marks target coverage complete by inference;
-that is an explicit project-owner assertion.
-
-To work from another directory, add `--project path/to/project` to any command.
-
-## Choose the right analysis mode
+### Choose the right analysis mode
 
 The mode defines the analysis boundary and apply policy. It is not a shortcut
 for increasing confidence.
@@ -160,7 +173,7 @@ A mutation containing eligible `HIGH` findings asks for `[y/N]`; CI can accept
 that one specific risk with `flutter_pruner apply --yes`. The flag does not
 bypass coverage, planning, verification or quarantine.
 
-## Understand the confidence tiers
+### Understand the confidence tiers
 
 | Tier | Meaning |
 |---|---|
@@ -306,7 +319,7 @@ When upgrading older configs, remove `analysis.root_coverage`. The only accepted
 mode values are `application`, `package` and `package-internal`; the old
 `workspace`, `--safe` and `--high` interfaces are intentionally rejected.
 
-## Documentation
+## Documentation and support
 
 | Document | Start here for |
 |---|---|
@@ -321,6 +334,11 @@ mode values are `application`, `package` and `package-internal`; the old
 See [ROADMAP.md](ROADMAP.md) for planned work. Adapters are the main extension
 point; the adapter guide includes a
 [copyable template](doc/contributing/adapter-template.dart).
+
+Found a bug or have a focused feature request? Open an
+[issue](https://github.com/nhan7777/flutter_pruner/issues). To contribute code,
+start with [CONTRIBUTING.md](CONTRIBUTING.md) and include regression evidence for
+changes that affect confidence, mutation or recovery behavior.
 
 ## License
 
