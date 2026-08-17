@@ -165,6 +165,35 @@ void main() {
         forward.units.map((unit) => unit.findings.single.node.id),
       );
     });
+
+    test(
+      'duplicate groups cannot enter a plan even with a forged SAFE tier',
+      () {
+        final duplicate = Finding(
+          ruleId: 'PRN-DUP-001',
+          node: GraphNode(
+            id: 'duplicate:app:abc',
+            kind: NodeKind.duplicateGroup,
+            origin: Uri.file('/project/assets/a.png'),
+          ),
+          confidence: Confidence.safe,
+          title: 'duplicate',
+          predicates: predicates,
+          proposedAction: 'Remove duplicate',
+          reportingAdapterId: 'duplicates',
+        );
+        final graph = ReachabilityGraph()..addNode(duplicate.node);
+
+        final plan = const RemovalPlanner().build(
+          findings: [duplicate],
+          graph: graph,
+          project: _project,
+        );
+
+        expect(plan.units, isEmpty);
+        expect(plan.blocked, isEmpty);
+      },
+    );
   });
 }
 

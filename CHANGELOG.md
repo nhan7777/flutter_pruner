@@ -7,6 +7,17 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+### Changed
+
+- Made HIGH classification check its manual-risk allowlist explicitly and
+  strengthened duplicate planning tests so review-only findings cannot enter a
+  removal plan even if an upstream tier is malformed.
+
+### Documentation
+
+- Added the version 1 project-configuration schema, coverage assertions, and
+  mandatory verification contract.
+
 ## [1.1.0] - 2026-08-17
 
 ### Added

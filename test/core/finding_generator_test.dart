@@ -802,7 +802,11 @@ void main() {
       expect(findings.single.proposedAction, isNull);
       expect(
         findings.single.classificationReasons,
-        contains(ClassificationReason.duplicateCanonicalChoice),
+        containsAll([
+          ClassificationReason.duplicateCanonicalChoice,
+          ClassificationReason.unsupportedAction,
+          ClassificationReason.nonDeterministicInverse,
+        ]),
       );
     });
 

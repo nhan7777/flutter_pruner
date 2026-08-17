@@ -97,13 +97,18 @@ void main() {
       );
     });
 
-    test('exactly one allowlisted manual risk produces HIGH', () {
-      expect(
-        const ConfidenceClassifier().classify(
-          assessment(risks: {ManualRisk.externalConsumersNotScanned}),
-        ),
-        Confidence.high,
-      );
+    test('exactly one explicitly allowlisted manual risk produces HIGH', () {
+      const allowlisted = {
+        ManualRisk.externalConsumersNotScanned,
+        ManualRisk.broadRemovalScope,
+      };
+      for (final risk in allowlisted) {
+        expect(
+          const ConfidenceClassifier().classify(assessment(risks: {risk})),
+          Confidence.high,
+          reason: risk.code,
+        );
+      }
     });
 
     test('two simultaneous manual risks produce REVIEW', () {
