@@ -2,7 +2,7 @@ name: flutter_pruner
 description: >-
   Safety-first semantic auditor for Dart and Flutter. Finds unreachable
   declarations, unused assets, and duplicate files with reversible cleanup.
-version: 1.0.1
+version: 1.1.0
 repository: https://github.com/nhan7777/flutter_pruner
 issue_tracker: https://github.com/nhan7777/flutter_pruner/issues
 

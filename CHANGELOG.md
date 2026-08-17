@@ -7,6 +7,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-08-17
+
 ### Added
 
 - Added deterministic synthetic performance-fixture generation, repeatable JSON
@@ -128,6 +130,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Custom runtime callback and asset registries require explicit modeling or
   project policy.
 
-[Unreleased]: https://github.com/nhan7777/flutter_pruner/compare/v1.0.1...main
+[Unreleased]: https://github.com/nhan7777/flutter_pruner/compare/v1.1.0...main
+[1.1.0]: https://github.com/nhan7777/flutter_pruner/compare/v1.0.1...v1.1.0
 [1.0.1]: https://github.com/nhan7777/flutter_pruner/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/nhan7777/flutter_pruner/tree/v1.0.0
