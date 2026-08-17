@@ -26,7 +26,7 @@ environment:
     final project = await ProjectContext.load(root);
     final workspace = DartAnalysisWorkspace(project);
     final path = workspace.dartFiles.singleWhere(
-      (path) => path.endsWith('/lib/main.dart'),
+      (path) => p.equals(path, mainFile.absolute.path),
     );
 
     final first = await workspace.resolveLibrary(path);
