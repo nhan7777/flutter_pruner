@@ -306,6 +306,13 @@ class ReachabilityGraph {
         .toList(growable: false);
   }
 
+  /// Whether a recorded [blocker] addresses at least one registered node.
+  ///
+  /// Uses the blocker-to-node index maintained during graph construction, so
+  /// report projections do not need to rescan the complete node inventory.
+  bool blockerAddressesAnyNode(Blocker blocker) =>
+      _nodesByBlocker[blocker]?.isNotEmpty ?? false;
+
   /// Edges leaving [nodeId].
   Iterable<GraphEdge> outgoingFrom(String nodeId) =>
       UnmodifiableSetView(_outgoing[nodeId] ?? const {});

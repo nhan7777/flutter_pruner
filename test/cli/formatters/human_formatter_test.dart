@@ -291,6 +291,27 @@ void main() {
       expect(_stripAnsi(output), isNot(contains('No unused candidates found')));
     });
 
+    test('warns when blockers cannot attach to an empty inventory', () {
+      final output = _stripAnsi(
+        const HumanFormatter().format(
+          _report(
+            const [],
+            blockerStatistics: BlockerStatistics(
+              recorded: 1,
+              activeUnique: 0,
+              unboundUnique: 1,
+              affectedFindings: 0,
+              byProducer: {},
+            ),
+          ),
+        ),
+      );
+
+      expect(output, contains('⚠ SCAN COMPLETED WITH WARNINGS · 0 findings'));
+      expect(output, contains('could not attach to any inventoried node'));
+      expect(output, isNot(contains('No unused candidates found')));
+    });
+
     test('warns and suppresses clean guidance for dangling roots', () {
       final output = _stripAnsi(
         const HumanFormatter().format(_report(const [], danglingRoots: 1)),

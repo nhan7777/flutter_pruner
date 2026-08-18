@@ -70,6 +70,9 @@ class AnalysisSnapshot {
         ifAbsent: () => 1,
       );
     }
+    final unboundBlockers = graph.blockers
+        .where((blocker) => !graph.blockerAddressesAnyNode(blocker))
+        .toList(growable: false);
 
     final measurements = <RunMeasurement>[];
     final reportingAdapters = adapterRuns
@@ -191,9 +194,11 @@ class AnalysisSnapshot {
         byNodeKind: findingStatistics.byNodeKind,
         byClassificationReason: findingStatistics.byClassificationReason,
       ),
+      unboundBlockers: unboundBlockers,
       blockerStatistics: BlockerStatistics(
         recorded: graph.blockers.length,
         activeUnique: activeBlockers.length,
+        unboundUnique: unboundBlockers.length,
         affectedFindings: affectedFindingIds.length,
         byProducer: Map.unmodifiable(blockersByProducer),
       ),

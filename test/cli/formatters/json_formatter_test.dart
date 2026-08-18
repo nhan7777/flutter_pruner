@@ -165,11 +165,44 @@ void main() {
       hasLength(1),
     );
   });
+
+  test('v3 preserves an unbound inventory blocker with zero findings', () {
+    final blocker = Blocker(
+      producer: 'l10n',
+      reason: 'duplicate top-level ARB key prevents inventory construction',
+      location: 'lib/l10n/app_en.arb:4:3',
+      affectedNamespace: 'l10n:test:',
+    );
+    final output =
+        jsonDecode(
+              const JsonFormatter().format(
+                _report(zeroFindings: true, recordedBlockers: [blocker]),
+              ),
+            )
+            as Map;
+
+    expect(output['findings'], isEmpty);
+    final blockers = output['blockers'] as Map;
+    expect(blockers, hasLength(1));
+    expect(
+      (blockers.values.single as Map)['reason'],
+      'duplicate top-level ARB key prevents inventory construction',
+    );
+    expect((output['statistics'] as Map)['blockers'], {
+      'recorded': 1,
+      'activeUnique': 0,
+      'unboundUnique': 1,
+      'affectedFindings': 0,
+      'byProducer': <String, int>{},
+    });
+  });
 }
 
 RunReport _report({
   bool withApplyOutcome = false,
+  bool zeroFindings = false,
   List<Blocker> blockers = const [],
+  List<Blocker> recordedBlockers = const [],
 }) {
   final finding = Finding(
     ruleId: 'PRN-DUP-001',
@@ -198,7 +231,9 @@ RunReport _report({
     reportingAdapterId: 'duplicates',
     sourceBytes: 4,
   );
-  final statistics = FindingStatistics.fromFindings([finding]);
+  final statistics = FindingStatistics.fromFindings(
+    zeroFindings ? const [] : [finding],
+  );
   final pass = AnalysisPassReport(
     id: 'analysis-001',
     purpose: AnalysisPassPurpose.initial,
@@ -206,7 +241,7 @@ RunReport _report({
     nodeCount: 1,
     edgeCount: 0,
     rootCount: 0,
-    recordedBlockerCount: 0,
+    recordedBlockerCount: recordedBlockers.length,
     danglingEdgeCount: 0,
     danglingRootCount: 2,
     adapterRuns: const [
@@ -222,9 +257,11 @@ RunReport _report({
       ),
     ],
     findingStatistics: statistics,
+    unboundBlockers: recordedBlockers,
     blockerStatistics: BlockerStatistics(
-      recorded: 0,
+      recorded: recordedBlockers.length,
       activeUnique: 0,
+      unboundUnique: zeroFindings ? recordedBlockers.length : 0,
       affectedFindings: 0,
       byProducer: {},
     ),
@@ -267,7 +304,7 @@ RunReport _report({
     ]),
     rootCoverage: RootCoverage.applicationApi(),
     analysisPasses: [pass],
-    findings: withApplyOutcome ? const [] : [finding],
+    findings: withApplyOutcome || zeroFindings ? const [] : [finding],
     diagnostics: const [],
     acceptedRiskCodes: withApplyOutcome
         ? const ['external-consumers-not-scanned']

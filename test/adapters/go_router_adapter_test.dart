@@ -51,6 +51,11 @@ void main() {
         '/duplicate-path',
         '/duplicate-name-one',
         '/duplicate-name-two',
+        '/signup',
+        '/search',
+        '/guides',
+        '/guides/faq',
+        '/login',
       });
     });
 
@@ -384,6 +389,56 @@ void main() {
         );
       },
     );
+
+    test(
+      'traces a local wrapper parameter through static route producers',
+      () async {
+        final project = await loadFixture();
+        final workspace = DartAnalysisWorkspace(project);
+        final inventory = await RouteInventory.discover(
+          project,
+          workspace: workspace,
+        );
+        final resolver = RouteReferenceResolver(project, inventory);
+
+        await resolver.analyzeProject(workspace: workspace);
+
+        final wrapperReferences = resolver.references
+            .where(
+              (reference) => reference.callerId.endsWith('#openThroughWrapper'),
+            )
+            .map((reference) => reference.routeNodeId)
+            .toSet();
+        expect(wrapperReferences, {
+          'route:go_router_test:/signup',
+          'route:go_router_test:/guides/faq',
+          'route:go_router_test:/search',
+        });
+      },
+    );
+
+    test('resolves route paths returned from redirect callbacks', () async {
+      final project = await loadFixture();
+      final workspace = DartAnalysisWorkspace(project);
+      final inventory = await RouteInventory.discover(
+        project,
+        workspace: workspace,
+      );
+      final resolver = RouteReferenceResolver(project, inventory);
+
+      await resolver.analyzeProject(workspace: workspace);
+
+      expect(
+        resolver.references
+            .where(
+              (reference) =>
+                  reference.description.contains('redirects to') &&
+                  reference.routeNodeId == 'route:go_router_test:/signup',
+            )
+            .length,
+        1,
+      );
+    });
   });
 
   group('GoRouterAdapter', () {
@@ -423,6 +478,23 @@ void main() {
       );
 
       expect(graph.rootIds, isNot(contains('route:go_router_test:/settings')));
+    });
+
+    test('keeps parent routes alive through a reachable child route', () async {
+      final project = await loadFixture();
+      final graph = ReachabilityGraph();
+
+      await const GoRouterAdapter().analyze(
+        project,
+        GraphBuilder(graph, 'go_router'),
+      );
+
+      expect(
+        graph
+            .outgoingFrom('route:go_router_test:/guides/faq')
+            .map((edge) => edge.to),
+        contains('route:go_router_test:/guides'),
+      );
     });
 
     test('dynamic navigation blocks routes instead of deleting them', () async {

@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter_pruner/src/adapters/analyzer_adapter.dart';
 import 'package:flutter_pruner/src/adapters/dart/dart_adapter.dart';
 import 'package:flutter_pruner/src/adapters/dart/dart_analysis_workspace.dart';
+import 'package:flutter_pruner/src/adapters/dart/dart_application_reachability.dart';
 import 'package:flutter_pruner/src/adapters/l10n/l10n_adapter.dart';
 import 'package:flutter_pruner/src/core/confidence/confidence.dart';
 import 'package:flutter_pruner/src/core/confidence/finding_generator.dart';
@@ -326,6 +327,16 @@ class AppLocalizations {
         addTearDown(() => root.delete(recursive: true));
         await File(p.join(root.path, 'lib/custom_lookup.dart')).delete();
         await File(p.join(root.path, 'lib/consumer.dart')).delete();
+        await File(p.join(root.path, 'lib/main.dart')).writeAsString('''
+import 'constructor_consumer.dart';
+import 'l10n/app_localizations.dart';
+import 'reexport_consumer.dart';
+
+void main() {
+  ConstructsLocalizations();
+  throughExport(const AppLocalizations());
+}
+''');
         await File(p.join(root.path, 'lib/l10n/app_vi.arb')).writeAsString('''
 {
   "@@locale": "vi",
@@ -353,6 +364,68 @@ class AppLocalizations {
         expect(graph.blockersFor(unused.node.id), isEmpty);
         expect(unused.confidence, Confidence.review);
         expect(unused.proposedAction, isNull);
+      },
+    );
+
+    test(
+      'ignores localization uses outside configured application entrypoints',
+      () async {
+        final root = await _createReachabilityFixture();
+        addTearDown(() => root.delete(recursive: true));
+        final project = await _loadCompleteProject(root);
+        final graph = ReachabilityGraph();
+        final workspace = DartAnalysisWorkspace(project);
+        final reachability = await DartApplicationReachability.discover(
+          project,
+          workspace: workspace,
+        );
+
+        expect(reachability.issues, isEmpty);
+        expect(
+          reachability.unitPaths.map(project.relative),
+          isNot(contains('lib/unreachable.dart')),
+        );
+        expect(
+          reachability.unitPaths.map(project.relative),
+          isNot(contains('test/localizations_test.dart')),
+        );
+
+        await const DartAdapter().analyzeWithServices(
+          project,
+          GraphBuilder(graph, 'dart'),
+          AdapterServices(dartWorkspace: workspace),
+        );
+        await const L10nAdapter().analyzeWithServices(
+          project,
+          GraphBuilder(graph, 'l10n'),
+          AdapterServices(dartWorkspace: workspace),
+        );
+
+        final findings = const FindingGenerator().generate(
+          graph: graph,
+          project: project,
+          reportingNodeSchemes: const {'l10n'},
+        );
+        expect(
+          findings.map((finding) => finding.node.metadata['key']),
+          containsAll(<String>['deadOnly', 'testOnly']),
+        );
+        expect(
+          findings.map((finding) => finding.node.metadata['key']),
+          isNot(contains('live')),
+        );
+        expect(
+          graph
+              .incomingTo('l10n:l10n_test:deadOnly')
+              .where((edge) => edge.kind == EdgeKind.references),
+          isEmpty,
+        );
+        expect(
+          graph
+              .incomingTo('l10n:l10n_test:testOnly')
+              .where((edge) => edge.kind == EdgeKind.references),
+          isEmpty,
+        );
       },
     );
 
@@ -425,9 +498,85 @@ Future<Directory> _copyFixture() async {
       await entity.copy(destination);
     }
   }
+  await File(p.join(root.path, 'lib/main.dart')).writeAsString('''
+import 'constructor_consumer.dart';
+import 'consumer.dart';
+import 'custom_lookup.dart';
+import 'l10n/app_localizations.dart';
+import 'reexport_consumer.dart';
+
+void main() {
+  Localizer(const AppLocalizations()).direct();
+  ConstructsLocalizations();
+  constantLookup(const AppLocalizations());
+  throughExport(const AppLocalizations());
+}
+''');
+  return root;
+}
+
+Future<Directory> _createReachabilityFixture() async {
+  final root = await Directory.systemTemp.createTemp('l10n_reachability_');
+  await Directory(p.join(root.path, 'lib/l10n')).create(recursive: true);
+  await Directory(p.join(root.path, 'test')).create(recursive: true);
+  await File(p.join(root.path, 'pubspec.yaml')).writeAsString('''
+name: l10n_test
+publish_to: none
+environment:
+  sdk: ^3.9.0
+dependencies:
+  flutter:
+    sdk: flutter
+flutter:
+  generate: true
+''');
+  await File(p.join(root.path, 'l10n.yaml')).writeAsString('''
+arb-dir: lib/l10n
+template-arb-file: app_en.arb
+''');
+  for (final locale in const ['en', 'vi']) {
+    await File(p.join(root.path, 'lib/l10n/app_$locale.arb')).writeAsString('''
+{
+  "@@locale": "$locale",
+  "live": "Live",
+  "deadOnly": "Dead",
+  "testOnly": "Test"
+}
+''');
+  }
   await File(
-    p.join(root.path, 'lib/main.dart'),
-  ).writeAsString('void main() {}');
+    p.join(root.path, 'lib/l10n/app_localizations.dart'),
+  ).writeAsString('''
+class AppLocalizations {
+  const AppLocalizations();
+
+  String get live => 'Live';
+  String get deadOnly => 'Dead';
+  String get testOnly => 'Test';
+}
+''');
+  await File(p.join(root.path, 'lib/main.dart')).writeAsString('''
+import 'reachable.dart';
+
+void main() => useLive();
+''');
+  await File(p.join(root.path, 'lib/reachable.dart')).writeAsString('''
+import 'l10n/app_localizations.dart';
+
+String useLive() => const AppLocalizations().live;
+''');
+  await File(p.join(root.path, 'lib/unreachable.dart')).writeAsString('''
+import 'l10n/app_localizations.dart';
+
+String useDead(AppLocalizations localizations) => localizations.deadOnly;
+''');
+  await File(p.join(root.path, 'test/localizations_test.dart')).writeAsString(
+    '''
+import '../lib/l10n/app_localizations.dart';
+
+String useFromTest(AppLocalizations localizations) => localizations.testOnly;
+''',
+  );
   return root;
 }
 

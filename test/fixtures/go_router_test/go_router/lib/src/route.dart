@@ -7,12 +7,14 @@ class GoRoute extends RouteBase {
     required this.path,
     this.name,
     this.builder,
+    this.redirect,
     this.routes = const <RouteBase>[],
   });
 
   final String path;
   final String? name;
   final Object? builder;
+  final Object? redirect;
   final List<RouteBase> routes;
 }
 

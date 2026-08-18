@@ -167,6 +167,11 @@ A blocker does not veto a finding. It caps confidence and appears in the report
 as the reason, so the user can look at the call site and decide what the tool
 could not.
 
+If a scoped blocker matches no inventoried node, the final report still retains
+it as an unbound blocker and warns that the inventory may be empty or
+incomplete. This is important for parse failures such as a duplicate ARB key:
+zero nodes and zero findings are not evidence of a clean domain.
+
 A blocked node is retained, so its outgoing dependencies are traversed as live.
 The blocked node itself remains reportable as `REVIEW`; only its dependency
 closure is excluded from automatic deletion. Otherwise a generated model could

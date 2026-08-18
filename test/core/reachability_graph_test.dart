@@ -360,6 +360,26 @@ void main() {
   });
 
   group('blockers', () {
+    test('reports whether a recorded blocker addresses any graph node', () {
+      final bound = Blocker(
+        producer: 'l10n',
+        reason: 'bounded parse issue',
+        affectedNamespace: 'l10n:app:',
+      );
+      final unbound = Blocker(
+        producer: 'l10n',
+        reason: 'empty inventory parse issue',
+        affectedNamespace: 'l10n:empty:',
+      );
+      final graph = ReachabilityGraph()
+        ..addBlocker(bound)
+        ..addBlocker(unbound)
+        ..addNode(_node('l10n:app:title'));
+
+      expect(graph.blockerAddressesAnyNode(bound), isTrue);
+      expect(graph.blockerAddressesAnyNode(unbound), isFalse);
+    });
+
     test('a namespace blocker covers nodes under that namespace only', () {
       final graph = ReachabilityGraph()
         ..addBlocker(

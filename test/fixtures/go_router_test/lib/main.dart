@@ -9,6 +9,7 @@ const duplicateRouteName = 'duplicate';
 void main() {}
 
 final router = GoRouter(
+  redirect: (context, state) => AppRoutes.signup,
   routes: [
     GoRoute(
       path: '/',
@@ -26,8 +27,39 @@ final router = GoRouter(
     GoRoute(path: '/duplicate-path', name: 'duplicatePathSecond'),
     GoRoute(path: '/duplicate-name-one', name: duplicateRouteName),
     GoRoute(path: '/duplicate-name-two', name: duplicateRouteName),
+    GoRoute(path: '/signup'),
+    GoRoute(path: '/search'),
+    GoRoute(
+      path: '/guides',
+      routes: [GoRoute(path: 'faq')],
+    ),
+    GoRoute(path: '/login'),
   ],
 );
+
+abstract final class AppRoutes {
+  static String get signup => '/signup';
+
+  static String guide(String topic) => '/guides/$topic';
+
+  static String search(String query) => '/search?query=$query';
+}
+
+class AppNavigator {
+  AppNavigator(this.context);
+
+  final BuildContext context;
+
+  Future<void> push(String routeName) async {
+    await context.push(routeName);
+  }
+}
+
+Future<void> openThroughWrapper(AppNavigator navigator) async {
+  await navigator.push(AppRoutes.signup);
+  await navigator.push(AppRoutes.guide('faq'));
+  await navigator.push(AppRoutes.search('tea'));
+}
 
 void openHome(BuildContext context) {
   context.go('/');

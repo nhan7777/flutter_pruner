@@ -4,6 +4,7 @@ import '../adapters/adapter_report_definition.dart';
 import '../apply/finding_selection.dart';
 import '../core/confidence/confidence.dart';
 import '../core/confidence/finding.dart';
+import '../core/graph/evidence.dart';
 import '../core/project/analysis_mode.dart';
 import '../core/project/target_matrix.dart';
 
@@ -244,12 +245,14 @@ class BlockerStatistics {
   BlockerStatistics({
     required this.recorded,
     required this.activeUnique,
+    this.unboundUnique = 0,
     required this.affectedFindings,
     required Map<String, int> byProducer,
   }) : byProducer = Map.unmodifiable(byProducer);
 
   final int recorded;
   final int activeUnique;
+  final int unboundUnique;
   final int affectedFindings;
   final Map<String, int> byProducer;
 }
@@ -269,12 +272,14 @@ class AnalysisPassReport {
     this.danglingRootCount = 0,
     required List<AdapterRunReport> adapterRuns,
     required this.findingStatistics,
+    List<Blocker> unboundBlockers = const [],
     required this.blockerStatistics,
     required List<RunMeasurement> measurements,
     required this.exclusionPolicyVersion,
     required Map<String, int> exclusionsByReason,
     this.round,
   }) : adapterRuns = List.unmodifiable(adapterRuns),
+       unboundBlockers = List.unmodifiable(unboundBlockers),
        measurements = List.unmodifiable(measurements),
        exclusionsByReason = Map.unmodifiable(exclusionsByReason);
 
@@ -290,6 +295,7 @@ class AnalysisPassReport {
   final int danglingRootCount;
   final List<AdapterRunReport> adapterRuns;
   final FindingStatistics findingStatistics;
+  final List<Blocker> unboundBlockers;
   final BlockerStatistics blockerStatistics;
   final List<RunMeasurement> measurements;
   final int exclusionPolicyVersion;

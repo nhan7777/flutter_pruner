@@ -9,6 +9,7 @@ import '../../core/project/project_context.dart';
 import '../adapter_report_definition.dart';
 import '../analyzer_adapter.dart';
 import '../dart/dart_analysis_workspace.dart';
+import '../dart/dart_application_reachability.dart';
 import 'arb_inventory.dart';
 import 'l10n_config.dart';
 import 'l10n_usage_resolver.dart';
@@ -126,8 +127,18 @@ class L10nAdapter extends AnalyzerAdapter {
         return;
       case L10nConfigValid(:final config):
         final inventory = ArbInventory.read(project, config);
+        final applicationReachability =
+            await DartApplicationReachability.discover(
+              project,
+              workspace: workspace,
+            );
         final resolver = L10nUsageResolver(project, config, inventory);
-        await resolver.analyzeProject(workspace: workspace);
+        await resolver.analyzeProject(
+          workspace: workspace,
+          includedUnitPaths: applicationReachability.isComplete
+              ? applicationReachability.unitPaths
+              : null,
+        );
 
         for (final key in inventory.keys) {
           graph.addNode(
@@ -176,6 +187,12 @@ class L10nAdapter extends AnalyzerAdapter {
             sourceNodeId: blocker.sourceNodeId,
             affectedNamespace: blocker.affectedNamespace,
             affectedNodeIds: blocker.affectedNodeIds,
+          );
+        }
+        for (final issue in applicationReachability.issues) {
+          graph.addBlocker(
+            reason: issue,
+            affectedNamespace: ArbInventory.namespaceFor(project),
           );
         }
         final generatedOutput = _generatedOutputProtection(project, config);

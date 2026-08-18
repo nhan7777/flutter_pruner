@@ -52,17 +52,26 @@ class JsonFormatter implements ReportFormatter {
     final blockerIdsByObject = Map<Blocker, String>.identity();
     final blockerIdsByCanonicalKey = <String, String>{};
     final blockerRegistry = <String, Blocker>{};
+    void registerBlocker(Blocker blocker) {
+      final cachedId = blockerIdsByObject[blocker];
+      if (cachedId != null) return;
+      final canonicalKey = blockerCanonicalKey(blocker);
+      final id = blockerIdsByCanonicalKey.putIfAbsent(
+        canonicalKey,
+        () => _blockerId(canonicalKey),
+      );
+      blockerIdsByObject[blocker] = id;
+      blockerRegistry.putIfAbsent(id, () => blocker);
+    }
+
+    if (report.analysisPasses.isNotEmpty) {
+      for (final blocker in report.analysisPasses.last.unboundBlockers) {
+        registerBlocker(blocker);
+      }
+    }
     for (final finding in report.findings) {
       for (final blocker in finding.blockers) {
-        final cachedId = blockerIdsByObject[blocker];
-        if (cachedId != null) continue;
-        final canonicalKey = blockerCanonicalKey(blocker);
-        final id = blockerIdsByCanonicalKey.putIfAbsent(
-          canonicalKey,
-          () => _blockerId(canonicalKey),
-        );
-        blockerIdsByObject[blocker] = id;
-        blockerRegistry[id] = blocker;
+        registerBlocker(blocker);
       }
     }
     final sortedBlockerIds = blockerRegistry.keys.toList()..sort();
@@ -123,6 +132,7 @@ class JsonFormatter implements ReportFormatter {
             ? {
                 'recorded': 0,
                 'activeUnique': 0,
+                'unboundUnique': 0,
                 'affectedFindings': 0,
                 'byProducer': const <String, int>{},
               }
@@ -328,6 +338,7 @@ class JsonFormatter implements ReportFormatter {
   ) => {
     'recorded': statistics.recorded,
     'activeUnique': statistics.activeUnique,
+    'unboundUnique': statistics.unboundUnique,
     'affectedFindings': statistics.affectedFindings,
     'byProducer': _sortedMap(statistics.byProducer),
   };

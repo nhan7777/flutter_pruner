@@ -89,9 +89,9 @@ preferences.
 | `execution.analysisPasses` | Initial, fixed-point rescan and final scan facts |
 | `statistics.findings` | Counts by tier, reporting adapter, rule, node kind and reason |
 | `statistics.measurements` | Typed, scoped quantities; rows are not implicitly additive |
-| `statistics.blockers` | Recorded blockers, active unique blockers and affected findings |
+| `statistics.blockers` | Recorded blockers, active unique blockers, unbound unique blockers and affected findings |
 | `statistics.exclusions` | Paths observed and rejected by the central path policy |
-| `blockers` | Deduplicated blocker registry referenced by stable IDs from findings |
+| `blockers` | Deduplicated blocker registry referenced by stable IDs from findings, plus final-pass blockers that could not attach to an inventoried node |
 | `verificationAttempts` | Sanitized baseline, candidate and rollback verifier evidence |
 | `apply` | Logical finding, physical action and transaction counters plus per-finding outcomes |
 | `presentation.adapters` | Adapter-scoped labels, typed detail fields and measurement definitions captured for offline rendering |
@@ -106,6 +106,12 @@ JSON is emitted in compact form because blocker-to-finding relationships can be
 large. Field order and blocker-registry key order are deterministic, and exact
 duplicate blocker facts share one stable registry entry and one ID per finding.
 Use `jq` or another JSON viewer when an indented local view is needed.
+
+`statistics.blockers.unboundUnique` counts final-pass blockers whose namespace
+or explicit node scope matched no inventoried node. They remain in the top-level
+registry even when `findings` is empty, so malformed source input cannot be
+misreported as a clean inventory. Terminal output presents the same condition
+as an analysis-limited warning.
 
 ## Status and exit code
 

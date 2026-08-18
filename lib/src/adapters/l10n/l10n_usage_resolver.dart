@@ -113,6 +113,7 @@ final class L10nUsageResolver {
   /// the same shared [workspace] cache.
   Future<void> analyzeProject({
     required DartAnalysisWorkspace workspace,
+    Set<String>? includedUnitPaths,
   }) async {
     _generatedDartNamespaces.add(
       _dartNamespaceFor(project, config.generatedLibraryPath),
@@ -126,6 +127,10 @@ final class L10nUsageResolver {
     final units = <String, ResolvedUnitResult>{};
     for (final path in workspace.dartFiles) {
       if (project.pathPolicy.shouldExclude(path)) continue;
+      if (includedUnitPaths != null &&
+          !includedUnitPaths.contains(_normalizedPath(path))) {
+        continue;
+      }
       try {
         final result = await workspace.resolveLibrary(path);
         if (result is ResolvedLibraryResult) {
@@ -150,6 +155,9 @@ final class L10nUsageResolver {
     for (final path in paths) {
       final unit = units[path]!;
       if (_generatedOutputPaths.contains(path)) continue;
+      if (includedUnitPaths != null && !includedUnitPaths.contains(path)) {
+        continue;
+      }
       if (unit.diagnostics.isNotEmpty) {
         _addNamespaceBlocker(
           'analyzer errors prevent semantic localization usage classification',

@@ -21,6 +21,7 @@ class RouteEntry {
   RouteEntry({
     required this.nodeId,
     required this.fullPath,
+    required this.parentNodeId,
     required this.name,
     required this.origin,
     required this.location,
@@ -31,6 +32,9 @@ class RouteEntry {
 
   /// Path composed from every enclosing route.
   final String fullPath;
+
+  /// Enclosing route kept alive whenever this child route is reachable.
+  final String? parentNodeId;
 
   /// Declared `name:` value, when it is a constant string.
   final String? name;
@@ -220,6 +224,12 @@ class _RouteDeclarationVisitor extends RecursiveAstVisitor<void> {
     final entry = RouteEntry(
       nodeId: nodeId,
       fullPath: fullPath,
+      parentNodeId: _parentPaths.isEmpty
+          ? null
+          : routeNodeId(
+              packageName: project.packageName,
+              fullPath: _parentPaths.last,
+            ),
       name: name,
       origin: Uri.file(unit.path),
       location: _location(node),

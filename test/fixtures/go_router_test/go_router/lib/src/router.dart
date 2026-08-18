@@ -5,7 +5,8 @@ class BuildContext {
 }
 
 class GoRouter {
-  const GoRouter({required this.routes});
+  const GoRouter({required this.routes, this.redirect});
 
   final List<RouteBase> routes;
+  final Object? redirect;
 }

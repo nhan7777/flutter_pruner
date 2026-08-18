@@ -38,6 +38,13 @@ void main() {
     final tiers = <String, int>{'SAFE': 1};
     final adapterTiers = <String, Map<String, int>>{'assets': tiers};
     final passRuns = <AdapterRunReport>[];
+    final unboundBlockers = <Blocker>[
+      Blocker(
+        producer: 'l10n',
+        reason: 'duplicate ARB key',
+        affectedNamespace: 'l10n:project:',
+      ),
+    ];
     final measurements = <RunMeasurement>[];
     final exclusions = <String, int>{'directory:.dart_tool': 1};
     final requiredStepIds = <String>['analyze'];
@@ -87,6 +94,7 @@ void main() {
           byNodeKind: const {'asset': 1},
           byClassificationReason: const {},
         ),
+        unboundBlockers: unboundBlockers,
         blockerStatistics: BlockerStatistics(
           recorded: 0,
           activeUnique: 0,
@@ -144,6 +152,7 @@ void main() {
     tiers['SAFE'] = 2;
     adapterTiers['dart'] = {'HIGH': 1};
     passRuns.add(_adapterRun());
+    unboundBlockers.clear();
     measurements.add(_measurement());
     exclusions.clear();
     requiredStepIds.add('test');
@@ -178,6 +187,7 @@ void main() {
       },
     );
     expect(report.analysisPasses.single.adapterRuns, isEmpty);
+    expect(report.analysisPasses.single.unboundBlockers, hasLength(1));
     expect(report.analysisPasses.single.measurements, isEmpty);
     expect(report.analysisPasses.single.exclusionsByReason, {
       'directory:.dart_tool': 1,
@@ -222,6 +232,10 @@ void main() {
     );
     expect(
       () => report.verificationAttempts.single.steps.clear(),
+      throwsUnsupportedError,
+    );
+    expect(
+      () => report.analysisPasses.single.unboundBlockers.clear(),
       throwsUnsupportedError,
     );
     expect(() => report.applyFindingOutcomes.clear(), throwsUnsupportedError);

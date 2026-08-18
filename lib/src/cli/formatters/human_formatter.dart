@@ -890,6 +890,22 @@ class HumanFormatter implements ReportFormatter {
         color: _Ansi.yellow,
       );
     }
+    final unboundBlockers = pass?.blockerStatistics.unboundUnique ?? 0;
+    if (unboundBlockers > 0) {
+      _writeLabeledRow(
+        buffer,
+        icon: '!',
+        label: 'Inventory',
+        value:
+            '$unboundBlockers analysis '
+            '${unboundBlockers == 1 ? 'blocker' : 'blockers'} could not '
+            'attach to any inventoried node',
+        detail:
+            'A domain inventory may be empty or incomplete; inspect the '
+            'recorded blocker before treating this scan as clean.',
+        color: _Ansi.yellow,
+      );
+    }
     final next = packageAuditOnly
         ? 'Validate REVIEW findings against external consumers; do not apply '
               'them automatically.'
@@ -1663,6 +1679,14 @@ class HumanFormatter implements ReportFormatter {
         'unregistered nodes; findings are downgraded.',
       );
     }
+    final unboundBlockers = pass?.blockerStatistics.unboundUnique ?? 0;
+    if (unboundBlockers > 0) {
+      warnings.add(
+        '$unboundBlockers analysis '
+        '${unboundBlockers == 1 ? 'blocker could' : 'blockers could'} not '
+        'attach to any inventoried node; a domain inventory may be incomplete.',
+      );
+    }
     return warnings;
   }
 
@@ -1674,7 +1698,8 @@ class HumanFormatter implements ReportFormatter {
       !report.targetMatrix.isComplete ||
       !report.rootCoverage.internalBoundaryComplete ||
       (pass?.danglingEdgeCount ?? 0) > 0 ||
-      (pass?.danglingRootCount ?? 0) > 0;
+      (pass?.danglingRootCount ?? 0) > 0 ||
+      (pass?.blockerStatistics.unboundUnique ?? 0) > 0;
 
   String _sentenceCase(String value) {
     if (value.isEmpty) return value;

@@ -115,9 +115,9 @@ dart pub global deactivate flutter_pruner
 |---|---|---|
 | Dart | Unreachable top-level declarations and empty libraries | Confidence and mode controlled |
 | Assets | Exact references and assets unreachable from live Dart code | Confidence and mode controlled |
-| Routes | `go_router` declarations and exact path/name navigation | Review only |
+| Routes | `go_router` declarations, redirects, nested routes, and exact path/name navigation through resolved local wrappers | Review only |
 | Dependency injection | Direct base-scope `GetIt` registrations and exact resolved lookups | Review only |
-| Localization | ARB keys and resolved current real-source `gen-l10n` accessors | Review only |
+| Localization | ARB keys and current real-source `gen-l10n` accessors reachable from configured app targets | Review only |
 | Duplicates | Byte-identical files grouped with SHA-256 | Review only |
 
 ## Why Flutter Pruner
@@ -300,6 +300,10 @@ the schema, HTML features and CI selectors.
   wiring are uncertainty boundaries. ARB/gen-l10n analysis targets current
   real-source output. These cases add scoped blockers rather than authorizing
   removal.
+- Route and localization consumers are narrowed to the configured application
+  entrypoint closure only when analyzer resolution proves that closure
+  complete. Missing entrypoints, unresolved local directives, and conditional
+  imports or exports keep the broader conservative scan and emit blockers.
 - Configured verification and import cleanup run as argv-only subprocesses with
   deadlines and bounded captured output. An unconfirmed detached process tree
   produces `recoveryRequired`; Windows termination behavior is covered by the

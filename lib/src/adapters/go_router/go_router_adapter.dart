@@ -5,6 +5,7 @@ import '../../core/project/project_context.dart';
 import '../adapter_report_definition.dart';
 import '../analyzer_adapter.dart';
 import '../dart/dart_analysis_workspace.dart';
+import '../dart/dart_application_reachability.dart';
 import 'deep_link_probe.dart';
 import 'route_inventory.dart';
 import 'route_reference_resolver.dart';
@@ -105,8 +106,17 @@ class GoRouterAdapter extends AnalyzerAdapter {
       project,
       workspace: workspace,
     );
+    final applicationReachability = await DartApplicationReachability.discover(
+      project,
+      workspace: workspace,
+    );
     final resolver = RouteReferenceResolver(project, inventory);
-    await resolver.analyzeProject(workspace: workspace);
+    await resolver.analyzeProject(
+      workspace: workspace,
+      includedUnitPaths: applicationReachability.isComplete
+          ? applicationReachability.unitPaths
+          : null,
+    );
     final deepLinks = DeepLinkProbe.detect(project);
 
     for (final entry in inventory.byNodeId.values) {
@@ -140,6 +150,22 @@ class GoRouterAdapter extends AnalyzerAdapter {
       );
     }
 
+    for (final entry in inventory.byNodeId.values) {
+      final parentNodeId = entry.parentNodeId;
+      if (parentNodeId == null) continue;
+      graph.addReference(
+        from: entry.nodeId,
+        to: parentNodeId,
+        kind: EdgeKind.references,
+        evidence: graph.evidence(
+          kind: EvidenceKind.configuration,
+          description: 'child route requires its enclosing route',
+          exact: true,
+          location: entry.location,
+        ),
+      );
+    }
+
     for (final blocker in [...inventory.blockers, ...resolver.blockers]) {
       graph.addBlocker(
         reason: blocker.reason,
@@ -147,6 +173,12 @@ class GoRouterAdapter extends AnalyzerAdapter {
         sourceNodeId: blocker.sourceNodeId,
         affectedNamespace: blocker.affectedNamespace,
         affectedNodeIds: blocker.affectedNodeIds,
+      );
+    }
+    for (final issue in applicationReachability.issues) {
+      graph.addBlocker(
+        reason: issue,
+        affectedNamespace: RouteInventory.namespaceFor(project),
       );
     }
 

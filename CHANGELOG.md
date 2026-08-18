@@ -14,6 +14,18 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   runtime, and generated boundaries emit scoped blockers; neither adapter has
   an apply action.
 
+### Changed
+
+- Limited `go_router` and localization usage analysis to Dart libraries
+  reachable from configured application targets when that closure is complete;
+  incomplete entrypoints or conditional directives continue to fail closed.
+- Resolved exact `go_router` navigation forwarded through local wrappers,
+  static path getters/helpers, route redirects, query strings, and nested
+  parent-child route retention.
+- Preserved blockers that cannot attach to an inventoried node in JSON v3 and
+  terminal warnings, including malformed or duplicate ARB input with zero
+  findings.
+
 ## [1.3.0] - 2026-08-18
 
 ### Added
