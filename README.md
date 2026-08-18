@@ -156,6 +156,9 @@ flutter_pruner init --type package-internal
 
 The interactive wizard always lists all three modes. Pressing Enter keeps the
 detected conservative default; `package-internal` must be selected explicitly.
+On supported terminals, semantic color and text weight distinguish sections,
+defaults, confirmations, and risk warnings; icons and labels keep the same
+meaning when ANSI styling is unavailable.
 
 Both package modes require at least one `public_entrypoints` entry. Public
 exports and their dependency closure remain reachable, so an exported API is

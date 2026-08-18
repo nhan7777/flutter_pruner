@@ -339,8 +339,8 @@ void main() {
       expect(
         prompt.transcript,
         allOf(
-          contains('Analysis modes:'),
-          contains('1) application (default)'),
+          contains('◆ ANALYSIS MODE'),
+          contains('1) application  DEFAULT'),
           contains('2) package'),
           contains('3) package-internal'),
           contains('Select mode [1]:'),
@@ -355,9 +355,13 @@ void main() {
       );
       expect(
         prompt.transcript,
-        contains('Review configuration:\n  Analysis mode: application'),
+        allOf(
+          contains('◆ REVIEW CONFIGURATION'),
+          contains('◇ Analysis mode:      application'),
+        ),
       );
       expect(prompt.transcript, contains('Write the configuration? [Y/n]'));
+      expect(prompt.transcript, isNot(contains('\x1B[')));
     },
   );
 
@@ -378,9 +382,9 @@ void main() {
       );
       expect(loaded.analysisMode.wireName, 'package');
       _expectInOrder(prompt.transcript, [
-        'Analysis modes:',
+        '◆ ANALYSIS MODE',
         'Select mode [2]:',
-        'Review configuration:',
+        '◆ REVIEW CONFIGURATION',
         'Action policy: audit only',
         'Write the configuration? [Y/n]',
       ]);
@@ -388,9 +392,163 @@ void main() {
         prompt.transcript,
         allOf(
           contains('1) application'),
-          contains('2) package (default)'),
+          contains('2) package  DEFAULT'),
           contains('3) package-internal'),
           contains('Select mode [2]:'),
+        ),
+      );
+      expect(
+        prompt.transcript,
+        allOf(
+          contains('Detected package.\n\n◆ ANALYSIS MODE'),
+          contains(
+            '◇ Use public library "lib/menu_package.dart"? [Y/n] '
+            '\n\n◆ TARGET COVERAGE',
+          ),
+          contains(
+            '◇ Use these verifier commands? [Y/n] '
+            '\n\n◆ REVIEW CONFIGURATION',
+          ),
+        ),
+      );
+    },
+  );
+
+  test(
+    'interactive ANSI styling preserves the plain wizard contract',
+    () async {
+      final plainProject = _project('plain_ansi', name: 'ansi_package');
+      final styledProject = _project('styled_ansi', name: 'ansi_package');
+      final plain = _FakeInitPrompt(['', '', '', '', '', '']);
+      final styled = _FakeInitPrompt([
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+      ], supportsAnsiEscapes: true);
+
+      final plainExitCode = await FlutterPrunerCommandRunner(
+        initPrompt: plain,
+      ).run(['init', plainProject.path]);
+      final styledExitCode = await FlutterPrunerCommandRunner(
+        initPrompt: styled,
+      ).run(['init', styledProject.path]);
+
+      expect(plainExitCode, 0);
+      expect(styledExitCode, 0);
+      expect(plain.responsesRead, 6);
+      expect(styled.responsesRead, 6);
+      expect(plain.transcript, isNot(contains('\x1B[')));
+      expect(
+        _stripAnsi(
+          styled.transcript,
+        ).replaceAll(styledProject.path, '<project>'),
+        plain.transcript.replaceAll(plainProject.path, '<project>'),
+      );
+      expect(
+        File(
+          p.join(plainProject.path, '.flutter_pruner', 'config.yaml'),
+        ).readAsStringSync(),
+        File(
+          p.join(styledProject.path, '.flutter_pruner', 'config.yaml'),
+        ).readAsStringSync(),
+      );
+      expect(
+        styled.transcript,
+        allOf(
+          contains('\x1B[1m\x1B[36m◆ FLUTTER PRUNER · INIT\x1B[0m'),
+          contains('\x1B[1m\x1B[32mDEFAULT\x1B[0m'),
+          contains('\x1B[1m\x1B[35mpackage\x1B[0m'),
+          contains('\x1B[1mSelect mode\x1B[0m'),
+          contains('\x1B[1m\x1B[33m!\x1B[0m'),
+          contains('\x1B[2m'),
+        ),
+      );
+      expect(
+        styled.transcript,
+        isNot(
+          anyOf(
+            contains(
+              '\x1B[2mUse when this project owns the complete application '
+              'boundary.',
+            ),
+            contains(
+              '\x1B[2mReusable/public package; external consumers keep '
+              'findings at REVIEW.',
+            ),
+            contains(
+              '\x1B[2mLocal package boundary; may produce actionable SAFE '
+              'findings.',
+            ),
+          ),
+        ),
+      );
+      expect(
+        _stripAnsi(styled.transcript),
+        allOf(
+          contains('◆ ANALYSIS MODE'),
+          contains('◇ Select mode [2]:'),
+          contains('! Reusable-package consumers are open-world.'),
+          contains('✓ CONFIGURATION CREATED'),
+        ),
+      );
+    },
+  );
+
+  test(
+    'interactive ANSI errors and cancellation preserve the plain contract',
+    () async {
+      final plainProject = _project(
+        'plain_error',
+        name: 'plain_error_app',
+        application: true,
+      );
+      final styledProject = _project(
+        'styled_error',
+        name: 'styled_error_app',
+        application: true,
+      );
+      final plain = _FakeInitPrompt(['9', null]);
+      final styled = _FakeInitPrompt(['9', null], supportsAnsiEscapes: true);
+
+      final plainExitCode = await FlutterPrunerCommandRunner(
+        initPrompt: plain,
+      ).run(['init', plainProject.path]);
+      final styledExitCode = await FlutterPrunerCommandRunner(
+        initPrompt: styled,
+      ).run(['init', styledProject.path]);
+
+      expect(plainExitCode, 0);
+      expect(styledExitCode, 0);
+      expect(plain.responsesRead, 2);
+      expect(styled.responsesRead, 2);
+      expect(
+        Directory(p.join(plainProject.path, '.flutter_pruner')).existsSync(),
+        isFalse,
+      );
+      expect(
+        Directory(p.join(styledProject.path, '.flutter_pruner')).existsSync(),
+        isFalse,
+      );
+      expect(
+        _stripAnsi(
+          styled.transcript,
+        ).replaceAll(styledProject.path, '<project>'),
+        plain.transcript.replaceAll(plainProject.path, '<project>'),
+      );
+      expect(
+        styled.transcript,
+        allOf(
+          contains(
+            '\x1B[1m\x1B[33m!\x1B[0m '
+            '\x1B[33mInvalid value:',
+          ),
+          contains(
+            '\x1B[1m\x1B[33m!\x1B[0m '
+            '\x1B[33mCancelled; no files were written.\x1B[0m',
+          ),
         ),
       );
     },
@@ -423,7 +581,7 @@ void main() {
             'package-internal).',
           ),
           contains('Package-internal can produce actionable SAFE findings'),
-          contains('Analysis mode: package-internal'),
+          contains('Analysis mode:      package-internal'),
           contains(
             'Action policy: SAFE can be applied; eligible HIGH requires '
             'confirmation.',
@@ -550,25 +708,54 @@ void main() {
     expect(prompt.transcript, contains('Cancelled; no files were written.'));
   });
 
-  test('interactive replacement defaults to no and preserves bytes', () async {
-    final project = _project(
-      'replacement',
-      name: 'replacement_app',
-      application: true,
-    );
-    final config = File(p.join(project.path, '.flutter_pruner', 'config.yaml'))
-      ..createSync(recursive: true)
-      ..writeAsStringSync('owner bytes\n');
-    final prompt = _FakeInitPrompt(['']);
+  test(
+    'interactive replacement preserves bytes with plain and ANSI prompts',
+    () async {
+      final plainProject = _project(
+        'plain_replacement',
+        name: 'replacement_app',
+        application: true,
+      );
+      final styledProject = _project(
+        'styled_replacement',
+        name: 'replacement_app',
+        application: true,
+      );
+      final plainConfig =
+          File(p.join(plainProject.path, '.flutter_pruner', 'config.yaml'))
+            ..createSync(recursive: true)
+            ..writeAsStringSync('owner bytes\n');
+      final styledConfig =
+          File(p.join(styledProject.path, '.flutter_pruner', 'config.yaml'))
+            ..createSync(recursive: true)
+            ..writeAsStringSync('owner bytes\n');
+      final plain = _FakeInitPrompt(['']);
+      final styled = _FakeInitPrompt([''], supportsAnsiEscapes: true);
 
-    final exitCode = await FlutterPrunerCommandRunner(
-      initPrompt: prompt,
-    ).run(['init', project.path]);
+      final plainExitCode = await FlutterPrunerCommandRunner(
+        initPrompt: plain,
+      ).run(['init', plainProject.path]);
+      final styledExitCode = await FlutterPrunerCommandRunner(
+        initPrompt: styled,
+      ).run(['init', styledProject.path]);
 
-    expect(exitCode, 0);
-    expect(config.readAsStringSync(), 'owner bytes\n');
-    expect(File('${config.path}.bak').existsSync(), isFalse);
-  });
+      expect(plainExitCode, 0);
+      expect(styledExitCode, 0);
+      expect(plain.responsesRead, 1);
+      expect(styled.responsesRead, 1);
+      expect(plainConfig.readAsStringSync(), 'owner bytes\n');
+      expect(styledConfig.readAsStringSync(), 'owner bytes\n');
+      expect(File('${plainConfig.path}.bak').existsSync(), isFalse);
+      expect(File('${styledConfig.path}.bak').existsSync(), isFalse);
+      expect(
+        _stripAnsi(
+          styled.transcript,
+        ).replaceAll(styledProject.path, '<project>'),
+        plain.transcript.replaceAll(plainProject.path, '<project>'),
+      );
+      expect(styled.transcript, contains('\x1B[1mConfiguration exists'));
+    },
+  );
 
   test(
     'explicit interactive mode fails instead of reading a non-terminal',
@@ -611,9 +798,12 @@ void main() {
   });
 }
 
-class _FakeInitPrompt implements InitPrompt {
-  _FakeInitPrompt(Iterable<String?> responses, {this.isInteractive = true})
-    : _responses = List<String?>.from(responses);
+class _FakeInitPrompt implements InitPrompt, AnsiInitPrompt {
+  _FakeInitPrompt(
+    Iterable<String?> responses, {
+    this.isInteractive = true,
+    this.supportsAnsiEscapes = false,
+  }) : _responses = List<String?>.from(responses);
 
   final List<String?> _responses;
   final StringBuffer _output = StringBuffer();
@@ -621,12 +811,20 @@ class _FakeInitPrompt implements InitPrompt {
 
   String get transcript => _output.toString();
 
+  int get responsesRead => _index;
+
   @override
   final bool isInteractive;
 
   @override
-  String? readLine() =>
-      _index < _responses.length ? _responses[_index++] : null;
+  final bool supportsAnsiEscapes;
+
+  @override
+  String? readLine() {
+    final response = _index < _responses.length ? _responses[_index++] : null;
+    if (response != null) _output.writeln();
+    return response;
+  }
 
   @override
   void write(String value) => _output.write(value);
@@ -662,3 +860,6 @@ void _expectInOrder(String value, List<String> fragments) {
     offset = index + fragment.length;
   }
 }
+
+String _stripAnsi(String value) =>
+    value.replaceAll(RegExp(r'\x1B\[[0-9;]*m'), '');

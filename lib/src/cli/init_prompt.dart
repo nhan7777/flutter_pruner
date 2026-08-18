@@ -18,13 +18,22 @@ abstract class InitPrompt {
   String? readLine();
 }
 
+/// Optional capability for prompts that can render semantic ANSI styling.
+abstract interface class AnsiInitPrompt {
+  /// Whether ANSI color and text-weight escapes can be rendered.
+  bool get supportsAnsiEscapes;
+}
+
 /// Production prompt backed by process stdin/stdout.
-class StdioInitPrompt implements InitPrompt {
+class StdioInitPrompt implements InitPrompt, AnsiInitPrompt {
   /// Creates a stdio-backed prompt.
   const StdioInitPrompt();
 
   @override
   bool get isInteractive => stdin.hasTerminal && stdout.hasTerminal;
+
+  @override
+  bool get supportsAnsiEscapes => stdout.supportsAnsiEscapes;
 
   @override
   String? readLine() => stdin.readLineSync();
@@ -39,23 +48,26 @@ class StdioInitPrompt implements InitPrompt {
 /// Reusable yes/no and default-value interaction rules.
 class InitQuestions {
   /// Creates questions on [prompt].
-  const InitQuestions(this.prompt);
+  const InitQuestions(this.prompt, {this.styled = false});
 
   /// Terminal used for interaction.
   final InitPrompt prompt;
+
+  /// Whether to apply the interactive wizard's semantic ANSI hierarchy.
+  final bool styled;
 
   /// Asks a yes/no question and repeats invalid input.
   bool yesNo(String question, {required bool defaultValue}) {
     final suffix = defaultValue ? '[Y/n]' : '[y/N]';
     while (true) {
-      prompt.write('$question $suffix ');
+      _writeQuestion(question, ' $suffix');
       final response = prompt.readLine();
       if (response == null) throw const InitCancelledException();
       final normalized = response.trim().toLowerCase();
       if (normalized.isEmpty) return defaultValue;
       if (normalized == 'y' || normalized == 'yes') return true;
       if (normalized == 'n' || normalized == 'no') return false;
-      prompt.writeln('Please answer yes or no.');
+      _writeError('Please answer yes or no.');
     }
   }
 
@@ -67,20 +79,20 @@ class InitQuestions {
   }) {
     while (true) {
       final suffix = defaultValue == null ? '' : ' [$defaultValue]';
-      prompt.write('$label$suffix: ');
+      _writeQuestion(label, suffix, colon: true);
       final response = prompt.readLine();
       if (response == null) throw const InitCancelledException();
       final candidate = response.trim().isEmpty
           ? defaultValue
           : response.trim();
       if (candidate == null || candidate.isEmpty) {
-        prompt.writeln('A value is required.');
+        _writeError('A value is required.');
         continue;
       }
       try {
         return validate(candidate);
       } on FormatException catch (error) {
-        prompt.writeln('Invalid value: ${error.message}');
+        _writeError('Invalid value: ${error.message}');
       }
     }
   }
@@ -93,7 +105,7 @@ class InitQuestions {
   }) {
     while (true) {
       final shownDefault = defaultValue ?? 'none';
-      prompt.write('$label [$shownDefault]: ');
+      _writeQuestion(label, ' [$shownDefault]', colon: true);
       final response = prompt.readLine();
       if (response == null) throw const InitCancelledException();
       final normalized = response.trim();
@@ -102,9 +114,36 @@ class InitQuestions {
       try {
         return validate == null ? normalized : validate(normalized);
       } on FormatException catch (error) {
-        prompt.writeln('Invalid value: ${error.message}');
+        _writeError('Invalid value: ${error.message}');
       }
     }
+  }
+
+  void _writeQuestion(String label, String suffix, {bool colon = false}) {
+    if (!styled) {
+      prompt.write('$label$suffix${colon ? ':' : ''} ');
+      return;
+    }
+    final marker = _style('◇', _cyan);
+    final styledLabel = _style(label, _bold);
+    final styledSuffix = _style(suffix, _dim);
+    prompt.write('$marker $styledLabel$styledSuffix${colon ? ':' : ''} ');
+  }
+
+  void _writeError(String message) {
+    if (!styled) {
+      prompt.writeln(message);
+      return;
+    }
+    final marker = _style('!', '$_bold$_yellow');
+    prompt.writeln('$marker ${_style(message, _yellow)}');
+  }
+
+  String _style(String value, String style) {
+    final supportsAnsi =
+        prompt is AnsiInitPrompt &&
+        (prompt as AnsiInitPrompt).supportsAnsiEscapes;
+    return styled && supportsAnsi ? '$style$value$_reset' : value;
   }
 }
 
@@ -113,3 +152,9 @@ class InitCancelledException implements Exception {
   /// Creates the cancellation signal.
   const InitCancelledException();
 }
+
+const _reset = '\x1B[0m';
+const _bold = '\x1B[1m';
+const _dim = '\x1B[2m';
+const _yellow = '\x1B[33m';
+const _cyan = '\x1B[36m';

@@ -165,17 +165,21 @@ class InitCommand extends Command<int> {
         return 1;
       }
       try {
-        final replace = InitQuestions(_prompt).yesNo(
+        final replace = InitQuestions(_prompt, styled: true).yesNo(
           'Configuration exists at ${existingConfig.path}. Replace it?',
           defaultValue: false,
         );
         if (!replace) {
-          _prompt.writeln('Cancelled; no files were written.');
+          _InitWizardPresentation(
+            _prompt,
+          ).warning('Cancelled; no files were written.');
           return 0;
         }
         force = true;
       } on InitCancelledException {
-        _prompt.writeln('Cancelled; no files were written.');
+        _InitWizardPresentation(
+          _prompt,
+        ).warning('Cancelled; no files were written.');
         return 0;
       }
     }
@@ -209,7 +213,9 @@ class InitCommand extends Command<int> {
         );
       }
     } on InitCancelledException {
-      _prompt.writeln('Cancelled; no files were written.');
+      _InitWizardPresentation(
+        _prompt,
+      ).warning('Cancelled; no files were written.');
       return 0;
     } on ProjectSourcePathException catch (error) {
       stderr.writeln('Error: ${error.message}');
@@ -241,32 +247,71 @@ class InitCommand extends Command<int> {
     await _writeConfigAtomically(workspace, config, preserveBackup: force);
     final gitignore = File(p.join(workspace.directory.path, '.gitignore'));
     if (!gitignore.existsSync()) await gitignore.writeAsString(_gitignore);
-    stdout.writeln('Created ${workspace.configFile.path}');
-    stdout.writeln('Detected ${draft.projectType}.');
+    if (useWizard) {
+      _writeInteractiveCompletion(workspace, draft);
+    } else {
+      stdout.writeln('Created ${workspace.configFile.path}');
+      stdout.writeln('Detected ${draft.projectType}.');
+      if (draft.projectType == 'package') {
+        stdout.writeln(
+          'Reusable-package consumers are open-world. Findings stay capped '
+          'at REVIEW regardless of target completeness.',
+        );
+      } else if (draft.projectType == 'package-internal') {
+        stdout.writeln(
+          'Package-internal mode excludes external consumers. Scan and apply '
+          'will display a persistent warning. Target coverage is '
+          '${draft.complete ? 'complete' : 'incomplete'}.',
+        );
+      } else if (draft.complete) {
+        stdout.writeln(
+          'Coverage marked complete by explicit owner assertion. Review this '
+          'file whenever targets or entrypoints change.',
+        );
+      } else {
+        stdout.writeln(
+          'Coverage remains incomplete, so scan will cap candidates at '
+          'REVIEW. Review the generated targets before setting complete: '
+          'true.',
+        );
+      }
+      stdout.writeln('Next: ${projectCommandFor(workspace, 'scan')}');
+    }
+    return 0;
+  }
+
+  void _writeInteractiveCompletion(ToolWorkspace workspace, _InitDraft draft) {
+    final ui = _InitWizardPresentation(_prompt);
+    ui.section('Configuration created', tone: _WizardTone.success);
+    ui.field('Config', workspace.configFile.path, tone: _WizardTone.success);
+    ui.field('Analysis mode', draft.projectType, tone: _WizardTone.accent);
     if (draft.projectType == 'package') {
-      stdout.writeln(
+      ui.warning(
         'Reusable-package consumers are open-world. Findings stay capped at '
         'REVIEW regardless of target completeness.',
       );
     } else if (draft.projectType == 'package-internal') {
-      stdout.writeln(
+      ui.warning(
         'Package-internal mode excludes external consumers. Scan and apply '
         'will display a persistent warning. Target coverage is '
         '${draft.complete ? 'complete' : 'incomplete'}.',
       );
     } else if (draft.complete) {
-      stdout.writeln(
+      ui.success(
         'Coverage marked complete by explicit owner assertion. Review this '
         'file whenever targets or entrypoints change.',
       );
     } else {
-      stdout.writeln(
+      ui.warning(
         'Coverage remains incomplete, so scan will cap candidates at REVIEW. '
         'Review the generated targets before setting complete: true.',
       );
     }
-    stdout.writeln('Next: ${projectCommandFor(workspace, 'scan')}');
-    return 0;
+    ui.field(
+      'Next',
+      projectCommandFor(workspace, 'scan'),
+      tone: _WizardTone.success,
+    );
   }
 
   Future<void> _writeConfigAtomically(
@@ -543,34 +588,37 @@ class InitCommand extends Command<int> {
     required String? detectedType,
     required bool isHybridProject,
   }) {
-    final questions = InitQuestions(_prompt);
-    _prompt.writeln('Project: ${workspace.projectRoot.path}');
+    final questions = InitQuestions(_prompt, styled: true);
+    final ui = _InitWizardPresentation(_prompt)
+      ..banner(workspace.projectRoot.path);
     final defaultProjectType = detectedType ?? 'application';
     if (detectedType != null) {
-      _prompt.writeln(
+      ui.info(
         isHybridProject
             ? 'Detected a hybrid project; package is the safe default.'
             : 'Detected $detectedType.',
       );
     } else {
-      _prompt.writeln('No conventional entrypoint was detected at:');
-      _prompt.writeln('  - lib/main.dart');
-      _prompt.writeln('  - lib/$packageName.dart');
-      _prompt.writeln('Choose the boundary and path explicitly.');
+      ui.warning('No conventional entrypoint was detected at:');
+      ui.bullet('lib/main.dart');
+      ui.bullet('lib/$packageName.dart');
+      ui.detail('Choose the boundary and path explicitly.');
     }
-    final projectType = _askProjectType(questions, defaultProjectType);
+    final projectType = _askProjectType(questions, defaultProjectType, ui);
+    ui.field('Selected mode', projectType, tone: _WizardTone.accent);
 
     final publicEntrypoints = <String>[];
     late final List<BuildTarget> targets;
     var complete = false;
     if (projectType == 'application') {
+      ui.section('Target coverage');
       final discovery = InitTargetDiscovery(
         workspace.projectRoot,
       ).discoverApplication();
       if (discovery.targets.isNotEmpty) {
-        _prompt.writeln('Detected targets:');
+        ui.info('Detected targets');
         for (final target in discovery.targets) {
-          _prompt.writeln('  - ${_targetSummary(target)}');
+          ui.bullet(_targetSummary(target));
         }
       }
       final useDetected =
@@ -586,7 +634,7 @@ class InitCommand extends Command<int> {
 
       var issuesResolved = true;
       for (final issue in discovery.issues) {
-        _prompt.writeln('Warning: ${issue.message}');
+        ui.warning(issue.message);
         if (!issue.ownerResolvable) {
           issuesResolved = false;
           continue;
@@ -596,7 +644,7 @@ class InitCommand extends Command<int> {
         }
       }
       if (isHybridProject) {
-        _prompt.writeln(
+        ui.warning(
           'Coverage will remain incomplete because the public library has '
           'open-world consumers.',
         );
@@ -607,11 +655,12 @@ class InitCommand extends Command<int> {
           defaultValue: false,
         );
       } else {
-        _prompt.writeln(
+        ui.warning(
           'Coverage will remain incomplete until every warning is resolved.',
         );
       }
     } else {
+      ui.section('Package boundary');
       final defaultPublicEntrypoint = _defaultEntrypoint(
         projectType,
         packageName,
@@ -625,10 +674,8 @@ class InitCommand extends Command<int> {
           kind: ProjectSourceKind.publicLibrary,
         );
       } on ProjectSourcePathException catch (error) {
-        _prompt.writeln(
-          'Default public library cannot be used: ${error.message}',
-        );
-        _prompt.writeln('Enter another public library path.');
+        ui.warning('Default public library cannot be used: ${error.message}');
+        ui.detail('Enter another public library path.');
       }
       if (suggested != null &&
           questions.yesNo(
@@ -647,12 +694,13 @@ class InitCommand extends Command<int> {
           ),
         );
       }
+      ui.section('Target coverage');
       final platforms = _detectedPlatforms(
         workspace.projectRoot,
         isFlutterPackage: _isFlutterPackage(pubspecFile),
         projectType: projectType,
       );
-      _prompt.writeln('Detected platforms: ${platforms.join(', ')}');
+      ui.field('Detected platforms', platforms.join(', '));
       final accepted = questions.yesNo(
         'Use these detected platforms?',
         defaultValue: true,
@@ -667,15 +715,13 @@ class InitCommand extends Command<int> {
         defaultValue: false,
       );
       if (projectType == 'package') {
-        _prompt.writeln(
+        ui.info(
           'Package findings remain REVIEW-only because consumers are '
           'open-world.',
         );
       } else {
-        _prompt.writeln(
-          'Package-internal can produce actionable SAFE findings.',
-        );
-        _prompt.writeln(
+        ui.warning('Package-internal can produce actionable SAFE findings.');
+        ui.warning(
           'Eligible HIGH findings require explicit external-consumer risk '
           'acknowledgement.',
         );
@@ -686,34 +732,35 @@ class InitCommand extends Command<int> {
       projectRoot: workspace.projectRoot,
       isFlutterPackage: _isFlutterPackage(pubspecFile),
     );
-    _prompt.writeln('Verifier commands:');
+    ui.section('Verification');
+    ui.info('Verifier commands');
     for (final command in verification) {
-      _prompt.writeln('  - ${command.join(' ')}');
+      ui.bullet(command.join(' '));
     }
     if (!questions.yesNo('Use these verifier commands?', defaultValue: true)) {
-      _prompt.writeln(
+      ui.warning(
         'Custom verifier input is not supported by the wizard yet. Create '
         'the config non-interactively, then edit verification.steps.',
       );
       throw const InitCancelledException();
     }
-    _prompt.writeln('Review configuration:');
-    _prompt.writeln('  Analysis mode: $projectType');
-    _prompt.writeln('  Build targets: ${targets.length}');
-    _prompt.writeln(
-      '  Target coverage: ${complete ? 'complete' : 'incomplete'}',
+    ui.section('Review configuration');
+    ui.field('Analysis mode', projectType, tone: _WizardTone.accent);
+    ui.field('Build targets', '${targets.length}');
+    ui.field(
+      'Target coverage',
+      complete ? 'complete' : 'incomplete',
+      tone: complete ? _WizardTone.success : _WizardTone.warning,
     );
     if (projectType == 'package') {
-      _prompt.writeln(
-        '  Action policy: audit only; external consumers are open-world.',
-      );
+      ui.info('Action policy: audit only; external consumers are open-world.');
     } else if (projectType == 'package-internal') {
-      _prompt.writeln(
-        '  Analysis boundary: local package; external consumers are not '
+      ui.warning(
+        'Analysis boundary: local package; external consumers are not '
         'scanned.',
       );
-      _prompt.writeln(
-        '  Action policy: SAFE can be applied; eligible HIGH requires '
+      ui.warning(
+        'Action policy: SAFE can be applied; eligible HIGH requires '
         'confirmation.',
       );
     }
@@ -729,31 +776,41 @@ class InitCommand extends Command<int> {
     );
   }
 
-  String _askProjectType(InitQuestions questions, String defaultValue) {
+  String _askProjectType(
+    InitQuestions questions,
+    String defaultValue,
+    _InitWizardPresentation ui,
+  ) {
     final defaultChoice = switch (defaultValue) {
       'application' => '1',
       'package' => '2',
       'package-internal' => '3',
       _ => throw StateError('Unsupported project type: $defaultValue'),
     };
-    String marker(String value) => value == defaultValue ? ' (default)' : '';
-
-    _prompt.writeln('Analysis modes:');
-    _prompt.writeln('  1) application${marker('application')}');
-    _prompt.writeln(
-      '     Use when this project owns the complete application boundary.',
+    ui.section('Analysis mode');
+    ui.option(
+      1,
+      'application',
+      isDefault: defaultValue == 'application',
+      description:
+          'Use when this project owns the complete application boundary.',
     );
-    _prompt.writeln('  2) package${marker('package')}');
-    _prompt.writeln(
-      '     Reusable/public package; external consumers keep findings at '
-      'REVIEW.',
+    ui.option(
+      2,
+      'package',
+      isDefault: defaultValue == 'package',
+      description:
+          'Reusable/public package; external consumers keep findings at '
+          'REVIEW.',
     );
-    _prompt.writeln('  3) package-internal${marker('package-internal')}');
-    _prompt.writeln(
-      '     Local package boundary; may produce actionable SAFE findings.',
-    );
-    _prompt.writeln(
-      '     External-consumer candidates may be HIGH and need confirmation.',
+    ui.option(
+      3,
+      'package-internal',
+      isDefault: defaultValue == 'package-internal',
+      description:
+          'Local package boundary; may produce actionable SAFE findings.',
+      caution:
+          'External-consumer candidates may be HIGH and need confirmation.',
     );
     return questions.text(
       'Select mode',
@@ -1046,6 +1103,112 @@ verification:
 !config.yaml
 ''';
 }
+
+enum _WizardTone { normal, accent, success, warning }
+
+class _InitWizardPresentation {
+  const _InitWizardPresentation(this._prompt);
+
+  final InitPrompt _prompt;
+
+  void banner(String projectPath) {
+    _prompt.writeln(_style('◆ FLUTTER PRUNER · INIT', '$_ansiBold$_ansiCyan'));
+    _prompt.writeln(
+      '  ${_style('Conservative setup for a safe analysis boundary.', _ansiDim)}',
+    );
+    _prompt.writeln();
+    field('Project', projectPath, tone: _WizardTone.accent);
+  }
+
+  void section(String label, {_WizardTone tone = _WizardTone.normal}) {
+    final color = switch (tone) {
+      _WizardTone.success => _ansiGreen,
+      _WizardTone.warning => _ansiYellow,
+      _ => _ansiCyan,
+    };
+    final marker = tone == _WizardTone.success ? '✓' : '◆';
+    _prompt.writeln();
+    _prompt.writeln(
+      '${_style(marker, '$color$_ansiBold')} '
+      '${_style(label.toUpperCase(), '$_ansiBold$color')}',
+    );
+  }
+
+  void field(
+    String label,
+    String value, {
+    _WizardTone tone = _WizardTone.normal,
+  }) {
+    final valueStyle = switch (tone) {
+      _WizardTone.accent => '$_ansiBold$_ansiMagenta',
+      _WizardTone.success => '$_ansiBold$_ansiGreen',
+      _WizardTone.warning => '$_ansiBold$_ansiYellow',
+      _WizardTone.normal => '',
+    };
+    final marker = _style('◇', _ansiCyan);
+    final key = _style('$label:'.padRight(19), _ansiDim);
+    _prompt.writeln('  $marker $key ${_style(value, valueStyle)}');
+  }
+
+  void option(
+    int index,
+    String label, {
+    required bool isDefault,
+    required String description,
+    String? caution,
+  }) {
+    final number = _style('$index)', '$_ansiBold$_ansiCyan');
+    final name = _style(label, '$_ansiBold$_ansiMagenta');
+    final badge = isDefault
+        ? '  ${_style('DEFAULT', '$_ansiBold$_ansiGreen')}'
+        : '';
+    _prompt.writeln('  $number $name$badge');
+    detail(description);
+    if (caution != null) warning(caution, indent: 5);
+  }
+
+  void info(String value) {
+    final marker = _style('◇', _ansiCyan);
+    _prompt.writeln('  $marker $value');
+  }
+
+  void detail(String value) {
+    _prompt.writeln('     $value');
+  }
+
+  void bullet(String value) {
+    _prompt.writeln('    ${_style('-', _ansiCyan)} $value');
+  }
+
+  void warning(String value, {int indent = 2}) {
+    final marker = _style('!', '$_ansiBold$_ansiYellow');
+    _prompt.writeln(
+      '${''.padLeft(indent)}$marker ${_style(value, _ansiYellow)}',
+    );
+  }
+
+  void success(String value) {
+    final marker = _style('✓', '$_ansiBold$_ansiGreen');
+    _prompt.writeln('  $marker ${_style(value, _ansiGreen)}');
+  }
+
+  String _style(String value, String style) {
+    if (style.isEmpty || _prompt is! AnsiInitPrompt) {
+      return value;
+    }
+    final ansiPrompt = _prompt as AnsiInitPrompt;
+    if (!ansiPrompt.supportsAnsiEscapes) return value;
+    return '$style$value$_ansiReset';
+  }
+}
+
+const _ansiReset = '\x1B[0m';
+const _ansiBold = '\x1B[1m';
+const _ansiDim = '\x1B[2m';
+const _ansiGreen = '\x1B[32m';
+const _ansiYellow = '\x1B[33m';
+const _ansiMagenta = '\x1B[35m';
+const _ansiCyan = '\x1B[36m';
 
 class _InitDraft {
   const _InitDraft({
