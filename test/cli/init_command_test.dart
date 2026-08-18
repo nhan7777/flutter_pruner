@@ -338,7 +338,13 @@ void main() {
       expect(config.readAsStringSync(), contains('complete: false'));
       expect(
         prompt.transcript,
-        contains('Use detected type "application"? [Y/n]'),
+        allOf(
+          contains('Analysis modes:'),
+          contains('1) application (default)'),
+          contains('2) package'),
+          contains('3) package-internal'),
+          contains('Select mode [1]:'),
+        ),
       );
       expect(prompt.transcript, contains('Use these detected targets? [Y/n]'));
       expect(
@@ -347,9 +353,140 @@ void main() {
           'Have you declared every shipped platform, flavor, entrypoint',
         ),
       );
+      expect(
+        prompt.transcript,
+        contains('Review configuration:\n  Analysis mode: application'),
+      );
       expect(prompt.transcript, contains('Write the configuration? [Y/n]'));
     },
   );
+
+  test(
+    'interactive package menu exposes every mode and keeps the safe default',
+    () async {
+      final project = _project('interactive_package', name: 'menu_package');
+      final prompt = _FakeInitPrompt(['', '', '', '', '', '']);
+
+      final exitCode = await FlutterPrunerCommandRunner(
+        initPrompt: prompt,
+      ).run(['init', project.path]);
+
+      expect(exitCode, 0);
+      final loaded = await ProjectConfig.load(
+        File(p.join(project.path, '.flutter_pruner', 'config.yaml')),
+        projectRoot: project,
+      );
+      expect(loaded.analysisMode.wireName, 'package');
+      _expectInOrder(prompt.transcript, [
+        'Analysis modes:',
+        'Select mode [2]:',
+        'Review configuration:',
+        'Action policy: audit only',
+        'Write the configuration? [Y/n]',
+      ]);
+      expect(
+        prompt.transcript,
+        allOf(
+          contains('1) application'),
+          contains('2) package (default)'),
+          contains('3) package-internal'),
+          contains('Select mode [2]:'),
+        ),
+      );
+    },
+  );
+
+  test(
+    'interactive package menu validates input and selects package-internal',
+    () async {
+      final project = _project('interactive_internal', name: 'menu_internal');
+      final prompt = _FakeInitPrompt(['9', '3', '', '', 'y', '', '']);
+
+      final exitCode = await FlutterPrunerCommandRunner(
+        initPrompt: prompt,
+      ).run(['init', project.path]);
+
+      expect(exitCode, 0);
+      final loaded = await ProjectConfig.load(
+        File(p.join(project.path, '.flutter_pruner', 'config.yaml')),
+        projectRoot: project,
+      );
+      expect(loaded.analysisMode.wireName, 'package-internal');
+      expect(loaded.targetMatrix.isComplete, isTrue);
+      expect(loaded.rootCoverage.internalBoundaryComplete, isTrue);
+      expect(loaded.rootCoverage.externalConsumersCovered, isFalse);
+      expect(
+        prompt.transcript,
+        allOf(
+          contains(
+            'Invalid value: Enter 1, 2, or 3 (application, package, or '
+            'package-internal).',
+          ),
+          contains('Package-internal can produce actionable SAFE findings'),
+          contains('Analysis mode: package-internal'),
+          contains(
+            'Action policy: SAFE can be applied; eligible HIGH requires '
+            'confirmation.',
+          ),
+        ),
+      );
+    },
+  );
+
+  test(
+    'interactive package accepts a non-conventional public library path',
+    () async {
+      final project = _project('custom_barrel', name: 'custom_barrel_package');
+      File(
+        p.join(project.path, 'lib', 'custom_barrel_package.dart'),
+      ).deleteSync();
+      File(
+        p.join(project.path, 'lib', 'api.dart'),
+      ).writeAsStringSync('library api;\n');
+      final prompt = _FakeInitPrompt(['3', 'lib/api.dart', '', '', '', '', '']);
+
+      final exitCode = await FlutterPrunerCommandRunner(
+        initPrompt: prompt,
+      ).run(['init', project.path]);
+
+      expect(exitCode, 0);
+      final loaded = await ProjectConfig.load(
+        File(p.join(project.path, '.flutter_pruner', 'config.yaml')),
+        projectRoot: project,
+      );
+      expect(loaded.analysisMode.wireName, 'package-internal');
+      expect(loaded.rootCoverage.publicEntrypoints, ['lib/api.dart']);
+      expect(
+        prompt.transcript,
+        allOf(
+          contains('No conventional entrypoint was detected'),
+          contains('Default public library cannot be used'),
+          contains('Enter another public library path.'),
+          contains('Public library path:'),
+        ),
+      );
+    },
+  );
+
+  test('interactive cancellation at mode selection writes no state', () async {
+    final project = _project(
+      'mode_cancelled',
+      name: 'mode_cancelled_app',
+      application: true,
+    );
+    final prompt = _FakeInitPrompt([null]);
+
+    final exitCode = await FlutterPrunerCommandRunner(
+      initPrompt: prompt,
+    ).run(['init', project.path]);
+
+    expect(exitCode, 0);
+    expect(
+      Directory(p.join(project.path, '.flutter_pruner')).existsSync(),
+      isFalse,
+    );
+    expect(prompt.transcript, contains('Cancelled; no files were written.'));
+  });
 
   test(
     'interactive entrypoint validation reprompts for an outside path',
@@ -515,4 +652,13 @@ environment:
   )..createSync(recursive: true);
   entrypoint.writeAsStringSync('void main() {}\n');
   return project;
+}
+
+void _expectInOrder(String value, List<String> fragments) {
+  var offset = 0;
+  for (final fragment in fragments) {
+    final index = value.indexOf(fragment, offset);
+    expect(index, greaterThanOrEqualTo(0), reason: 'Missing "$fragment"');
+    offset = index + fragment.length;
+  }
 }

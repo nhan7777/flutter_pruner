@@ -545,20 +545,20 @@ class InitCommand extends Command<int> {
   }) {
     final questions = InitQuestions(_prompt);
     _prompt.writeln('Project: ${workspace.projectRoot.path}');
-    var projectType = detectedType;
-    if (projectType != null) {
+    final defaultProjectType = detectedType ?? 'application';
+    if (detectedType != null) {
       _prompt.writeln(
-        'Detected ${isHybridProject ? 'hybrid project; using package safety' : projectType}.',
+        isHybridProject
+            ? 'Detected a hybrid project; package is the safe default.'
+            : 'Detected $detectedType.',
       );
-      if (!questions.yesNo(
-        'Use detected type "$projectType"?',
-        defaultValue: true,
-      )) {
-        projectType = _askProjectType(questions, projectType);
-      }
     } else {
-      projectType = _askProjectType(questions, 'application');
+      _prompt.writeln('No conventional entrypoint was detected at:');
+      _prompt.writeln('  - lib/main.dart');
+      _prompt.writeln('  - lib/$packageName.dart');
+      _prompt.writeln('Choose the boundary and path explicitly.');
     }
+    final projectType = _askProjectType(questions, defaultProjectType);
 
     final publicEntrypoints = <String>[];
     late final List<BuildTarget> targets;
@@ -612,16 +612,29 @@ class InitCommand extends Command<int> {
         );
       }
     } else {
-      final suggested = ProjectSourcePath.validate(
-        workspace.projectRoot,
-        _defaultEntrypoint(projectType, packageName),
-        field: 'public entrypoint',
-        kind: ProjectSourceKind.publicLibrary,
+      final defaultPublicEntrypoint = _defaultEntrypoint(
+        projectType,
+        packageName,
       );
-      if (questions.yesNo(
-        'Use public library "$suggested"?',
-        defaultValue: true,
-      )) {
+      String? suggested;
+      try {
+        suggested = ProjectSourcePath.validate(
+          workspace.projectRoot,
+          defaultPublicEntrypoint,
+          field: 'public entrypoint',
+          kind: ProjectSourceKind.publicLibrary,
+        );
+      } on ProjectSourcePathException catch (error) {
+        _prompt.writeln(
+          'Default public library cannot be used: ${error.message}',
+        );
+        _prompt.writeln('Enter another public library path.');
+      }
+      if (suggested != null &&
+          questions.yesNo(
+            'Use public library "$suggested"?',
+            defaultValue: true,
+          )) {
         publicEntrypoints.add(suggested);
       } else {
         publicEntrypoints.addAll(
@@ -653,13 +666,20 @@ class InitCommand extends Command<int> {
         'dart-define combination?',
         defaultValue: false,
       );
-      _prompt.writeln(
-        projectType == 'package'
-            ? 'Package findings remain REVIEW-only because consumers are '
-                  'open-world.'
-            : 'External consumers will not be scanned; package-internal '
-                  'warnings remain enabled.',
-      );
+      if (projectType == 'package') {
+        _prompt.writeln(
+          'Package findings remain REVIEW-only because consumers are '
+          'open-world.',
+        );
+      } else {
+        _prompt.writeln(
+          'Package-internal can produce actionable SAFE findings.',
+        );
+        _prompt.writeln(
+          'Eligible HIGH findings require explicit external-consumer risk '
+          'acknowledgement.',
+        );
+      }
     }
 
     final verification = _verificationCommands(
@@ -677,10 +697,26 @@ class InitCommand extends Command<int> {
       );
       throw const InitCancelledException();
     }
+    _prompt.writeln('Review configuration:');
+    _prompt.writeln('  Analysis mode: $projectType');
+    _prompt.writeln('  Build targets: ${targets.length}');
     _prompt.writeln(
-      'Summary: ${targets.length} target(s), coverage '
-      '${complete ? 'complete' : 'incomplete'}.',
+      '  Target coverage: ${complete ? 'complete' : 'incomplete'}',
     );
+    if (projectType == 'package') {
+      _prompt.writeln(
+        '  Action policy: audit only; external consumers are open-world.',
+      );
+    } else if (projectType == 'package-internal') {
+      _prompt.writeln(
+        '  Analysis boundary: local package; external consumers are not '
+        'scanned.',
+      );
+      _prompt.writeln(
+        '  Action policy: SAFE can be applied; eligible HIGH requires '
+        'confirmation.',
+      );
+    }
     if (!questions.yesNo('Write the configuration?', defaultValue: true)) {
       throw const InitCancelledException();
     }
@@ -693,21 +729,54 @@ class InitCommand extends Command<int> {
     );
   }
 
-  String _askProjectType(InitQuestions questions, String defaultValue) =>
-      questions.text(
-        'Project type',
-        defaultValue: defaultValue,
-        validate: (value) {
-          if (value == 'application' ||
-              value == 'package' ||
-              value == 'package-internal') {
-            return value;
-          }
-          throw const FormatException(
-            'Use application, package, or package-internal.',
-          );
-        },
-      );
+  String _askProjectType(InitQuestions questions, String defaultValue) {
+    final defaultChoice = switch (defaultValue) {
+      'application' => '1',
+      'package' => '2',
+      'package-internal' => '3',
+      _ => throw StateError('Unsupported project type: $defaultValue'),
+    };
+    String marker(String value) => value == defaultValue ? ' (default)' : '';
+
+    _prompt.writeln('Analysis modes:');
+    _prompt.writeln('  1) application${marker('application')}');
+    _prompt.writeln(
+      '     Use when this project owns the complete application boundary.',
+    );
+    _prompt.writeln('  2) package${marker('package')}');
+    _prompt.writeln(
+      '     Reusable/public package; external consumers keep findings at '
+      'REVIEW.',
+    );
+    _prompt.writeln('  3) package-internal${marker('package-internal')}');
+    _prompt.writeln(
+      '     Local package boundary; may produce actionable SAFE findings.',
+    );
+    _prompt.writeln(
+      '     External-consumer candidates may be HIGH and need confirmation.',
+    );
+    return questions.text(
+      'Select mode',
+      defaultValue: defaultChoice,
+      validate: (value) {
+        switch (value.trim().toLowerCase()) {
+          case '1':
+          case 'application':
+            return 'application';
+          case '2':
+          case 'package':
+            return 'package';
+          case '3':
+          case 'package-internal':
+            return 'package-internal';
+          default:
+            throw const FormatException(
+              'Enter 1, 2, or 3 (application, package, or package-internal).',
+            );
+        }
+      },
+    );
+  }
 
   List<BuildTarget> _askTargets(
     InitQuestions questions,
@@ -774,7 +843,7 @@ class InitCommand extends Command<int> {
     Directory projectRoot, {
     required ProjectSourceKind kind,
     required String label,
-    required String defaultValue,
+    required String? defaultValue,
   }) {
     final paths = <String>[];
     do {

@@ -154,6 +154,9 @@ the scan:
 flutter_pruner init --type package-internal
 ```
 
+The interactive wizard always lists all three modes. Pressing Enter keeps the
+detected conservative default; `package-internal` must be selected explicitly.
+
 Both package modes require at least one `public_entrypoints` entry. Public
 exports and their dependency closure remain reachable, so an exported API is
 not reported unused merely because the package does not call it internally.

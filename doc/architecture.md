@@ -132,8 +132,10 @@ configuration, reports, quarantine, and recovery; without it, the current
 directory is selected. `init`, `scan`, and `apply` also accept one positional
 project path for compatibility. `init` creates the reviewable
 `<project>/.flutter_pruner/config.yaml`. In an interactive terminal it builds an
-in-memory draft through yes/no-first questions and writes nothing until final
-confirmation. Scripted runs remain flag-driven and never read stdin. It starts
+in-memory draft through an always-visible, numbered analysis-mode choice with a
+conservative detected default, followed by yes/no-first questions. It writes
+nothing until final confirmation. Scripted runs remain flag-driven and never
+read stdin. It starts
 with `target_matrix.complete: false`; `init --complete` is an explicit
 project-owner assertion after reviewing every target. It never asserts
 external-consumer coverage. Reusable and hybrid projects auto-detect as
