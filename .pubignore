@@ -20,6 +20,7 @@ flutter_pruner.yaml
 .agents/
 .claude/
 .codex/
+AGENTS.md
 .github/
 
 # Tests and their nested Flutter fixture remain available in the source
