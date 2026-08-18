@@ -171,9 +171,7 @@ class _RouteDeclarationVisitor extends RecursiveAstVisitor<void> {
     }
 
     final pathExpression = _namedArgument(node, 'path');
-    final rawPath = pathExpression is StringLiteral
-        ? pathExpression.stringValue
-        : null;
+    final rawPath = _constantString(pathExpression);
 
     if (rawPath == null) {
       blockers.add(
@@ -198,9 +196,8 @@ class _RouteDeclarationVisitor extends RecursiveAstVisitor<void> {
     final String? name;
     if (nameExpression == null) {
       name = null;
-    } else if (nameExpression is StringLiteral &&
-        nameExpression.stringValue != null) {
-      name = nameExpression.stringValue;
+    } else if (_constantString(nameExpression) case final constantName?) {
+      name = constantName;
     } else {
       name = null;
       blockers.add(
@@ -246,6 +243,26 @@ class _RouteDeclarationVisitor extends RecursiveAstVisitor<void> {
       return analyzerArgumentExpression(argument);
     }
     return null;
+  }
+
+  String? _constantString(Expression? expression) {
+    if (expression is StringLiteral) return expression.stringValue;
+    final element = switch (expression) {
+      SimpleIdentifier(:final element) => element,
+      PrefixedIdentifier(:final identifier) => identifier.element,
+      PropertyAccess(:final propertyName) => propertyName.element,
+      _ => null,
+    };
+    final variable = switch (element) {
+      PropertyAccessorElement(:final variable) => variable,
+      VariableElement() => element,
+      _ => null,
+    };
+    try {
+      return variable?.computeConstantValue()?.toStringValue();
+    } on StateError {
+      return null;
+    }
   }
 
   String _location(AstNode node) {

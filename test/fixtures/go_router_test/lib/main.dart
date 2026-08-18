@@ -2,18 +2,21 @@ import 'package:go_router/go_router.dart';
 
 part 'routes.g.dart';
 
+const detailsRouteName = 'details';
+const settingsRoutePath = '/settings';
+
 final router = GoRouter(
   routes: [
     GoRoute(
       path: '/',
       name: 'home',
       routes: [
-        GoRoute(path: 'details', name: 'details'),
+        GoRoute(path: 'details', name: detailsRouteName),
         GoRoute(path: 'orphan'),
       ],
     ),
     GoRoute(path: '/dead'),
-    GoRoute(path: '/settings', name: 'settings'),
+    GoRoute(path: settingsRoutePath, name: 'settings'),
     ShellRoute(routes: [GoRoute(path: '/shell-child')]),
     GoRoute(path: '/flags/:code'),
   ],
@@ -24,11 +27,15 @@ void openHome(BuildContext context) {
 }
 
 void openDetails(BuildContext context) {
-  context.goNamed('details');
+  context.goNamed(detailsRouteName);
 }
 
 void openSettings(BuildContext context) {
-  context.push('/settings');
+  context.push('/settings?tab=profile');
+}
+
+void openFlag(BuildContext context) {
+  context.go('/flags/us');
 }
 
 void openComputed(BuildContext context, String code) {

@@ -105,6 +105,29 @@ void main() {
       );
     });
 
+    test(
+      'resolves query-bearing and parameterized constant locations',
+      () async {
+        final project = await loadFixture();
+        final workspace = DartAnalysisWorkspace(project);
+        final inventory = await RouteInventory.discover(
+          project,
+          workspace: workspace,
+        );
+        final resolver = RouteReferenceResolver(project, inventory);
+
+        await resolver.analyzeProject(workspace: workspace);
+
+        expect(
+          resolver.references.map((reference) => reference.routeNodeId),
+          containsAll({
+            'route:go_router_test:/settings',
+            'route:go_router_test:/flags/:code',
+          }),
+        );
+      },
+    );
+
     test('never reports a reference for an undeclared route', () async {
       final project = await loadFixture();
       final workspace = DartAnalysisWorkspace(project);

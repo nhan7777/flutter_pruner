@@ -150,17 +150,63 @@ class _NavigationVisitor extends RecursiveAstVisitor<void> {
   }
 
   void _resolvePath(Expression argument, AstNode context) {
-    if (argument is StringLiteral && argument.stringValue != null) {
+    if (_constantString(argument) case final location?) {
+      final uri = Uri.tryParse(location);
+      final path = uri?.path;
+      if (path == null || !path.startsWith('/')) {
+        resolver.blockers.add(
+          RouteBlocker(
+            reason: 'navigation location requires runtime-relative resolution',
+            location: _location(argument),
+            sourceNodeId: _callerId(context),
+            affectedNamespace: RouteInventory.namespaceFor(_project),
+          ),
+        );
+        return;
+      }
+
+      final canonicalPath = path.length > 1 && path.endsWith('/')
+          ? path.substring(0, path.length - 1)
+          : path;
       final nodeId = routeNodeId(
         packageName: _project.packageName,
-        fullPath: argument.stringValue!,
+        fullPath: canonicalPath,
       );
       if (resolver.inventory.byNodeId.containsKey(nodeId)) {
         _recordExactReference(
           routeNodeId: nodeId,
           context: context,
           argument: argument,
-          description: "navigates to '${argument.stringValue}'",
+          description: "navigates to '$location'",
+        );
+        return;
+      }
+
+      final candidates = <String>{
+        for (final entry in resolver.inventory.byNodeId.values)
+          if (_couldMatchConcretePath(entry.fullPath, canonicalPath))
+            entry.nodeId,
+      };
+      if (candidates.length == 1) {
+        _recordExactReference(
+          routeNodeId: candidates.single,
+          context: context,
+          argument: argument,
+          description: "navigates to '$location'",
+        );
+      } else {
+        resolver.blockers.add(
+          RouteBlocker(
+            reason: candidates.isEmpty
+                ? 'constant navigation location did not resolve to a declared route'
+                : 'constant navigation location matches multiple route patterns',
+            location: _location(argument),
+            sourceNodeId: _callerId(context),
+            affectedNamespace: candidates.isEmpty
+                ? RouteInventory.namespaceFor(_project)
+                : null,
+            affectedNodeIds: candidates,
+          ),
         );
       }
       return;
@@ -196,10 +242,10 @@ class _NavigationVisitor extends RecursiveAstVisitor<void> {
   }
 
   void _resolveNamed(Expression argument, AstNode context) {
-    if (argument is StringLiteral && argument.stringValue != null) {
+    if (_constantString(argument) case final routeName?) {
       final key = routeNameKey(
         packageName: _project.packageName,
-        name: argument.stringValue!,
+        name: routeName,
       );
       final nodeId = resolver.inventory.nodeIdByNameKey[key];
       if (nodeId != null) {
@@ -207,7 +253,7 @@ class _NavigationVisitor extends RecursiveAstVisitor<void> {
           routeNodeId: nodeId,
           context: context,
           argument: argument,
-          description: "navigates to name '${argument.stringValue}'",
+          description: "navigates to name '$routeName'",
         );
       }
       return;
@@ -227,6 +273,26 @@ class _NavigationVisitor extends RecursiveAstVisitor<void> {
     if (expression is! StringInterpolation) return null;
     final first = expression.elements.first;
     return first is InterpolationString ? first.value : null;
+  }
+
+  String? _constantString(Expression expression) {
+    if (expression is StringLiteral) return expression.stringValue;
+    final element = switch (expression) {
+      SimpleIdentifier(:final element) => element,
+      PrefixedIdentifier(:final identifier) => identifier.element,
+      PropertyAccess(:final propertyName) => propertyName.element,
+      _ => null,
+    };
+    final variable = switch (element) {
+      PropertyAccessorElement(:final variable) => variable,
+      VariableElement() => element,
+      _ => null,
+    };
+    try {
+      return variable?.computeConstantValue()?.toStringValue();
+    } on StateError {
+      return null;
+    }
   }
 
   void _recordExactReference({
@@ -269,6 +335,21 @@ class _NavigationVisitor extends RecursiveAstVisitor<void> {
       final pathSegment = pathSegments[index];
       if (pathSegment.startsWith(':')) continue;
       if (pathSegment != prefixSegments[index]) return false;
+    }
+    return true;
+  }
+
+  bool _couldMatchConcretePath(String routePattern, String locationPath) {
+    final patternSegments = routePattern.split('/');
+    final locationSegments = locationPath.split('/');
+    if (patternSegments.length != locationSegments.length) return false;
+    for (var index = 0; index < patternSegments.length; index++) {
+      final patternSegment = patternSegments[index];
+      if (patternSegment.startsWith(':')) {
+        if (locationSegments[index].isEmpty) return false;
+        continue;
+      }
+      if (patternSegment != locationSegments[index]) return false;
     }
     return true;
   }
