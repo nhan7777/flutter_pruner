@@ -128,7 +128,8 @@ Treat these as protected roots, not as blockers.
 
 Android App Links and iOS Universal Links deliver a URI that the framework turns
 into navigation. A declared route with no `context.go(...)` anywhere in the
-source can still be the app's most-used entry point.
+source can still be the app's most-used entry point. Web targets need no
+additional setup: route paths are read from the browser URL.
 
 <https://docs.flutter.dev/ui/navigation/deep-linking>
 
@@ -169,6 +170,48 @@ treating it as global is how a false `SAFE` happens.
 static tree shaking. `Function.apply` and `noSuchMethod` require a function
 reference or an explicit override, so they do not create string→declaration
 resolution.
+
+---
+
+## Routes
+
+### `go_router` composes nested paths by segment
+
+A child route is declared in its parent's `routes:` list. The full path comes
+from `concatenatePaths(parentFullPath, route.path)`, which splits both sides on
+`/`, drops empty segments and rejoins them under one leading slash. A
+`ShellRoute` groups children without contributing a path segment.
+
+```dart
+GoRoute(
+  path: '/',
+  routes: [GoRoute(path: 'details')], // full path: /details
+)
+```
+
+<https://github.com/flutter/packages/blob/go_router-v17.5.0/packages/go_router/lib/src/path_utils.dart>
+
+### Navigation is exposed through `BuildContext`
+
+`GoRouterHelper` adds `go`, `goNamed`, `push`, `pushNamed`, `replace`,
+`replaceNamed`, `pushReplacement`, `pushReplacementNamed`, `pop`, `canPop` and
+`namedLocation`. The named variants address a route by its `name:` argument,
+not by path, so an adapter must index both.
+
+Because these are extension members on `BuildContext`, a project method with
+the same source name is a different element. Check the declaring library URI,
+not only the method name.
+
+<https://pub.dev/documentation/go_router/17.5.0/go_router/GoRouterHelper.html>
+
+### `GoRoute` declares a path and optional name
+
+`path` is a required `String`, `name` is an optional `String?`, and `routes` is
+a `List<RouteBase>` that defaults to empty. Other constructor parameters
+control builders, redirects, navigator placement, metadata, exit behavior and
+case sensitivity; they do not replace the route identity.
+
+<https://pub.dev/documentation/go_router/17.5.0/go_router/GoRoute-class.html>
 
 ---
 

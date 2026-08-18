@@ -1397,6 +1397,10 @@ class HumanFormatter implements ReportFormatter {
         sourceBytes == null
             ? 'Duplicate group · size unavailable'
             : 'Duplicate group · up to ${_formatBytes(sourceBytes)} reclaimable',
+      NodeKind.route => switch (finding.node.metadata['path']) {
+        final String path => 'Route · $path',
+        _ => 'Route',
+      },
       _ => null,
     };
   }

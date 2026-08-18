@@ -114,7 +114,7 @@ unmodeled runtime boundaries.
 
 ### High-impact candidates
 
-- [ ] Routes: `go_router`
+- [x] Routes: `go_router`
 - [ ] Routes: `auto_route`
 - [ ] Routes: named `Navigator` routes
 - [ ] Dependency injection: `get_it`

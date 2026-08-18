@@ -7,6 +7,15 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+### Added
+
+- Added a `go_router` route analyzer that inventories declared routes,
+  composes nested paths, and resolves path-based and named navigation through
+  the analyzer element model.
+- Route findings remain review-only. Dynamic locations and external route
+  channels, including platform deep links and web URLs, fail closed with
+  scoped blockers.
+
 ## [1.2.0] - 2026-08-18
 
 ### Changed

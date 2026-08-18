@@ -372,11 +372,16 @@ build:
 
 ## Where to look for examples
 
-Once Phase 1A lands, `AssetAdapter` is the reference implementation: it covers
-node creation, semantic reference resolution, pattern handling and blockers.
-`DuplicateAdapter` is the smallest complete example.
+`DuplicateAdapter` is the smallest complete example: one node kind and no
+analyzer use.
 
-Until then, the contract in
-[`lib/src/adapters/analyzer_adapter.dart`](../../lib/src/adapters/analyzer_adapter.dart)
-is fully documented, and [ROADMAP.md](../../ROADMAP.md) lists which adapters are
-still unclaimed.
+`AssetAdapter` is the reference for semantic resolution: inventory, exact
+reference resolution, bounded string evaluation and scoped blockers.
+
+`GoRouterAdapter` is the reference for a third-party framework. It resolves a
+package API through the element model, composes a derived identity (the full
+route path), and blocks its whole namespace when external route channels make
+absence-of-reference meaningless. It also demonstrates the ordering rule:
+declare `dependsOn: ['dart']` when edges start at Dart declarations, and never
+emit an edge to a node no adapter contributes. One dangling edge downgrades
+every finding in the run.

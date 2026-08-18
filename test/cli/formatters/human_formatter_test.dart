@@ -193,6 +193,25 @@ void main() {
       expect(output, contains('Asset · size unavailable'));
     });
 
+    test('renders route findings with their path', () {
+      final output = _stripAnsi(
+        const HumanFormatter(lineWidth: 200).format(
+          _report([
+            _finding(
+              Confidence.review,
+              'router.dart',
+              sourceBytes: null,
+              kind: NodeKind.route,
+              adapter: 'go_router',
+              metadata: {'path': '/checkout'},
+            ),
+          ]),
+        ),
+      );
+
+      expect(output, contains('Route · /checkout'));
+    });
+
     test('shows decision summary and friendly impact without diagnostics', () {
       final output = _stripAnsi(
         const HumanFormatter(lineWidth: 160).format(
@@ -366,6 +385,7 @@ Finding _finding(
   int? sourceBytes = 4096,
   NodeKind kind = NodeKind.declaration,
   String adapter = 'dart',
+  Map<String, Object?> metadata = const {},
   List<ClassificationReason>? classificationReasons,
 }) {
   final blocker = blockerLocation == null
@@ -383,6 +403,7 @@ Finding _finding(
       origin: Uri.file('/project/lib/src/$fileName'),
       displayName: fileName.replaceAll('.dart', ''),
       sizeBytes: sourceBytes,
+      metadata: metadata,
     ),
     confidence: confidence,
     title: fileName,
