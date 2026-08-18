@@ -108,13 +108,15 @@ own domain rather than corrupting the run.
 
 ## Adapter independence
 
-`dependsOn` exists but adapters are expected to leave it empty, and the template
-says so.
+`dependsOn` stays empty when an adapter does not need another adapter's graph
+facts included in the final selected graph or read during analysis. An adapter
+that emits edges from Dart callers declares `dependsOn: ['dart']`, so a filtered
+scan includes the Dart support it needs.
 
-The registry topologically sorts and rejects cycles, so dependencies work
-correctly. The problem is not correctness, it is contribution cost: an adapter
-with dependencies cannot be tested alone, cannot be understood alone, and turns
-a small PR into a conversation about execution order.
+The registry topologically sorts and rejects cycles. Keep dependencies narrow:
+the graph accepts future endpoints, so endpoint creation order alone does not
+require a dependency. Dependencies select or order adapters only when their
+facts must be included or read.
 
 Independence is achievable because the graph is the integration point. The asset
 adapter creates `asset:app/assets/logo.webp` because it read `pubspec.yaml`. The

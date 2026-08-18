@@ -1,0 +1,5 @@
+name: get_it_identity_test
+publish_to: none
+
+environment:
+  sdk: ^3.9.0

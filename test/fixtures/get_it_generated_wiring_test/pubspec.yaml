@@ -1,0 +1,14 @@
+name: get_it_generated_wiring_test
+description: Fixture for conservative generated GetIt wiring detection.
+version: 1.0.0
+publish_to: none
+
+environment:
+  sdk: ^3.9.0
+
+dependencies:
+  get_it: ^9.2.1
+  injectable: ^2.5.0
+
+dev_dependencies:
+  injectable_generator: ^2.6.0

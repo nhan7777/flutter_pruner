@@ -1,0 +1,6 @@
+name: get_it
+description: Minimal GetIt API fixture.
+version: 9.2.1
+
+environment:
+  sdk: ^3.9.0

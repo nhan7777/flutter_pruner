@@ -2,6 +2,7 @@ import 'package:analyzer/dart/analysis/results.dart';
 import 'package:analyzer/dart/ast/ast.dart';
 import 'package:analyzer/dart/ast/visitor.dart';
 import 'package:analyzer/dart/element/element.dart';
+import 'package:analyzer/dart/element/type.dart';
 
 import '../../core/project/project_context.dart';
 import '../dart/analyzer_ast_compat.dart';
@@ -117,6 +118,16 @@ class _NavigationVisitor extends RecursiveAstVisitor<void> {
   void visitMethodInvocation(MethodInvocation node) {
     final method = _resolvedNavigationMethod(node);
     if (method == null) {
+      final dynamicMethod = _dynamicNavigationMethod(node);
+      if (dynamicMethod != null && node.argumentList.arguments.isNotEmpty) {
+        _blockDynamicNavigation(
+          method: dynamicMethod,
+          argument: analyzerArgumentExpression(
+            node.argumentList.arguments.first,
+          ),
+          context: node,
+        );
+      }
       super.visitMethodInvocation(node);
       return;
     }
@@ -140,13 +151,88 @@ class _NavigationVisitor extends RecursiveAstVisitor<void> {
     final element = node.methodName.element;
     if (element is! ExecutableElement) return null;
     final libraryUri = element.library.firstFragment.source.uri.toString();
-    if (libraryUri != goRouterLibraryUri) return null;
+    if (!isGoRouterLibraryUri(libraryUri)) return null;
     final name = element.displayName;
     if (_pathNavigationMethods.contains(name) ||
         _namedNavigationMethods.contains(name)) {
       return name;
     }
     return null;
+  }
+
+  String? _dynamicNavigationMethod(MethodInvocation node) {
+    if (node.realTarget?.staticType is! DynamicType) return null;
+    final name = node.methodName.name;
+    if (_pathNavigationMethods.contains(name) ||
+        _namedNavigationMethods.contains(name)) {
+      return name;
+    }
+    return null;
+  }
+
+  void _blockDynamicNavigation({
+    required String method,
+    required Expression argument,
+    required AstNode context,
+  }) {
+    final affectedNodeIds = _namedNavigationMethods.contains(method)
+        ? _dynamicNamedCandidates(argument)
+        : _dynamicPathCandidates(argument);
+    resolver.blockers.add(
+      RouteBlocker(
+        reason:
+            'navigation receiver has dynamic type and cannot be resolved as '
+            'go_router',
+        location: _location(argument),
+        sourceNodeId: _callerId(context),
+        affectedNamespace: affectedNodeIds.isEmpty
+            ? RouteInventory.namespaceFor(_project)
+            : null,
+        affectedNodeIds: affectedNodeIds,
+      ),
+    );
+  }
+
+  Set<String> _dynamicNamedCandidates(Expression argument) {
+    final routeName = _constantString(argument);
+    if (routeName == null) return const {};
+    final nodeId =
+        resolver.inventory.nodeIdByNameKey[routeNameKey(
+          packageName: _project.packageName,
+          name: routeName,
+        )];
+    return nodeId == null ? const {} : {nodeId};
+  }
+
+  Set<String> _dynamicPathCandidates(Expression argument) {
+    final location = _constantString(argument);
+    if (location != null) {
+      final uri = Uri.tryParse(location);
+      final path = uri?.path;
+      if (path == null || !path.startsWith('/')) return const {};
+      final canonicalPath = path.length > 1 && path.endsWith('/')
+          ? path.substring(0, path.length - 1)
+          : path;
+      final exactNodeId = routeNodeId(
+        packageName: _project.packageName,
+        fullPath: canonicalPath,
+      );
+      if (resolver.inventory.byNodeId.containsKey(exactNodeId)) {
+        return {exactNodeId};
+      }
+      return {
+        for (final entry in resolver.inventory.byNodeId.values)
+          if (_couldMatchConcretePath(entry.fullPath, canonicalPath))
+            entry.nodeId,
+      };
+    }
+
+    final prefix = _constantPrefix(argument);
+    if (prefix == null || prefix.isEmpty) return const {};
+    return {
+      for (final entry in resolver.inventory.byNodeId.values)
+        if (_couldMatchPrefix(entry.fullPath, prefix)) entry.nodeId,
+    };
   }
 
   void _resolvePath(Expression argument, AstNode context) {

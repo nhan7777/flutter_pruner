@@ -1,0 +1,7 @@
+name: get_it
+description: Minimal GetIt API stub for semantic adapter tests.
+version: 9.2.1
+publish_to: none
+
+environment:
+  sdk: ^3.9.0

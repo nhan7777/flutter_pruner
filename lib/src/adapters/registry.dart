@@ -2,13 +2,17 @@ import 'analyzer_adapter.dart';
 import 'asset/asset_adapter.dart';
 import 'dart/dart_adapter.dart';
 import 'duplicate/duplicate_adapter.dart';
+import 'get_it/get_it_adapter.dart';
 import 'go_router/go_router_adapter.dart';
+import 'l10n/l10n_adapter.dart';
 
 final Map<String, Type> _reservedAdapterTypes = {
   'assets': AssetAdapter,
   'duplicates': DuplicateAdapter,
   'dart': DartAdapter,
   'go_router': GoRouterAdapter,
+  'get_it': GetItAdapter,
+  'l10n': L10nAdapter,
 };
 
 const Map<String, String> _reservedRuleOwners = {
@@ -17,6 +21,8 @@ const Map<String, String> _reservedRuleOwners = {
   'PRN-DART-001': 'dart',
   'PRN-DART-002': 'dart',
   'PRN-ROUTE-001': 'go_router',
+  'PRN-DI-001': 'get_it',
+  'PRN-L10N-001': 'l10n',
 };
 
 /// Resolves and orders the adapters a scan will run.
@@ -39,15 +45,16 @@ class AdapterRegistry {
   /// Adapters shipped with the tool, in registration order.
   ///
   /// Phase 1A adds `AssetAdapter`; 1B adds duplicates and Dart; V2 adds routes,
-  /// DI and localization — see ROADMAP.md.
-  static final List<AnalyzerAdapter> builtIn = List.unmodifiable(
-    const <AnalyzerAdapter>[
-      AssetAdapter(),
-      DuplicateAdapter(),
-      DartAdapter(),
-      GoRouterAdapter(),
-    ],
-  );
+  /// DI, and localization — see ROADMAP.md.
+  static final List<AnalyzerAdapter> builtIn =
+      List.unmodifiable(const <AnalyzerAdapter>[
+        AssetAdapter(),
+        DuplicateAdapter(),
+        DartAdapter(),
+        GoRouterAdapter(),
+        GetItAdapter(),
+        L10nAdapter(),
+      ]);
 
   /// Adapters to run for a scan, topologically ordered by [AnalyzerAdapter.dependsOn].
   ///

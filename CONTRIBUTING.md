@@ -5,9 +5,11 @@ capability does not require touching the engine, and so that a first PR can be
 small.
 
 Flutter Pruner is `1.3.0` and solo-maintained. Built-in asset, duplicate-file,
-Dart declaration, and `go_router` adapters are implemented. If you want to
-build something substantial, open a draft PR or a discussion first so we do
-not duplicate work.
+Dart declaration, `go_router`, direct base-scope `GetIt`, and current
+ARB/real-source `gen-l10n` adapters are implemented. The latter two remain
+review-only and deliberately block unmodeled runtime or generated boundaries.
+If you want to build something substantial, open a draft PR or a discussion
+first so we do not duplicate work.
 
 ---
 
@@ -278,11 +280,11 @@ future major release.
 
 ## Unclaimed work
 
-Highest-impact adapters, none started:
+High-impact adapter work still unclaimed:
 
-- routes — `go_router`, `auto_route`, plain `Navigator`
-- DI registrations — `get_it`, `injectable`, `riverpod`
-- localization keys — ARB / `gen-l10n`
+- routes — `auto_route`, named `Navigator` routes
+- DI registrations — `Injectable`, `GetIt` scopes/generated wiring/runtime
+  APIs, `riverpod`
 - unused font weights and variants
 
 [ROADMAP.md](ROADMAP.md) has the current state. Comment on the relevant issue, or

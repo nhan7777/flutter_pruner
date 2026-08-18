@@ -1,0 +1,5 @@
+{
+  "@@locale": "vi",
+  "welcome": "Chao mung",
+  "greeting": "Xin chao {name}"
+}

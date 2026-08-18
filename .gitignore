@@ -2,6 +2,8 @@
 .dart_tool/
 !test/fixtures/go_router_test/.dart_tool/
 !test/fixtures/go_router_test/.dart_tool/package_config.json
+!test/fixtures/get_it*/.dart_tool/
+!test/fixtures/get_it*/.dart_tool/package_config.json
 .packages
 build/
 

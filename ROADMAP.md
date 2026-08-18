@@ -117,9 +117,12 @@ unmodeled runtime boundaries.
 - [x] Routes: `go_router`
 - [ ] Routes: `auto_route`
 - [ ] Routes: named `Navigator` routes
-- [ ] Dependency injection: `get_it`
-- [ ] Dependency injection: `injectable`
-- [ ] Localization keys: ARB and `gen-l10n`
+- [x] Dependency injection: direct base-scope `GetIt` registrations and
+      resolved lookups (review-only)
+- [ ] Dependency injection: `Injectable`, `GetIt` scopes, generated wiring,
+      and runtime/container-state APIs
+- [x] Localization keys: ARB and current real-source `gen-l10n` accessors
+      (review-only)
 
 ### Additional candidates
 

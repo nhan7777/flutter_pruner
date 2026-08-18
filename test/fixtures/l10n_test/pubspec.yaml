@@ -1,0 +1,13 @@
+name: l10n_test
+description: Fixture bootstrap for gen-l10n adapter tests.
+publish_to: none
+
+environment:
+  sdk: ^3.9.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+flutter:
+  generate: true

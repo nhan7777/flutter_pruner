@@ -1,0 +1,17 @@
+{
+  "configVersion": 2,
+  "packages": [
+    {
+      "name": "get_it_test",
+      "rootUri": "../",
+      "packageUri": "lib/",
+      "languageVersion": "3.9"
+    },
+    {
+      "name": "get_it",
+      "rootUri": "../get_it",
+      "packageUri": "lib/",
+      "languageVersion": "3.9"
+    }
+  ]
+}

@@ -1,0 +1,4 @@
+name: get_it
+version: 9.2.1
+environment:
+  sdk: ^3.9.0

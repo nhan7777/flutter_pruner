@@ -20,6 +20,19 @@ Future<ProjectContext> loadFixture() =>
 
 void main() {
   group('RouteInventory', () {
+    test(
+      'discovers routes declared in a re-exported go_router sublibrary',
+      () async {
+        final project = await loadFixture();
+        final inventory = await RouteInventory.discover(
+          project,
+          workspace: DartAnalysisWorkspace(project),
+        );
+
+        expect(inventory.byNodeId, contains('route:go_router_test:/settings'));
+      },
+    );
+
     test('composes full paths for nested and top-level routes', () async {
       final project = await loadFixture();
       final inventory = await RouteInventory.discover(
@@ -35,6 +48,9 @@ void main() {
         '/settings',
         '/shell-child',
         '/flags/:code',
+        '/duplicate-path',
+        '/duplicate-name-one',
+        '/duplicate-name-two',
       });
     });
 
@@ -68,9 +84,78 @@ void main() {
       expect(project.relative(dead.origin.toFilePath()), 'lib/main.dart');
       expect(dead.location, startsWith('lib/main.dart:'));
     });
+
+    test(
+      'preserves the first duplicate path and blocks the route namespace',
+      () async {
+        final project = await loadFixture();
+        final inventory = await RouteInventory.discover(
+          project,
+          workspace: DartAnalysisWorkspace(project),
+        );
+
+        expect(
+          inventory.byNodeId['route:go_router_test:/duplicate-path']!.name,
+          'duplicatePathFirst',
+        );
+        expect(
+          inventory.blockers.map((blocker) => blocker.reason),
+          contains('duplicate route path cannot be represented independently'),
+        );
+        expect(
+          inventory.blockers
+              .where(
+                (blocker) =>
+                    blocker.reason ==
+                    'duplicate route path cannot be represented independently',
+              )
+              .single
+              .affectedNamespace,
+          'route:go_router_test:',
+        );
+      },
+    );
+
+    test('removes an ambiguous route name from the exact index', () async {
+      final project = await loadFixture();
+      final inventory = await RouteInventory.discover(
+        project,
+        workspace: DartAnalysisWorkspace(project),
+      );
+
+      final duplicateNameKey = 'route:go_router_test:#name=duplicate';
+      expect(inventory.nodeIdByNameKey, isNot(contains(duplicateNameKey)));
+      final duplicateName = inventory.blockers.singleWhere(
+        (blocker) => blocker.reason == 'duplicate route name is ambiguous',
+      );
+      expect(duplicateName.affectedNodeIds, {
+        'route:go_router_test:/duplicate-name-one',
+        'route:go_router_test:/duplicate-name-two',
+      });
+    });
   });
 
   group('RouteReferenceResolver', () {
+    test(
+      'resolves navigation declared in a re-exported go_router sublibrary',
+      () async {
+        final project = await loadFixture();
+        final workspace = DartAnalysisWorkspace(project);
+        final inventory = await RouteInventory.discover(
+          project,
+          workspace: workspace,
+        );
+        final resolver = RouteReferenceResolver(project, inventory);
+
+        await resolver.analyzeProject(workspace: workspace);
+
+        expect(
+          resolver.references.map((reference) => reference.routeNodeId),
+          contains('route:go_router_test:/settings'),
+        );
+      },
+    );
+
     test('resolves a constant path to an exact reference', () async {
       final project = await loadFixture();
       final workspace = DartAnalysisWorkspace(project);
@@ -149,6 +234,28 @@ void main() {
       );
     });
 
+    test(
+      'does not create an exact reference for an ambiguous route name',
+      () async {
+        final project = await loadFixture();
+        final workspace = DartAnalysisWorkspace(project);
+        final inventory = await RouteInventory.discover(
+          project,
+          workspace: workspace,
+        );
+        final resolver = RouteReferenceResolver(project, inventory);
+
+        await resolver.analyzeProject(workspace: workspace);
+
+        expect(
+          resolver.references
+              .map((reference) => reference.callerId)
+              .where((callerId) => callerId.endsWith('#openAmbiguousName')),
+          isEmpty,
+        );
+      },
+    );
+
     test('scopes an interpolated location to matching routes', () async {
       final project = await loadFixture();
       final workspace = DartAnalysisWorkspace(project);
@@ -184,6 +291,99 @@ void main() {
       expect(opaque.affectedNamespace, 'route:go_router_test:');
       expect(opaque.sourceNodeId, endsWith('lib/main.dart#openOpaque'));
     });
+
+    test(
+      'blocks navigation through a dynamic receiver without recording liveness',
+      () async {
+        final project = await loadFixture();
+        final workspace = DartAnalysisWorkspace(project);
+        final inventory = await RouteInventory.discover(
+          project,
+          workspace: workspace,
+        );
+        final resolver = RouteReferenceResolver(project, inventory);
+
+        await resolver.analyzeProject(workspace: workspace);
+
+        final dynamicPath = resolver.blockers.singleWhere(
+          (blocker) =>
+              blocker.sourceNodeId?.endsWith('lib/main.dart#openDynamicPath') ??
+              false,
+        );
+        expect(dynamicPath.affectedNodeIds, {'route:go_router_test:/settings'});
+        final dynamicName = resolver.blockers.singleWhere(
+          (blocker) =>
+              blocker.sourceNodeId?.endsWith('lib/main.dart#openDynamicName') ??
+              false,
+        );
+        expect(dynamicName.affectedNodeIds, {'route:go_router_test:/details'});
+        final dynamicOpaque = resolver.blockers.singleWhere(
+          (blocker) =>
+              blocker.sourceNodeId?.endsWith(
+                'lib/main.dart#openDynamicOpaque',
+              ) ??
+              false,
+        );
+        expect(dynamicOpaque.affectedNamespace, 'route:go_router_test:');
+        final dynamicCascade = resolver.blockers.singleWhere(
+          (blocker) =>
+              blocker.sourceNodeId?.endsWith(
+                'lib/main.dart#openDynamicCascade',
+              ) ??
+              false,
+        );
+        expect(dynamicCascade.affectedNodeIds, {
+          'route:go_router_test:/settings',
+        });
+        final dynamicNullShortingCascade = resolver.blockers.singleWhere(
+          (blocker) =>
+              blocker.sourceNodeId?.endsWith(
+                'lib/main.dart#openDynamicNullShortingCascade',
+              ) ??
+              false,
+        );
+        expect(dynamicNullShortingCascade.affectedNodeIds, {
+          'route:go_router_test:/details',
+        });
+        expect(
+          resolver.references
+              .map((reference) => reference.callerId)
+              .where((callerId) => callerId.contains('#openDynamic')),
+          isEmpty,
+        );
+      },
+    );
+
+    test(
+      'ignores a resolved local API with a navigation method name',
+      () async {
+        final project = await loadFixture();
+        final workspace = DartAnalysisWorkspace(project);
+        final inventory = await RouteInventory.discover(
+          project,
+          workspace: workspace,
+        );
+        final resolver = RouteReferenceResolver(project, inventory);
+
+        await resolver.analyzeProject(workspace: workspace);
+
+        expect(
+          resolver.references
+              .map((reference) => reference.callerId)
+              .where((callerId) => callerId.endsWith('#openLocalNavigation')),
+          isEmpty,
+        );
+        expect(
+          resolver.blockers
+              .map((blocker) => blocker.sourceNodeId)
+              .where(
+                (callerId) =>
+                    callerId?.endsWith('#openLocalNavigation') ?? false,
+              ),
+          isEmpty,
+        );
+      },
+    );
   });
 
   group('GoRouterAdapter', () {
@@ -242,6 +442,15 @@ void main() {
       expect(
         graph.blockersFor('route:go_router_test:/flags/:code'),
         isNotEmpty,
+      );
+      expect(
+        graph
+            .blockersFor('route:go_router_test:/settings')
+            .map((blocker) => blocker.reason),
+        contains(
+          'navigation receiver has dynamic type and cannot be resolved as '
+          'go_router',
+        ),
       );
     });
 

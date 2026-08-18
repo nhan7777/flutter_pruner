@@ -1,0 +1,10 @@
+name: get_it_dynamic_receiver_test
+description: GetIt dynamic receiver fixture for adapter tests.
+version: 1.0.0
+publish_to: none
+
+environment:
+  sdk: ^3.9.0
+
+dependencies:
+  get_it: ^9.2.1

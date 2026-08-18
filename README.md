@@ -116,6 +116,8 @@ dart pub global deactivate flutter_pruner
 | Dart | Unreachable top-level declarations and empty libraries | Confidence and mode controlled |
 | Assets | Exact references and assets unreachable from live Dart code | Confidence and mode controlled |
 | Routes | `go_router` declarations and exact path/name navigation | Review only |
+| Dependency injection | Direct base-scope `GetIt` registrations and exact resolved lookups | Review only |
+| Localization | ARB keys and resolved current real-source `gen-l10n` accessors | Review only |
 | Duplicates | Byte-identical files grouped with SHA-256 | Review only |
 
 ## Why Flutter Pruner
@@ -294,6 +296,10 @@ the schema, HTML features and CI selectors.
 - Asset paths assembled only by custom runtime code remain a trust boundary.
   Known dynamic or unresolved asset usage blocks affected findings, but the tool
   cannot prove that an unmodeled runtime API has no consumers.
+- `GetIt` scopes, runtime or dynamic lookup state, and generated `Injectable`
+  wiring are uncertainty boundaries. ARB/gen-l10n analysis targets current
+  real-source output. These cases add scoped blockers rather than authorizing
+  removal.
 - Configured verification and import cleanup run as argv-only subprocesses with
   deadlines and bounded captured output. An unconfirmed detached process tree
   produces `recoveryRequired`; Windows termination behavior is covered by the

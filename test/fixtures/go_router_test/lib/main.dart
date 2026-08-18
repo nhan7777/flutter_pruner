@@ -4,6 +4,7 @@ part 'routes.g.dart';
 
 const detailsRouteName = 'details';
 const settingsRoutePath = '/settings';
+const duplicateRouteName = 'duplicate';
 
 void main() {}
 
@@ -21,6 +22,10 @@ final router = GoRouter(
     GoRoute(path: settingsRoutePath, name: 'settings'),
     ShellRoute(routes: [GoRoute(path: '/shell-child')]),
     GoRoute(path: '/flags/:code'),
+    GoRoute(path: '/duplicate-path', name: 'duplicatePathFirst'),
+    GoRoute(path: '/duplicate-path', name: 'duplicatePathSecond'),
+    GoRoute(path: '/duplicate-name-one', name: duplicateRouteName),
+    GoRoute(path: '/duplicate-name-two', name: duplicateRouteName),
   ],
 );
 
@@ -46,4 +51,36 @@ void openComputed(BuildContext context, String code) {
 
 void openOpaque(BuildContext context, String location) {
   context.go(location);
+}
+
+void openDynamicPath(dynamic context) {
+  context.go('/settings');
+}
+
+void openDynamicName(dynamic context) {
+  context.goNamed(detailsRouteName);
+}
+
+void openDynamicOpaque(dynamic context, String location) {
+  context.push(location);
+}
+
+void openDynamicCascade(dynamic context) {
+  context..go('/settings');
+}
+
+void openDynamicNullShortingCascade(dynamic context) {
+  context?..pushNamed(detailsRouteName);
+}
+
+void openAmbiguousName(BuildContext context) {
+  context.goNamed(duplicateRouteName);
+}
+
+class LocalNavigator {
+  void go(String location) {}
+}
+
+void openLocalNavigation(LocalNavigator navigator) {
+  navigator.go('/dead');
 }

@@ -8,8 +8,12 @@ import '../dart/analyzer_ast_compat.dart';
 import '../dart/dart_analysis_workspace.dart';
 import 'route_path.dart';
 
-/// Library URI that owns the route API this adapter understands.
-const String goRouterLibraryUri = 'package:go_router/go_router.dart';
+/// Package URI namespace that owns the route API this adapter understands.
+const String goRouterPackageUriPrefix = 'package:go_router/';
+
+/// Whether a resolved declaration belongs to the go_router package.
+bool isGoRouterLibraryUri(String libraryUri) =>
+    libraryUri.startsWith(goRouterPackageUriPrefix);
 
 /// One declared route.
 class RouteEntry {
@@ -93,6 +97,7 @@ class RouteInventory {
   }) async {
     final byNodeId = <String, RouteEntry>{};
     final nodeIdByNameKey = <String, String>{};
+    final nodeIdsByNameKey = <String, Set<String>>{};
     final blockers = <RouteBlocker>[];
     final units = <String, ResolvedUnitResult>{};
 
@@ -133,6 +138,7 @@ class RouteInventory {
           unit: unit,
           byNodeId: byNodeId,
           nodeIdByNameKey: nodeIdByNameKey,
+          nodeIdsByNameKey: nodeIdsByNameKey,
           blockers: blockers,
         ),
       );
@@ -152,6 +158,7 @@ class _RouteDeclarationVisitor extends RecursiveAstVisitor<void> {
     required this.unit,
     required this.byNodeId,
     required this.nodeIdByNameKey,
+    required this.nodeIdsByNameKey,
     required this.blockers,
   });
 
@@ -159,6 +166,7 @@ class _RouteDeclarationVisitor extends RecursiveAstVisitor<void> {
   final ResolvedUnitResult unit;
   final Map<String, RouteEntry> byNodeId;
   final Map<String, String> nodeIdByNameKey;
+  final Map<String, Set<String>> nodeIdsByNameKey;
   final List<RouteBlocker> blockers;
   final List<String> _parentPaths = [];
 
@@ -209,19 +217,24 @@ class _RouteDeclarationVisitor extends RecursiveAstVisitor<void> {
       );
     }
 
-    byNodeId[nodeId] = RouteEntry(
+    final entry = RouteEntry(
       nodeId: nodeId,
       fullPath: fullPath,
       name: name,
       origin: Uri.file(unit.path),
       location: _location(node),
     );
-    if (name != null) {
-      nodeIdByNameKey[routeNameKey(
-            packageName: project.packageName,
-            name: name,
-          )] =
-          nodeId;
+    if (byNodeId.containsKey(nodeId)) {
+      blockers.add(
+        RouteBlocker(
+          reason: 'duplicate route path cannot be represented independently',
+          location: entry.location,
+          affectedNamespace: RouteInventory.namespaceFor(project),
+        ),
+      );
+    } else {
+      byNodeId[nodeId] = entry;
+      if (name != null) _indexRouteName(name, nodeId, entry.location);
     }
 
     _parentPaths.add(fullPath);
@@ -229,11 +242,30 @@ class _RouteDeclarationVisitor extends RecursiveAstVisitor<void> {
     _parentPaths.removeLast();
   }
 
+  void _indexRouteName(String name, String nodeId, String location) {
+    final key = routeNameKey(packageName: project.packageName, name: name);
+    final nodeIds = nodeIdsByNameKey.putIfAbsent(key, () => <String>{});
+    nodeIds.add(nodeId);
+    if (nodeIds.length == 1) {
+      nodeIdByNameKey[key] = nodeId;
+      return;
+    }
+
+    nodeIdByNameKey.remove(key);
+    blockers.add(
+      RouteBlocker(
+        reason: 'duplicate route name is ambiguous',
+        location: location,
+        affectedNodeIds: {...nodeIds},
+      ),
+    );
+  }
+
   String? _resolvedGoRouterOwner(InstanceCreationExpression node) {
     final element = node.constructorName.element;
     if (element is! ConstructorElement) return null;
     final libraryUri = element.library.firstFragment.source.uri.toString();
-    if (libraryUri != goRouterLibraryUri) return null;
+    if (!isGoRouterLibraryUri(libraryUri)) return null;
     return element.enclosingElement.name;
   }
 

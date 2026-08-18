@@ -1,0 +1,14 @@
+{
+  "@@locale": "en",
+  "welcome": "Welcome",
+  "cartItem": "{count, plural, =0{No items} other{{count} items}}",
+  "greeting": "Hello {name}",
+  "@greeting": {
+    "description": "Greeting for the signed-in user.",
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  }
+}

@@ -1,0 +1,10 @@
+name: get_it_test
+description: Semantic fixture for GetIt registration inventory tests.
+version: 1.0.0
+publish_to: none
+
+environment:
+  sdk: ^3.9.0
+
+dependencies:
+  get_it: ^9.2.1

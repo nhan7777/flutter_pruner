@@ -1,4 +1,8 @@
+import 'dart:io';
+
 import 'package:flutter_pruner/flutter_pruner.dart';
+import 'package:flutter_pruner/src/analysis/project_analyzer.dart';
+import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
 /// A no-op adapter used to exercise selection and ordering.
@@ -129,10 +133,10 @@ void main() {
     test('builtIn contains every shipped adapter', () {
       // Phase 1A: AssetAdapter
       // Phase 1B: DuplicateAdapter, DartAdapter
-      expect(AdapterRegistry.builtIn, hasLength(4));
+      expect(AdapterRegistry.builtIn, hasLength(6));
       expect(
         AdapterRegistry.builtIn.map((a) => a.id).toList(),
-        equals(['assets', 'duplicates', 'dart', 'go_router']),
+        equals(['assets', 'duplicates', 'dart', 'go_router', 'get_it', 'l10n']),
       );
     });
 
@@ -150,7 +154,14 @@ void main() {
       );
       expect(
         AdapterRegistry.builtIn.map((adapter) => adapter.id),
-        orderedEquals(['assets', 'duplicates', 'dart', 'go_router']),
+        orderedEquals([
+          'assets',
+          'duplicates',
+          'dart',
+          'go_router',
+          'get_it',
+          'l10n',
+        ]),
       );
     });
 
@@ -162,7 +173,14 @@ void main() {
 
       expect(
         definitions.keys,
-        containsAll(['assets', 'duplicates', 'dart', 'go_router']),
+        containsAll([
+          'assets',
+          'duplicates',
+          'dart',
+          'go_router',
+          'get_it',
+          'l10n',
+        ]),
       );
       expect(
         definitions['assets']!.findingFor(NodeKind.asset)!.ruleId,
@@ -181,6 +199,14 @@ void main() {
       expect(
         definitions['go_router']!.findingFor(NodeKind.route)!.ruleId,
         'PRN-ROUTE-001',
+      );
+      expect(
+        definitions['get_it']!.findingFor(NodeKind.diRegistration)!.ruleId,
+        'PRN-DI-001',
+      );
+      expect(
+        definitions['l10n']!.findingFor(NodeKind.localizationKey)!.ruleId,
+        'PRN-L10N-001',
       );
       expect(
         definitions.values.every(
@@ -259,6 +285,32 @@ void main() {
       );
     });
 
+    test('get_it resolves after its dart dependency', () {
+      expect(
+        AdapterRegistry.resolve(
+          only: {'get_it', 'dart'},
+        ).map((adapter) => adapter.id),
+        equals(['dart', 'get_it']),
+      );
+      expect(
+        () => AdapterRegistry.resolve(only: {'get_it'}),
+        throwsA(isA<StateError>()),
+      );
+    });
+
+    test('l10n resolves after its dart dependency', () {
+      expect(
+        AdapterRegistry.resolve(
+          only: {'l10n', 'dart'},
+        ).map((adapter) => adapter.id),
+        equals(['dart', 'l10n']),
+      );
+      expect(
+        () => AdapterRegistry.resolve(only: {'l10n'}),
+        throwsA(isA<StateError>()),
+      );
+    });
+
     test('a dependency runs before its dependent', () {
       final resolved = AdapterRegistry.resolve(
         adapters: const [
@@ -333,6 +385,39 @@ void main() {
       );
     });
 
+    test(
+      'rejects a contributor impersonating the reserved GetIt adapter id',
+      () {
+        expect(
+          () =>
+              AdapterRegistry.resolve(adapters: const [_FakeAdapter('get_it')]),
+          throwsA(
+            isA<StateError>().having(
+              (error) => error.message,
+              'message',
+              contains('reserved for the core'),
+            ),
+          ),
+        );
+      },
+    );
+
+    test(
+      'rejects a contributor impersonating the reserved l10n adapter id',
+      () {
+        expect(
+          () => AdapterRegistry.resolve(adapters: const [_FakeAdapter('l10n')]),
+          throwsA(
+            isA<StateError>().having(
+              (error) => error.message,
+              'message',
+              contains('reserved for the core'),
+            ),
+          ),
+        );
+      },
+    );
+
     test('rejects a contributor claiming a reserved core rule id', () {
       final adapter = _FakeAdapter(
         'routes',
@@ -357,6 +442,64 @@ void main() {
             (error) => error.message,
             'message',
             contains('reserved for adapter "dart"'),
+          ),
+        ),
+      );
+    });
+
+    test('rejects a contributor claiming the reserved GetIt rule id', () {
+      final adapter = _FakeAdapter(
+        'contributor_di',
+        definition: AdapterReportDefinition(
+          adapterId: 'contributor_di',
+          displayName: 'fake contributor_di',
+          findings: [
+            AdapterFindingReportDefinition(
+              nodeKind: NodeKind.diRegistration,
+              ruleId: 'PRN-DI-001',
+              title: 'Pretend DI rule',
+              nodeLabel: 'DI registration',
+            ),
+          ],
+        ),
+      );
+
+      expect(
+        () => AdapterRegistry.resolve(adapters: [adapter]),
+        throwsA(
+          isA<StateError>().having(
+            (error) => error.message,
+            'message',
+            contains('reserved for adapter "get_it"'),
+          ),
+        ),
+      );
+    });
+
+    test('rejects a contributor claiming the reserved l10n rule id', () {
+      final adapter = _FakeAdapter(
+        'contributor_l10n',
+        definition: AdapterReportDefinition(
+          adapterId: 'contributor_l10n',
+          displayName: 'fake contributor_l10n',
+          findings: [
+            AdapterFindingReportDefinition(
+              nodeKind: NodeKind.localizationKey,
+              ruleId: 'PRN-L10N-001',
+              title: 'Pretend localization rule',
+              nodeLabel: 'Localization key',
+            ),
+          ],
+        ),
+      );
+
+      expect(
+        () => AdapterRegistry.resolve(adapters: [adapter]),
+        throwsA(
+          isA<StateError>().having(
+            (error) => error.message,
+            'message',
+            contains('reserved for adapter "l10n"'),
           ),
         ),
       );
@@ -530,4 +673,66 @@ void main() {
       );
     });
   });
+
+  group('filtered pipeline', () {
+    test('l10n-only analysis runs Dart as support end to end', () async {
+      final root = await _copyL10nFixture();
+      addTearDown(() => root.delete(recursive: true));
+      final inferred = await ProjectContext.load(root);
+      final project = ProjectContext(
+        root: root,
+        pubspec: inferred.pubspec,
+        packageName: inferred.packageName,
+        targetMatrix: TargetMatrix.declared([
+          BuildTarget(
+            name: 'test',
+            platform: 'android',
+            entrypoint: 'lib/main.dart',
+          ),
+        ]),
+        rootCoverage: RootCoverage.applicationApi(),
+      );
+
+      final snapshot = await ProjectAnalyzer(
+        project: project,
+        only: {'l10n'},
+      ).analyze();
+
+      expect(snapshot.adapterIds, ['dart', 'l10n']);
+      expect(snapshot.graph.danglingEdgesFor(project.targets), isEmpty);
+      expect(snapshot.graph.danglingRootIdsFor(project.targets), isEmpty);
+      expect(snapshot.findings, isNotEmpty);
+      expect(
+        snapshot.findings.every(
+          (finding) =>
+              finding.node.kind == NodeKind.localizationKey &&
+              finding.reportingAdapterId == 'l10n',
+        ),
+        isTrue,
+      );
+      expect(snapshot.adapterRuns.map((run) => '${run.id}:${run.role.name}'), [
+        'dart:support',
+        'l10n:reporting',
+      ]);
+    });
+  });
+}
+
+Future<Directory> _copyL10nFixture() async {
+  final source = Directory(p.absolute('test/fixtures/l10n_test'));
+  final root = await Directory.systemTemp.createTemp('registry_l10n_');
+  await for (final entity in source.list(recursive: true)) {
+    final relative = p.relative(entity.path, from: source.path);
+    final destination = p.join(root.path, relative);
+    if (entity is Directory) {
+      await Directory(destination).create(recursive: true);
+    } else if (entity is File) {
+      await File(destination).parent.create(recursive: true);
+      await entity.copy(destination);
+    }
+  }
+  await File(
+    p.join(root.path, 'lib/main.dart'),
+  ).writeAsString('void main() {}');
+  return root;
 }

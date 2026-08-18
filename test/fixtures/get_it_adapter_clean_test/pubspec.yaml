@@ -1,0 +1,10 @@
+name: get_it_adapter_clean_test
+description: Complete base-scope fixture for GetIt adapter integration tests.
+version: 1.0.0
+publish_to: none
+
+environment:
+  sdk: ^3.9.0
+
+dependencies:
+  get_it: ^9.2.1

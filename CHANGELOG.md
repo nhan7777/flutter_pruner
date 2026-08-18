@@ -7,6 +7,13 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+### Added
+
+- Added review-only direct base-scope `GetIt` registration and lookup analysis,
+  plus ARB/current real-source `gen-l10n` key and accessor analysis. Dynamic,
+  runtime, and generated boundaries emit scoped blockers; neither adapter has
+  an apply action.
+
 ## [1.3.0] - 2026-08-18
 
 ### Added
