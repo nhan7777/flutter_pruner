@@ -115,6 +115,7 @@ dart pub global deactivate flutter_pruner
 |---|---|---|
 | Dart | Unreachable top-level declarations and empty libraries | Confidence and mode controlled |
 | Assets | Exact references and assets unreachable from live Dart code | Confidence and mode controlled |
+| Routes | `go_router` declarations and exact path/name navigation | Review only |
 | Duplicates | Byte-identical files grouped with SHA-256 | Review only |
 
 ## Why Flutter Pruner

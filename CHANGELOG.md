@@ -7,6 +7,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-08-18
+
 ### Added
 
 - Added a `go_router` route analyzer that inventories declared routes,
@@ -15,6 +17,14 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Route findings remain review-only. Dynamic locations and external route
   channels, including platform deep links and web URLs, fail closed with
   scoped blockers.
+
+### Changed
+
+- Reworked the interactive `init` wizard to always present all three analysis
+  modes, keep the detected conservative default, and require an explicit choice
+  for `package-internal`.
+- Improved terminal hierarchy for configuration summaries, risk warnings, and
+  next steps while preserving the same labels when ANSI styling is unavailable.
 
 ## [1.2.0] - 2026-08-18
 
@@ -168,7 +178,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Custom runtime callback and asset registries require explicit modeling or
   project policy.
 
-[Unreleased]: https://github.com/nhan7777/flutter_pruner/compare/v1.2.0...main
+[Unreleased]: https://github.com/nhan7777/flutter_pruner/compare/v1.3.0...main
+[1.3.0]: https://github.com/nhan7777/flutter_pruner/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/nhan7777/flutter_pruner/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/nhan7777/flutter_pruner/compare/v1.0.1...v1.1.0
 [1.0.1]: https://github.com/nhan7777/flutter_pruner/compare/v1.0.0...v1.0.1
