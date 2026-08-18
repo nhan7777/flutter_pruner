@@ -22,6 +22,7 @@ flutter_pruner.yaml
 .codex/
 AGENTS.md
 .github/
+doc/superpowers/
 
 # Tests and their nested Flutter fixture remain available in the source
 # repository; they are not runtime contents of the published CLI package.
