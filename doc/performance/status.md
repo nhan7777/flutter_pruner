@@ -25,7 +25,8 @@ the fail-closed safety model and are covered by regression tests.
 - Duplicate I/O: candidates are grouped by file size before hashing and only
   collision groups are hashed. SHA-256 consumes file streams instead of loading
   the largest file into one allocation. Asset inventory hashing is streaming as
-  well.
+  well. Quarantine integrity checks also stream file bytes so their peak
+  allocation does not scale with the largest transaction file.
 - Path fast path: lexical exclusions run before filesystem syscalls. Traversals
   using `followLinks: false` reuse the known entity type and do not repeat
   canonical resolution for every ordinary file.

@@ -2600,8 +2600,7 @@ class QuarantineManager {
   }
 
   Future<String> _computeSha256(File file) async {
-    final bytes = await file.readAsBytes();
-    return sha256.convert(bytes).toString();
+    return (await sha256.bind(file.openRead()).first).toString();
   }
 
   File _quarantineFileFor(Directory quarantineDir, String originalPath) {

@@ -12,6 +12,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Made JSON v3 output compact and lazy, cached stable blocker IDs across
   findings, deduplicated exact blocker facts before graph indexing, and changed
   blocker retention to a source-indexed work queue.
+- Streamed quarantine SHA-256 integrity checks instead of allocating each
+  complete file in memory.
 - Made HIGH classification check its manual-risk allowlist explicitly and
   strengthened duplicate planning tests so review-only findings cannot enter a
   removal plan even if an upstream tier is malformed.
