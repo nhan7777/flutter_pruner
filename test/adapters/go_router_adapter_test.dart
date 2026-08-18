@@ -6,8 +6,10 @@ import 'package:flutter_pruner/src/adapters/dart/dart_analysis_workspace.dart';
 import 'package:flutter_pruner/src/adapters/go_router/go_router_adapter.dart';
 import 'package:flutter_pruner/src/adapters/go_router/route_inventory.dart';
 import 'package:flutter_pruner/src/adapters/go_router/route_reference_resolver.dart';
+import 'package:flutter_pruner/src/analysis/project_analyzer.dart';
 import 'package:flutter_pruner/src/core/confidence/confidence.dart';
 import 'package:flutter_pruner/src/core/confidence/finding_generator.dart';
+import 'package:flutter_pruner/src/core/graph/node.dart';
 import 'package:flutter_pruner/src/core/graph/reachability_graph.dart';
 import 'package:flutter_pruner/src/core/project/project_context.dart';
 import 'package:path/path.dart' as p;
@@ -301,6 +303,31 @@ void main() {
 
       expect(const GoRouterAdapter().appliesTo(project), isTrue);
       expect(const GoRouterAdapter().dependsOn, ['dart']);
+    });
+
+    test('route-only analysis runs Dart as support end to end', () async {
+      final project = await loadFixture();
+
+      final snapshot = await ProjectAnalyzer(
+        project: project,
+        only: {'go_router'},
+      ).analyze();
+
+      expect(snapshot.adapterIds, ['dart', 'go_router']);
+      expect(snapshot.graph.danglingEdgesFor(project.targets), isEmpty);
+      expect(snapshot.findings, isNotEmpty);
+      expect(
+        snapshot.findings.every(
+          (finding) =>
+              finding.node.kind == NodeKind.route &&
+              finding.reportingAdapterId == 'go_router',
+        ),
+        isTrue,
+      );
+      expect(snapshot.adapterRuns.map((run) => '${run.id}:${run.role.name}'), [
+        'dart:support',
+        'go_router:reporting',
+      ]);
     });
   });
 }
