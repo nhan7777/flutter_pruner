@@ -252,21 +252,26 @@ void main() {
       expect(findings.first.ruleId, 'PRN-ROUTE-001');
     });
 
-    test(
-      'adds no dangling edges that would downgrade other adapters',
-      () async {
-        final project = await loadFixture();
-        final graph = ReachabilityGraph();
+    test('adds no dangling edges that would downgrade other adapters', () async {
+      final project = await loadFixture();
+      final graph = ReachabilityGraph();
 
-        await const DartAdapter().analyze(project, GraphBuilder(graph, 'dart'));
-        await const GoRouterAdapter().analyze(
-          project,
-          GraphBuilder(graph, 'go_router'),
-        );
+      await const DartAdapter().analyze(project, GraphBuilder(graph, 'dart'));
+      await const GoRouterAdapter().analyze(
+        project,
+        GraphBuilder(graph, 'go_router'),
+      );
 
-        expect(graph.danglingEdgesFor(project.targets), isEmpty);
-      },
-    );
+      expect(graph.danglingEdgesFor(project.targets), isEmpty);
+      expect(
+        graph
+            .blockersFor('route:go_router_test:/dead')
+            .map((blocker) => blocker.reason),
+        contains(
+          'navigation occurs in a source unit not modeled by the Dart adapter',
+        ),
+      );
+    });
 
     test('applies only to projects that depend on go_router', () async {
       final project = await loadFixture();

@@ -156,13 +156,11 @@ class _NavigationVisitor extends RecursiveAstVisitor<void> {
         fullPath: argument.stringValue!,
       );
       if (resolver.inventory.byNodeId.containsKey(nodeId)) {
-        resolver.references.add(
-          RouteReference(
-            routeNodeId: nodeId,
-            callerId: _callerId(context),
-            location: _location(argument),
-            description: "navigates to '${argument.stringValue}'",
-          ),
+        _recordExactReference(
+          routeNodeId: nodeId,
+          context: context,
+          argument: argument,
+          description: "navigates to '${argument.stringValue}'",
         );
       }
       return;
@@ -205,13 +203,11 @@ class _NavigationVisitor extends RecursiveAstVisitor<void> {
       );
       final nodeId = resolver.inventory.nodeIdByNameKey[key];
       if (nodeId != null) {
-        resolver.references.add(
-          RouteReference(
-            routeNodeId: nodeId,
-            callerId: _callerId(context),
-            location: _location(argument),
-            description: "navigates to name '${argument.stringValue}'",
-          ),
+        _recordExactReference(
+          routeNodeId: nodeId,
+          context: context,
+          argument: argument,
+          description: "navigates to name '${argument.stringValue}'",
         );
       }
       return;
@@ -231,6 +227,35 @@ class _NavigationVisitor extends RecursiveAstVisitor<void> {
     if (expression is! StringInterpolation) return null;
     final first = expression.elements.first;
     return first is InterpolationString ? first.value : null;
+  }
+
+  void _recordExactReference({
+    required String routeNodeId,
+    required AstNode context,
+    required AstNode argument,
+    required String description,
+  }) {
+    final callerId = _callerId(context);
+    if (callerId == null) {
+      resolver.blockers.add(
+        RouteBlocker(
+          reason:
+              'navigation occurs in a source unit not modeled by the Dart '
+              'adapter',
+          location: _location(argument),
+          affectedNodeIds: {routeNodeId},
+        ),
+      );
+      return;
+    }
+    resolver.references.add(
+      RouteReference(
+        routeNodeId: routeNodeId,
+        callerId: callerId,
+        location: _location(argument),
+        description: description,
+      ),
+    );
   }
 
   bool _couldMatchPrefix(String fullPath, String prefix) {
@@ -254,7 +279,8 @@ class _NavigationVisitor extends RecursiveAstVisitor<void> {
         '${position.lineNumber}:${position.columnNumber}';
   }
 
-  String _callerId(AstNode node) {
+  String? _callerId(AstNode node) {
+    if (!DartIds.isModeledProjectPath(_project, unit.path)) return null;
     AstNode? current = node.parent;
     while (current != null) {
       final fragment = switch (current) {
