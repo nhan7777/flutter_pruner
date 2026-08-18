@@ -39,6 +39,33 @@ class _FakeAdapter extends AnalyzerAdapter {
   Future<void> analyze(ProjectContext project, GraphBuilder graph) async {}
 }
 
+class _RouteImpersonator extends AnalyzerAdapter {
+  const _RouteImpersonator();
+
+  @override
+  String get id => 'contributor_routes';
+
+  @override
+  String get name => 'Contributor routes';
+
+  @override
+  AdapterReportDefinition get reportDefinition => AdapterReportDefinition(
+    adapterId: 'contributor_routes',
+    displayName: 'Contributor routes',
+    findings: [
+      AdapterFindingReportDefinition(
+        nodeKind: NodeKind.route,
+        ruleId: 'PRN-ROUTE-001',
+        title: 'Unused route',
+        nodeLabel: 'Route',
+      ),
+    ],
+  );
+
+  @override
+  Future<void> analyze(ProjectContext project, GraphBuilder graph) async {}
+}
+
 List<String> _ids(List<AnalyzerAdapter> adapters) =>
     adapters.map((a) => a.id).toList();
 
@@ -99,13 +126,13 @@ void main() {
       },
     );
 
-    test('builtIn contains all Phase 1 adapters', () {
+    test('builtIn contains every shipped adapter', () {
       // Phase 1A: AssetAdapter
       // Phase 1B: DuplicateAdapter, DartAdapter
-      expect(AdapterRegistry.builtIn, hasLength(3));
+      expect(AdapterRegistry.builtIn, hasLength(4));
       expect(
         AdapterRegistry.builtIn.map((a) => a.id).toList(),
-        equals(['assets', 'duplicates', 'dart']),
+        equals(['assets', 'duplicates', 'dart', 'go_router']),
       );
     });
 
@@ -123,7 +150,7 @@ void main() {
       );
       expect(
         AdapterRegistry.builtIn.map((adapter) => adapter.id),
-        orderedEquals(['assets', 'duplicates', 'dart']),
+        orderedEquals(['assets', 'duplicates', 'dart', 'go_router']),
       );
     });
 
@@ -133,7 +160,10 @@ void main() {
           adapter.id: adapter.reportDefinition,
       };
 
-      expect(definitions.keys, containsAll(['assets', 'duplicates', 'dart']));
+      expect(
+        definitions.keys,
+        containsAll(['assets', 'duplicates', 'dart', 'go_router']),
+      );
       expect(
         definitions['assets']!.findingFor(NodeKind.asset)!.ruleId,
         'PRN-ASSET-001',
@@ -147,6 +177,10 @@ void main() {
       expect(
         definitions['dart']!.findingFor(NodeKind.declaration)!.ruleId,
         'PRN-DART-001',
+      );
+      expect(
+        definitions['go_router']!.findingFor(NodeKind.route)!.ruleId,
+        'PRN-ROUTE-001',
       );
       expect(
         definitions.values.every(
@@ -212,6 +246,19 @@ void main() {
   });
 
   group('ordering', () {
+    test('go_router resolves after its dart dependency', () {
+      expect(
+        AdapterRegistry.resolve(
+          only: {'go_router', 'dart'},
+        ).map((adapter) => adapter.id),
+        equals(['dart', 'go_router']),
+      );
+      expect(
+        () => AdapterRegistry.resolve(only: {'go_router'}),
+        throwsA(isA<StateError>()),
+      );
+    });
+
     test('a dependency runs before its dependent', () {
       final resolved = AdapterRegistry.resolve(
         adapters: const [
@@ -264,6 +311,15 @@ void main() {
   });
 
   group('failure modes', () {
+    test('a contributor cannot claim the route rule', () {
+      expect(
+        () => AdapterRegistry.resolve(
+          adapters: [const _RouteImpersonator(), ...AdapterRegistry.builtIn],
+        ),
+        throwsA(isA<StateError>()),
+      );
+    });
+
     test('rejects a contributor impersonating a reserved adapter id', () {
       expect(
         () => AdapterRegistry.resolve(adapters: const [_FakeAdapter('dart')]),

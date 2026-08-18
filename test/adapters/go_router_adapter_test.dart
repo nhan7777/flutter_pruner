@@ -1,8 +1,14 @@
 import 'dart:io';
 
+import 'package:flutter_pruner/src/adapters/analyzer_adapter.dart';
+import 'package:flutter_pruner/src/adapters/dart/dart_adapter.dart';
 import 'package:flutter_pruner/src/adapters/dart/dart_analysis_workspace.dart';
+import 'package:flutter_pruner/src/adapters/go_router/go_router_adapter.dart';
 import 'package:flutter_pruner/src/adapters/go_router/route_inventory.dart';
 import 'package:flutter_pruner/src/adapters/go_router/route_reference_resolver.dart';
+import 'package:flutter_pruner/src/core/confidence/confidence.dart';
+import 'package:flutter_pruner/src/core/confidence/finding_generator.dart';
+import 'package:flutter_pruner/src/core/graph/reachability_graph.dart';
 import 'package:flutter_pruner/src/core/project/project_context.dart';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
@@ -152,6 +158,121 @@ void main() {
       );
       expect(opaque.affectedNamespace, 'route:go_router_test:');
       expect(opaque.sourceNodeId, endsWith('lib/main.dart#openOpaque'));
+    });
+  });
+
+  group('GoRouterAdapter', () {
+    test('reports a route with no navigation call site', () async {
+      final project = await loadFixture();
+      final graph = ReachabilityGraph();
+
+      await const GoRouterAdapter().analyze(
+        project,
+        GraphBuilder(graph, 'go_router'),
+      );
+
+      expect(graph.hasNode('route:go_router_test:/dead'), isTrue);
+      expect(graph.incomingTo('route:go_router_test:/dead'), isEmpty);
+    });
+
+    test('retains routes reached by constant navigation', () async {
+      final project = await loadFixture();
+      final graph = ReachabilityGraph();
+
+      await const GoRouterAdapter().analyze(
+        project,
+        GraphBuilder(graph, 'go_router'),
+      );
+
+      expect(graph.incomingTo('route:go_router_test:/settings'), isNotEmpty);
+      expect(graph.incomingTo('route:go_router_test:/details'), isNotEmpty);
+    });
+
+    test('models navigation as an edge rather than a root', () async {
+      final project = await loadFixture();
+      final graph = ReachabilityGraph();
+
+      await const GoRouterAdapter().analyze(
+        project,
+        GraphBuilder(graph, 'go_router'),
+      );
+
+      expect(graph.rootIds, isNot(contains('route:go_router_test:/settings')));
+    });
+
+    test('dynamic navigation blocks routes instead of deleting them', () async {
+      final project = await loadFixture();
+      final graph = ReachabilityGraph();
+
+      await const GoRouterAdapter().analyze(
+        project,
+        GraphBuilder(graph, 'go_router'),
+      );
+
+      expect(
+        graph.blockersFor('route:go_router_test:/dead'),
+        isNotEmpty,
+        reason: 'an opaque navigation argument could address any route',
+      );
+      expect(
+        graph.blockersFor('route:go_router_test:/flags/:code'),
+        isNotEmpty,
+      );
+    });
+
+    test('route findings never reach SAFE or HIGH', () async {
+      final project = await loadFixture();
+      final graph = ReachabilityGraph();
+
+      await const DartAdapter().analyze(project, GraphBuilder(graph, 'dart'));
+      await const GoRouterAdapter().analyze(
+        project,
+        GraphBuilder(graph, 'go_router'),
+      );
+
+      final findings = const FindingGenerator().generate(
+        graph: graph,
+        project: project,
+        reportingNodeSchemes: const {'route'},
+      );
+
+      expect(findings, isNotEmpty);
+      expect(
+        findings.every(
+          (finding) =>
+              finding.confidence == Confidence.review ||
+              finding.confidence == Confidence.protected,
+        ),
+        isTrue,
+      );
+      expect(
+        findings.every((finding) => finding.proposedAction == null),
+        isTrue,
+      );
+      expect(findings.first.ruleId, 'PRN-ROUTE-001');
+    });
+
+    test(
+      'adds no dangling edges that would downgrade other adapters',
+      () async {
+        final project = await loadFixture();
+        final graph = ReachabilityGraph();
+
+        await const DartAdapter().analyze(project, GraphBuilder(graph, 'dart'));
+        await const GoRouterAdapter().analyze(
+          project,
+          GraphBuilder(graph, 'go_router'),
+        );
+
+        expect(graph.danglingEdgesFor(project.targets), isEmpty);
+      },
+    );
+
+    test('applies only to projects that depend on go_router', () async {
+      final project = await loadFixture();
+
+      expect(const GoRouterAdapter().appliesTo(project), isTrue);
+      expect(const GoRouterAdapter().dependsOn, ['dart']);
     });
   });
 }
