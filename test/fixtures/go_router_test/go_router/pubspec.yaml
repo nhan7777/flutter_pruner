@@ -1,0 +1,7 @@
+name: go_router
+description: Minimal stub of go_router for adapter fixtures.
+version: 17.5.0
+publish_to: none
+
+environment:
+  sdk: ^3.9.0

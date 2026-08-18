@@ -1,0 +1,10 @@
+name: go_router_test
+description: Fixture for go_router route analysis.
+version: 1.0.0
+publish_to: none
+
+environment:
+  sdk: ^3.9.0
+
+dependencies:
+  go_router: ^17.5.0

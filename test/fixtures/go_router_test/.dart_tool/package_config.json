@@ -1,0 +1,17 @@
+{
+  "configVersion": 2,
+  "packages": [
+    {
+      "name": "go_router_test",
+      "rootUri": "../",
+      "packageUri": "lib/",
+      "languageVersion": "3.9"
+    },
+    {
+      "name": "go_router",
+      "rootUri": "../go_router",
+      "packageUri": "lib/",
+      "languageVersion": "3.9"
+    }
+  ]
+}
