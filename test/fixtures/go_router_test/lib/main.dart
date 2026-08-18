@@ -5,6 +5,8 @@ part 'routes.g.dart';
 const detailsRouteName = 'details';
 const settingsRoutePath = '/settings';
 
+void main() {}
+
 final router = GoRouter(
   routes: [
     GoRoute(
