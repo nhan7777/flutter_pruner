@@ -14,7 +14,14 @@ void main() {
   late ResolvedLibraryResult library;
 
   setUpAll(() async {
-    final root = Directory(p.absolute('test/fixtures/get_it_identity_test'));
+    final root = Directory(
+      p.join(
+        Directory.current.path,
+        'test',
+        'fixtures',
+        'get_it_identity_test',
+      ),
+    );
     final mainPath = p.join(root.path, 'lib', 'main.dart');
     final collection = AnalysisContextCollection(includedPaths: [root.path]);
     final result = await collection

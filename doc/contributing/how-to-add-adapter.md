@@ -288,10 +288,15 @@ filters or orders adapters, so invalid report metadata cannot be hidden by an
 ## Step 7 — Open the pull request
 
 ```bash
-dart format .
-dart analyze
+git diff -z --name-only --diff-filter=ACMR origin/main...HEAD -- '*.dart' \
+  | xargs -0 dart format
+dart analyze --fatal-infos
 dart test
 ```
+
+The three-dot diff starts at the merge base, so formatting stays limited to the
+contribution instead of absorbing unrelated changes from `main`. Generated or
+otherwise unrelated files do not belong in an adapter commit.
 
 Then open a PR. A draft PR with a rough approach and a question is welcome — it
 is much cheaper to redirect an approach early than after a week of work.

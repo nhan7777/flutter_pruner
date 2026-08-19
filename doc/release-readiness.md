@@ -1,6 +1,6 @@
 # Release readiness
 
-V1 release readiness is evidence-based. Passing unit tests is necessary, but a
+Release readiness is evidence-based. Passing unit tests is necessary, but a
 cleanup tool also needs clean-tree replay, real-project fail-closed evidence,
 and a reproducible reporting-overhead measurement.
 
@@ -26,6 +26,39 @@ jq -e '
 
 Hosted CI remains the authority for the supported Dart floor and stable Linux,
 macOS, and Windows matrix.
+
+## V2 adapter accuracy gate
+
+A release that changes route, GetIt, localization, graph-blocker, or V2 report
+behavior must either reproduce the external natural-project oracle or prove
+that those production paths are unchanged from the retained behavior commit:
+
+```bash
+git diff --exit-code f461cb8f44165cd0df09427ae0a813ad243ae5b3..HEAD -- \
+  lib/src/adapters/dart/dart_application_reachability.dart \
+  lib/src/adapters/go_router \
+  lib/src/adapters/get_it \
+  lib/src/adapters/l10n \
+  lib/src/analysis/analysis_snapshot.dart \
+  lib/src/cli/formatters/human_formatter.dart \
+  lib/src/cli/formatters/json_formatter.dart \
+  lib/src/core/graph/reachability_graph.dart \
+  lib/src/reporting/run_report.dart
+jq -e '
+  .kind == "v2-natural-accuracy" and
+  .overall.confirmedCases == 2621 and
+  .overall.falsePositives == 0 and
+  .overall.falseNegatives == 0 and
+  .overall.reviewFindings == 378 and
+  .overall.safeFindings == 0 and
+  .overall.highFindings == 0
+' benchmark/baselines/v2-natural-accuracy-7dc495b.json
+```
+
+The retained accuracy replay covers natural `go_router` and localization
+declarations, not GetIt or device runtime behavior. Keep that evidence boundary
+visible in release notes instead of generalizing the zero-error result. See
+[`performance/v2-natural-accuracy.md`](performance/v2-natural-accuracy.md).
 
 ## Report-overhead gate
 

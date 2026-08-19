@@ -52,6 +52,10 @@ the fail-closed safety model and are covered by regression tests.
   before semantic graph construction and is awaited before diagnostic nodes are
   committed. This preserves the fail-closed lint contract while overlapping
   independent read-only work.
+- V2 natural-accuracy replay: a compact SHA-pinned result records exhaustive
+  oracle grading across Smooth App, GSY and GitJournal. This is a correctness
+  replay, not a performance threshold; see
+  [`v2-natural-accuracy.md`](v2-natural-accuracy.md).
 
 The measured Small fixture contains 200 Dart files, 30,000 LOC, 100 asset
 files, and 5,000 graph-reference seeds. Three post-warmup samples measured
@@ -59,8 +63,10 @@ files, and 5,000 graph-reference seeds. Three post-warmup samples measured
 edges. Raw samples are in
 `benchmark/baselines/small-macos-arm64-dart-3.9.2.json`.
 
-Only synthetic-fixture measurements are committed. See `profiling.md` for the
-comparison and redaction protocol for any local real-project investigation.
+Only synthetic-fixture timing measurements are committed as performance
+baselines. The V2 accuracy baseline contains classifications, corpus pins and
+hashes but no real-project source, absolute path or timing threshold. See
+`profiling.md` for the comparison and redaction protocol for local timing work.
 
 ## Deferred after feasibility review
 

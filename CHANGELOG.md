@@ -7,6 +7,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-08-19
+
 ### Added
 
 - Added review-only direct base-scope `GetIt` registration and lookup analysis,
@@ -25,6 +27,11 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Preserved blockers that cannot attach to an inventoried node in JSON v3 and
   terminal warnings, including malformed or duplicate ARB input with zero
   findings.
+
+### Documentation
+
+- Documented the as-built V2 adapter boundaries and a SHA-pinned natural
+  accuracy replay, including its external-oracle evidence boundary.
 
 ## [1.3.0] - 2026-08-18
 
@@ -197,7 +204,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Custom runtime callback and asset registries require explicit modeling or
   project policy.
 
-[Unreleased]: https://github.com/nhan7777/flutter_pruner/compare/v1.3.0...main
+[Unreleased]: https://github.com/nhan7777/flutter_pruner/compare/v1.4.0...main
+[1.4.0]: https://github.com/nhan7777/flutter_pruner/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/nhan7777/flutter_pruner/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/nhan7777/flutter_pruner/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/nhan7777/flutter_pruner/compare/v1.0.1...v1.1.0

@@ -1,0 +1,105 @@
+{
+  "schemaVersion": 1,
+  "kind": "v2-natural-accuracy",
+  "date": "2026-08-19",
+  "flutterPrunerCommit": "7dc495b5699d6afe6fc18828ea81964042e28f5e",
+  "behaviorCommit": "f461cb8f44165cd0df09427ae0a813ad243ae5b3",
+  "toolVersion": "1.3.0",
+  "dartVersion": "3.9.2 (stable) on macos_arm64",
+  "oracleContract": "static-application-compile-removability",
+  "projects": {
+    "smooth": {
+      "repository": "https://github.com/openfoodfacts/smooth-app.git",
+      "commit": "bac71afd115f72e379c0b501b95e5ede20ecd636",
+      "configSha256": "59dc83948c3ef90c91199af0e520c487c8cac801e1cad46adad6fc3a4c53256d",
+      "packageConfigSha256": "e80ccea81376c9e7a62ff416fad89cfe04097b3267c5b1246595a77f424457d0",
+      "lockSha256": "7c72596202e74900ea8e12a61209ac5bde02522440847d1f6c8940df28b4a260",
+      "scanSha256": "42f03cd958615e5b2de4d1f3a949ca9db493c514f92ed74cb1243e29b0617d4c",
+      "statusUnchanged": true,
+      "arbFilesUnchanged": true
+    },
+    "gsy": {
+      "repository": "https://github.com/CarGuo/gsy_github_app_flutter.git",
+      "commit": "2b6c49008afc44b90fee869dedf8e59a86482953",
+      "configSha256": "088014c7fc747e62ba52e705374da2e6fb12aea87fa4f0cdd9a0d3935d916beb",
+      "packageConfigSha256": "aa95a1403db9d9bd434addd133a13702a05bc9688fab255301066cb7c489fa95",
+      "lockSha256": "cbacadbd02cc4c5bc957767b7383dc16281736e9cdfb902493f406a06292824f",
+      "scanSha256": "e0a9a82b74c755a3de2da55e5f2e1579c172ca5fb59d0cb5687c883605c4ec17",
+      "originalInputScanSha256": "093590f50398310ef31ce01070b97f0b9bdd0047f2f67b7aa0d5e5096db28e0c",
+      "statusUnchanged": true,
+      "arbFilesUnchanged": true
+    },
+    "gitjournal": {
+      "repository": "https://github.com/GitJournal/GitJournal.git",
+      "commit": "c8a67e098db06335762f822d7733c330f4bd0d6b",
+      "configSha256": "9da39c1fee335715130cfcfd9c3b056277c0597694ab5de21857177fa98a96d5",
+      "packageConfigSha256": "b2546f98c441ccef9ef9239294cf623b5db86cfb32c6738a1fe34977ab3417d9",
+      "lockSha256": "64232187946cd795ddb6b1ae85d8bd538de0d65601f4f4fb5d3fea090c67d4dd",
+      "scanSha256": "41e9009e245f7f762509c67f62301943335dbe352d1f0ea9e5bb27747225658a",
+      "statusUnchanged": true,
+      "arbFilesUnchanged": true
+    }
+  },
+  "oracles": {
+    "smoothL10nSha256": "3ba9fb5be7bb70dcb68856cf4339c3e80626d30844fbc93dd7c81ecf5cc99020",
+    "smoothRouteSha256": "67327b75d3bdb1f25e0c9d7833c37c1ca0418f97908deb31599d8176e38fdc6c",
+    "gsyL10nSha256": "9e113537db5e2a7b057bffc0d1ff74ce6799c2b31b36b89ff36bcf3afda65d35",
+    "gitjournalL10nSha256": "e07dafbb2b3cdecba0e928a08f0025ed8cc8bc161e0979dec73bb460b13ffc77"
+  },
+  "grades": {
+    "smoothL10n": {
+      "sha256": "f89f677662fbb704526eafc86d330b860785ffb7f20cb09fa7ce7d8fdb045743",
+      "cases": 1780,
+      "truePositives": 323,
+      "trueNegatives": 1457,
+      "falsePositives": 0,
+      "falseNegatives": 0
+    },
+    "smoothRoute": {
+      "sha256": "31603f45adf77ecdfefc3ca466655f012c271aee76bfe1c3282d1ec1314d662e",
+      "cases": 19,
+      "truePositives": 0,
+      "trueNegatives": 19,
+      "falsePositives": 0,
+      "falseNegatives": 0
+    },
+    "gsyL10n": {
+      "sha256": "af7d646e19494ef028329b441bb3cc1b68e61540389a48162827835a77010746",
+      "cases": 403,
+      "truePositives": 17,
+      "trueNegatives": 386,
+      "falsePositives": 0,
+      "falseNegatives": 0
+    },
+    "gitjournalL10n": {
+      "sha256": "b8cf397a97788a1d8ba046d34d0a90418caa154fddb64e1c904ef873e7bf003b",
+      "cases": 419,
+      "truePositives": 38,
+      "trueNegatives": 381,
+      "falsePositives": 0,
+      "falseNegatives": 0
+    }
+  },
+  "overall": {
+    "confirmedCases": 2621,
+    "truePositives": 378,
+    "trueNegatives": 2243,
+    "falsePositives": 0,
+    "falseNegatives": 0,
+    "reviewFindings": 378,
+    "safeFindings": 0,
+    "highFindings": 0
+  },
+  "originalGsyInput": {
+    "graded": false,
+    "findings": 0,
+    "unboundBlockers": 2,
+    "presentedAsClean": false
+  },
+  "evidenceBoundary": {
+    "rawOraclesCommitted": false,
+    "graderCommitted": false,
+    "rawScansCommitted": false,
+    "sourceMutationRetained": false
+  }
+}

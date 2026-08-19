@@ -115,7 +115,7 @@ dart pub global deactivate flutter_pruner
 |---|---|---|
 | Dart | Unreachable top-level declarations and empty libraries | Confidence and mode controlled |
 | Assets | Exact references and assets unreachable from live Dart code | Confidence and mode controlled |
-| Routes | `go_router` declarations, redirects, nested routes, and exact path/name navigation through resolved local wrappers | Review only |
+| Routes | `go_router` declarations, redirects, nested routes, direct path/name navigation, and path navigation through resolved local wrappers | Review only |
 | Dependency injection | Direct base-scope `GetIt` registrations and exact resolved lookups | Review only |
 | Localization | ARB keys and current real-source `gen-l10n` accessors reachable from configured app targets | Review only |
 | Duplicates | Byte-identical files grouped with SHA-256 | Review only |
@@ -346,8 +346,10 @@ mode values are `application`, `package` and `package-internal`; the old
 | [Project configuration](doc/flutter_pruner.yaml.md) | Config schema, coverage and verification policy |
 | [Run reports](doc/run-report.md) | JSON v3, HTML and CI selectors |
 | [Report schema migrations](doc/report-schema-migration.md) | Compatibility and deprecation policy |
+| [V2 adapters](doc/v2-adapters.md) | As-built route, GetIt and localization behavior and boundaries |
 | [Release readiness](doc/release-readiness.md) | Replay, real-project and performance gates |
 | [Performance profiling](doc/performance/profiling.md) | Synthetic fixtures, benchmarks and privacy rules |
+| [V2 natural accuracy](doc/performance/v2-natural-accuracy.md) | Real-project oracle method, corpus pins and retained results |
 | [Verified Flutter facts](doc/flutter-facts.md) | Framework assumptions and primary sources |
 | [Contributor guide](CONTRIBUTING.md) | Development setup and pull requests |
 | [Adapter guide](doc/contributing/how-to-add-adapter.md) | Adding a new analyzer |
