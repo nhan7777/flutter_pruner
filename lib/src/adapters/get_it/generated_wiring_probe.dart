@@ -233,7 +233,12 @@ final class GeneratedWiringProbe {
         continue;
       }
 
-      final parsed = parseString(content: contents, path: file.path);
+      final parsed = parseString(
+        content: contents,
+        path: file.path,
+        featureSet: project.dartFeatureSet,
+        throwIfDiagnostics: false,
+      );
       if (parsed.errors.isNotEmpty) {
         uncertainties.add(
           GeneratedWiringUncertainty(

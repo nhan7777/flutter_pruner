@@ -1,14 +1,15 @@
 import 'dart:io';
 
-import 'package:analyzer/dart/analysis/features.dart';
 import 'package:analyzer/dart/analysis/utilities.dart';
 import 'package:analyzer/dart/ast/ast.dart';
+import 'package:analyzer/error/error.dart';
 import 'package:path/path.dart' as p;
 import 'package:yaml/yaml.dart';
 
 import '../../verification/verification_policy.dart';
 import '../graph/build_condition.dart';
 import 'analysis_mode.dart';
+import 'project_language_version.dart';
 import 'project_source_path.dart';
 import 'target_matrix.dart';
 
@@ -239,6 +240,7 @@ class ProjectConfig {
       );
     }
 
+    final featureSet = ProjectLanguageVersion.featureSetFor(projectRoot);
     final visitedPaths = <String>{};
     while (pendingPaths.isNotEmpty) {
       final sourcePath = p.normalize(pendingPaths.removeLast());
@@ -246,8 +248,18 @@ class ProjectConfig {
       try {
         final result = parseFile(
           path: sourcePath,
-          featureSet: FeatureSet.latestLanguageVersion(),
+          featureSet: featureSet,
+          throwIfDiagnostics: false,
         );
+        final hasSyntaxError = result.errors.any(
+          (diagnostic) =>
+              diagnostic.diagnosticCode.severity == DiagnosticSeverity.ERROR,
+        );
+        if (hasSyntaxError) {
+          // A source we cannot parse may still hide a conditional directive,
+          // so stay conservative instead of asserting there is none.
+          return true;
+        }
         final unit = result.unit;
         if (unit.directives.any(
           (directive) =>
@@ -299,6 +311,9 @@ class ProjectConfig {
             pendingPaths.add(referencedPath);
           }
         }
+      } on ArgumentError {
+        // A parse the analyzer rejects outright must not abort the whole run.
+        return true;
       } on FileSystemException {
         return true;
       }

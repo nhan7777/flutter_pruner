@@ -5,6 +5,7 @@ import 'package:analyzer/dart/ast/ast.dart';
 import 'package:path/path.dart' as p;
 
 import '../core/process/managed_process_runner.dart';
+import '../core/project/project_language_version.dart';
 
 /// Runs `dart fix --apply` to clean up unused imports.
 class ImportCleanupRunner {
@@ -55,6 +56,9 @@ class ImportCleanupRunner {
       final unit = parseString(
         content: content,
         path: filePath,
+        featureSet: ProjectLanguageVersion.featureSetFor(
+          Directory(projectRoot),
+        ),
         throwIfDiagnostics: false,
       ).unit;
       final edits = <({int start, int end})>[];

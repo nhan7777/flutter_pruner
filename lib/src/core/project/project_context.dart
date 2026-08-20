@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:analyzer/dart/analysis/features.dart';
 import 'package:path/path.dart' as p;
 import 'package:yaml/yaml.dart';
 
@@ -7,6 +8,7 @@ import '../../verification/verification_policy.dart';
 import '../graph/build_condition.dart';
 import 'analysis_mode.dart';
 import 'project_config.dart';
+import 'project_language_version.dart';
 import 'project_path_policy.dart';
 import 'target_matrix.dart';
 import 'tool_workspace.dart';
@@ -160,6 +162,10 @@ class ProjectContext {
 
   /// Package name from `pubspec.yaml`.
   final String packageName;
+
+  /// Feature set used to parse this project's own Dart sources.
+  late final FeatureSet dartFeatureSet =
+      ProjectLanguageVersion.featureSetForPubspec(pubspec);
 
   /// Selected analysis boundary and action policy.
   final AnalysisMode analysisMode;

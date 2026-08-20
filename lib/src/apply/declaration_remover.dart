@@ -30,6 +30,7 @@ class DeclarationRemover {
     final parsed = parseString(
       content: originalSource,
       path: filePath,
+      featureSet: project.dartFeatureSet,
       throwIfDiagnostics: false,
     );
     final syntaxErrors = parsed.errors.where(

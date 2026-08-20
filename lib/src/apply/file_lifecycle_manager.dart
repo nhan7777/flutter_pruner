@@ -43,7 +43,11 @@ class FileLifecycleManager {
   /// never considered empty. Content that fails to parse is never considered
   /// empty either, because an unparseable file may still hold live code.
   bool _isEmpty(String content) {
-    final result = parseString(content: content, throwIfDiagnostics: false);
+    final result = parseString(
+      content: content,
+      featureSet: project.dartFeatureSet,
+      throwIfDiagnostics: false,
+    );
     final hasSyntaxError = result.errors.any(
       (d) => d.diagnosticCode.severity == DiagnosticSeverity.ERROR,
     );

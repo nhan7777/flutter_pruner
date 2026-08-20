@@ -414,6 +414,7 @@ class DartAdapter extends AnalyzerAdapter {
       final parsed = parseString(
         content: file.readAsStringSync(),
         path: file.path,
+        featureSet: project.dartFeatureSet,
         throwIfDiagnostics: false,
       );
       final hasErrors = parsed.errors.any(
