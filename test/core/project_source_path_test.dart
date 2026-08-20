@@ -114,4 +114,57 @@ void main() {
       ),
     );
   });
+
+  test('accepts an entrypoint that declares a final parameter', () {
+    File(p.join(root.path, 'pubspec.yaml')).writeAsStringSync('''
+name: final_parameter_fixture
+environment:
+  sdk: ^3.12.0
+''');
+    File(p.join(root.path, 'lib', 'main.dart')).writeAsStringSync('''
+void main() => run(name: 'world');
+
+void run({required final String name}) => print(name);
+''');
+
+    expect(
+      ProjectSourcePath.validate(
+        root,
+        'lib/main.dart',
+        field: 'entrypoint',
+        kind: ProjectSourceKind.applicationEntrypoint,
+      ),
+      'lib/main.dart',
+    );
+  });
+
+  test('rejects syntax newer than the declared project language version', () {
+    File(p.join(root.path, 'pubspec.yaml')).writeAsStringSync('''
+name: legacy_fixture
+environment:
+  sdk: ^2.19.0
+''');
+    File(p.join(root.path, 'lib', 'main.dart')).writeAsStringSync('''
+void main() {
+  final (first, second) = (1, 2);
+  print(first + second);
+}
+''');
+
+    expect(
+      () => ProjectSourcePath.validate(
+        root,
+        'lib/main.dart',
+        field: 'entrypoint',
+        kind: ProjectSourceKind.applicationEntrypoint,
+      ),
+      throwsA(
+        isA<ProjectSourcePathException>().having(
+          (error) => error.message,
+          'message',
+          contains('not valid Dart syntax'),
+        ),
+      ),
+    );
+  });
 }

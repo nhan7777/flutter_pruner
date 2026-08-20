@@ -32,6 +32,47 @@ jobs:
       - name: Analyze
         run: dart analyze --fatal-infos
 
+  latest-analyzer:
+    name: Latest allowed analyzer
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: '3.13.0'
+
+      - name: Resolve without the repository lock
+        run: |
+          rm pubspec.lock
+          dart pub get
+
+      - name: Analyze package sources
+        run: dart analyze lib --fatal-infos
+
+      - name: Run parser compatibility tests
+        run: >-
+          dart test --reporter expanded
+          test/core/project_language_version_test.dart
+          test/core/project_context_test.dart
+          test/core/project_source_path_test.dart
+          test/adapters/get_it/generated_wiring_probe_test.dart
+
+      - name: Smoke init and scan
+        run: |
+          repro="$RUNNER_TEMP/final-parameter-language-version"
+          cp -R test/fixtures/final_parameter_language_version "$repro"
+          dart pub get --directory "$repro"
+          dart run bin/flutter_pruner.dart init \
+            --project "$repro" --type application --entrypoint lib/main.dart \
+            --platform linux --yes
+          dart run bin/flutter_pruner.dart scan \
+            --project "$repro" --adapter dart --format json \
+            --output latest-analyzer-scan.json
+          jq -e \
+            '.statistics.findings.byTier.SAFE == 0 and .statistics.findings.byTier.HIGH == 0' \
+            "$repro/.flutter_pruner/reports/latest-analyzer-scan.json"
+
   test:
     name: Test (${{ matrix.os }}, Dart ${{ matrix.sdk }})
     timeout-minutes: 25

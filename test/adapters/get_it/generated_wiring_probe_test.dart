@@ -200,5 +200,23 @@ class Unrelated {}
         );
       },
     );
+
+    test(
+      'records an unparseable source instead of aborting the probe',
+      () async {
+        final project = await _fixtureProject();
+
+        final evidence = GeneratedWiringProbe.detect(
+          project,
+          files: (_) => <File>[File(project.resolve('lib/injection.dart'))],
+          readFile: (_) => 'void {\n',
+        );
+
+        expect(
+          evidence.uncertainties.map((uncertainty) => uncertainty.reason),
+          contains(contains('could not parse Dart source')),
+        );
+      },
+    );
   });
 }

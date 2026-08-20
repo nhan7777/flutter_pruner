@@ -5,6 +5,8 @@ import 'package:analyzer/dart/analysis/utilities.dart';
 import 'package:analyzer/dart/ast/ast.dart';
 import 'package:path/path.dart' as p;
 
+import 'project_language_version.dart';
+
 /// The semantic role expected from a project-owned Dart source path.
 enum ProjectSourceKind {
   /// A runnable application entrypoint with a top-level `main()` function.
@@ -81,7 +83,13 @@ class ProjectSourcePath {
         '$field must not point at generated Dart output: $input.',
       );
     }
-    _validateDartRole(absoluteCandidate, normalized, field: field, kind: kind);
+    _validateDartRole(
+      absoluteCandidate,
+      normalized,
+      field: field,
+      kind: kind,
+      featureSet: ProjectLanguageVersion.featureSetFor(projectRoot),
+    );
     return normalized;
   }
 
@@ -90,12 +98,14 @@ class ProjectSourcePath {
     String relativePath, {
     required String field,
     required ProjectSourceKind kind,
+    required FeatureSet featureSet,
   }) {
     late final CompilationUnit unit;
     try {
       final result = parseFile(
         path: absolutePath,
-        featureSet: FeatureSet.latestLanguageVersion(),
+        featureSet: featureSet,
+        throwIfDiagnostics: false,
       );
       if (result.errors.isNotEmpty) {
         throw ProjectSourcePathException(

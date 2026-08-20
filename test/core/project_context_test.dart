@@ -552,6 +552,17 @@ target_matrix:
       );
     }
   });
+
+  test('an unparseable project source keeps the matrix partial', () async {
+    File(
+      p.join(project.path, 'lib', 'broken.dart'),
+    ).writeAsStringSync('void {\n');
+    _writeConfig(project, complete: true);
+
+    final context = await ProjectContext.load(project);
+
+    expect(context.targetMatrix.status, TargetMatrixStatus.declaredPartial);
+  });
 }
 
 void _writeConfig(
