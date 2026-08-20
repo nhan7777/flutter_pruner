@@ -116,6 +116,11 @@ void main() {
   });
 
   test('accepts an entrypoint that declares a final parameter', () {
+    File(p.join(root.path, 'pubspec.yaml')).writeAsStringSync('''
+name: final_parameter_fixture
+environment:
+  sdk: ^3.12.0
+''');
     File(p.join(root.path, 'lib', 'main.dart')).writeAsStringSync('''
 void main() => run(name: 'world');
 

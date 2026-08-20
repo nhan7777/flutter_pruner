@@ -7,6 +7,13 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+### Fixed
+
+- Parsed project-owned Dart sources at the language version declared by the
+  project's SDK lower bound, preventing newer analyzer releases from rejecting
+  valid `final` formal parameters during `init` and `scan`; unparseable sources
+  continue to downgrade coverage conservatively.
+
 ## [1.4.0] - 2026-08-19
 
 ### Added
