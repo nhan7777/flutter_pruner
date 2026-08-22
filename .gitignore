@@ -75,6 +75,9 @@ coverage/
 .trae/
 .windsurf/
 
+# Local implementation plans
+doc/plans/
+
 # Root-level AI instruction and configuration files
 .aider.conf.yml
 .cursorrules
