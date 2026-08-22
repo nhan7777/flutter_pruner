@@ -5,7 +5,7 @@ import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
 void main() {
-  test('redacts the analyzed project path by default', () async {
+  test('redacts the project path while reporting execution phases', () async {
     final project = Directory.systemTemp.createTempSync(
       'scan_benchmark_private_',
     );
@@ -48,6 +48,7 @@ environment:
           '0',
           '--iterations',
           '1',
+          '--profile',
           '--max-report-overhead-percent',
           '100',
         ],
@@ -68,6 +69,39 @@ environment:
       expect(sample['reportElapsedMicros'], isA<int>());
       expect(sample['reportBytes'], greaterThan(0));
       expect(sample['reportOverheadPercent'], isA<num>());
+      final dartProfile = sample['dartProfile'] as Map;
+      expect(
+        dartProfile,
+        containsPair('executionContextDiscovery', {
+          'elapsedMicros': isA<int>(),
+          'invocations': 1,
+        }),
+      );
+      expect(
+        dartProfile,
+        containsPair('directiveResolution', {
+          'elapsedMicros': isA<int>(),
+          'invocations': 1,
+        }),
+      );
+      expect(
+        dartProfile,
+        containsPair('executionClosure', {
+          'elapsedMicros': isA<int>(),
+          'invocations': 4,
+        }),
+      );
+      expect(
+        dartProfile,
+        containsPair('executionGraphEmission', {
+          'elapsedMicros': isA<int>(),
+          'invocations': 1,
+        }),
+      );
+      expect(
+        dartProfile['counters'],
+        containsPair('executionClosureCandidateEdges', 0),
+      );
     } finally {
       project.deleteSync(recursive: true);
     }

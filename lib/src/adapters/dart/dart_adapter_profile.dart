@@ -5,6 +5,7 @@
 final class DartAdapterProfile {
   final Map<String, int> _elapsedMicros = {};
   final Map<String, int> _invocations = {};
+  final Map<String, int> _counters = {};
 
   /// Measures one synchronous [operation] under [phase].
   T measure<T>(String phase, T Function() operation) {
@@ -31,12 +32,29 @@ final class DartAdapterProfile {
     }
   }
 
+  /// Adds [value] to one deterministic diagnostic counter.
+  void addCount(String counter, int value) {
+    if (value < 0) {
+      throw ArgumentError.value(value, 'value', 'must be non-negative');
+    }
+    _counters.update(
+      counter,
+      (current) => current + value,
+      ifAbsent: () => value,
+    );
+  }
+
   /// Returns a stable JSON-compatible snapshot sorted by phase name.
   Map<String, Object> snapshot() => {
     for (final phase in _elapsedMicros.keys.toList()..sort())
       phase: {
         'elapsedMicros': _elapsedMicros[phase]!,
         'invocations': _invocations[phase]!,
+      },
+    if (_counters.isNotEmpty)
+      'counters': {
+        for (final counter in _counters.keys.toList()..sort())
+          counter: _counters[counter]!,
       },
   };
 
