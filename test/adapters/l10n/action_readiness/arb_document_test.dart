@@ -114,6 +114,22 @@ void main() {
       });
       expect(document.member('café')!.decodedValue, 'literal');
       expect(document.member('鍵')!.decodedValue, 'escaped key');
+      _expectSpan(document.members[0].keySpan, (1, 9));
+      _expectSpan(document.members[0].valueSpan, (10, 52));
+      _expectSpan(document.members[0].memberSpan, (1, 52));
+      _expectSpan(document.members[1].keySpan, (53, 60));
+      _expectSpan(document.members[1].valueSpan, (61, 70));
+      _expectSpan(document.members[1].memberSpan, (53, 70));
+      _expectSpan(document.members[2].keySpan, (71, 79));
+      _expectSpan(document.members[2].valueSpan, (80, 93));
+      _expectSpan(document.members[2].memberSpan, (71, 93));
+      expect(document.delimiters, hasLength(2));
+      expect(document.delimiters[0].leftMemberIndex, 0);
+      expect(document.delimiters[0].rightMemberIndex, 1);
+      _expectSpan(document.delimiters[0].commaSpan, (52, 53));
+      expect(document.delimiters[1].leftMemberIndex, 1);
+      expect(document.delimiters[1].rightMemberIndex, 2);
+      _expectSpan(document.delimiters[1].commaSpan, (70, 71));
       expect(
         utf8.decode(
           document.source.slice(document.member('鍵')!.keySpan).copy(),
@@ -135,6 +151,16 @@ void main() {
           document.member('status')!.decodedValue,
           '{gender, select, male {His} female {Her} other {Their}}',
         );
+        _expectSpan(document.members[0].keySpan, (4, 10));
+        _expectSpan(document.members[0].valueSpan, (12, 76));
+        _expectSpan(document.members[0].memberSpan, (4, 76));
+        _expectSpan(document.members[1].keySpan, (80, 88));
+        _expectSpan(document.members[1].valueSpan, (90, 147));
+        _expectSpan(document.members[1].memberSpan, (80, 147));
+        expect(document.delimiters, hasLength(1));
+        expect(document.delimiters.single.leftMemberIndex, 0);
+        expect(document.delimiters.single.rightMemberIndex, 1);
+        _expectSpan(document.delimiters.single.commaSpan, (76, 77));
       },
     );
 
