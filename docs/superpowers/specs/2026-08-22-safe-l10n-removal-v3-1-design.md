@@ -1,7 +1,7 @@
 # Safe l10n Removal V3.1 Design
 
 Date: 2026-08-22
-Status: Approved in chat; written review pending
+Status: Approved
 
 ## Summary
 
