@@ -78,14 +78,50 @@ baselines. The V2 accuracy baseline contains classifications, corpus pins and
 hashes but no real-project source, absolute path or timing threshold. See
 `profiling.md` for the comparison and redaction protocol for local timing work.
 
-A local, non-threshold GSY replay at project commit `2b6c490`, tool commit
-`080d720`, Flutter 3.44.1 / Dart 3.12.1, and one warm-up plus three measured
-samples attributed the hash-lookup change independently. Median analysis fell
-from 127.442 s to 101.543 s (20.3%), and observed process-tree peak RSS fell
-from 2,538.6 MiB to 2,002.0 MiB (21.1%). Every sample retained exactly 932
-nodes, 24,489 edges, 3,510 blockers, 186 findings, and identical per-adapter
-node/edge/blocker counts. These local numbers describe that pinned replay only;
-they are not committed release thresholds.
+A local diagnostic, non-threshold GSY replay attributed the hash-lookup change
+independently. The baseline was the clean tool commit
+`080d7201a93de27e45a45766d40d8b7b0ff95fd0`; the candidate was that same
+checkout with only the `_edges.lookup(edge)` production hunk applied. That hunk
+was later committed in `ebcd89aec06946dd20596dbf5f2347256f801b4b`. The
+candidate was not a clean checkout of `ebcd89a`, so these results are not exact-
+commit release evidence.
+
+The harness invoked the committed scan benchmark as follows for each tool root:
+
+```text
+dart run <benchmark-root>/run_invoice_benchmarks.dart \
+  --tool-root <baseline-or-candidate-tool-root> \
+  --output <empty-result-directory> \
+  --snapshot gsy --gsy-root <gsy-worktree> --warmup 1 --iterations 3
+```
+
+The inner timed command used all registered adapters and
+`--ignore-project-config`. The target was GSY commit
+`2b6c49008afc44b90fee869dedf8e59a86482953` with package-config SHA-256
+`c937b8f54ace4c4af46a5b9162e5dbf0622d40abe2d7299cc0ffad992561e4fd` and
+lockfile SHA-256
+`773a178e2cce166796e061af198d82a44320e934d6e6e5301668329ef686ad08`.
+Both sides ran on the same MacBookPro18,3 (Apple M1 Pro, 8 cores, 16 GB),
+Flutter 3.44.1 / Dart 3.12.1.
+
+| Measurement | Baseline | Candidate | Change |
+|---|---:|---:|---:|
+| Analysis samples | 137.881, 127.442, 112.065 s | 106.130, 101.281, 101.543 s | — |
+| Median analysis | 127.442 s | 101.543 s | -20.3% |
+| Timed scan-benchmark user + system CPU time | 589.23 s | 480.10 s | -18.5% |
+| Sampled process-tree average CPU | 114.22% | 111.01% | -3.21 pp |
+| Sampled process-tree peak CPU | 323.2% | 293.8% | -29.4 pp |
+| Observed process-tree peak RSS | 2,538.625 MiB | 2,002.016 MiB | -21.1% |
+
+Timed CPU covers the inner scan benchmark, one warm-up, three measured samples,
+report construction, and descendants; it excludes outer harness orchestration
+and its `ps` sampler. Process-tree CPU/RSS was sampled every 200 ms; CPU may
+exceed 100% when multiple cores are active. Every measured sample retained
+exactly 932 nodes, 24,489 edges, 3,510 blockers, 186 findings, and identical
+per-adapter node/edge/blocker counts. No graph/finding fingerprint was captured,
+so the replay is supporting diagnostic evidence rather than an independent
+accuracy proof or a committed release threshold; deterministic semantic
+regression tests remain the acceptance gate.
 
 The corrected O3/O4 graph-oracle admission gates now pass their regression and
 independent-review evidence. This does not turn graph replay scans into an
