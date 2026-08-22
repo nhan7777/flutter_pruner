@@ -46,6 +46,11 @@ before the Dart adapter stopwatch, while directive resolution and closure run
 inside it. Some phases are nested or overlap the CLI analyzer, so do not add
 all subphase durations and compare that sum directly with wall time.
 
+Profile snapshots also expose deterministic diagnostic counters under
+`counters`. `executionClosureCandidateEdges` counts the directive edges
+examined by all proven and retained closure traversals; it is useful for
+detecting cross-context scan amplification independently of wall-clock noise.
+
 Every ordinary benchmark sample also measures JSON v3 report construction and
 serialization as `reportElapsedMicros`, `reportBytes`, and
 `reportOverheadPercent`. A release gate can enforce a median ceiling:

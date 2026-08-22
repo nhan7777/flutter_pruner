@@ -247,10 +247,7 @@ class ReachabilityGraph {
   /// may reference nodes another adapter contributes. Call [danglingEdges] after
   /// all adapters have run to audit unresolved endpoints.
   void addEdge(GraphEdge edge) {
-    final existing = _edges.cast<GraphEdge?>().firstWhere(
-      (candidate) => candidate == edge,
-      orElse: () => null,
-    );
+    final existing = _edges.lookup(edge);
     if (existing == null) {
       _edges.add(edge);
       (_outgoing[edge.from] ??= {}).add(edge);

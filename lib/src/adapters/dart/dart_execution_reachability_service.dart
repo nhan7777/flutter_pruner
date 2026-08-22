@@ -290,7 +290,12 @@ final class DefaultDartExecutionReachabilityService
       while (pending.isNotEmpty) {
         final current = pending.removeLast();
         reachedUnits.addAll(unitPathsByLibraryPath[current] ?? const {});
-        for (final edge in outgoing[current] ?? const <DartDirectiveEdge>[]) {
+        final candidateEdges = outgoing[current] ?? const <DartDirectiveEdge>[];
+        profile?.addCount(
+          'executionClosureCandidateEdges',
+          candidateEdges.length,
+        );
+        for (final edge in candidateEdges) {
           if (!follows(edge)) continue;
           if (!librariesByPath.containsKey(edge.targetPath)) continue;
           if (reachedLibraries.add(edge.targetPath)) {

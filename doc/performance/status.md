@@ -16,6 +16,10 @@ the fail-closed safety model and are covered by regression tests.
 - Graph indexes: incoming edges are indexed by target node. Blockers are
   indexed for registered graph nodes, with the previous semantic fallback kept
   for arbitrary IDs that are not registered.
+- Graph edge insertion uses the hash set's value lookup instead of linearly
+  scanning every accepted edge before insertion. Duplicate identity and exact-
+  evidence preference remain unchanged. A deterministic scaling benchmark
+  exercises the growth gate and both duplicate insertion orders remain covered.
 - Graph caching: retained and reachable sets are computed together once per
   complete build-target fingerprint and invalidated after graph mutation.
 - Shared semantic workspace: Dart and asset adapters reuse one
@@ -74,6 +78,15 @@ baselines. The V2 accuracy baseline contains classifications, corpus pins and
 hashes but no real-project source, absolute path or timing threshold. See
 `profiling.md` for the comparison and redaction protocol for local timing work.
 
+A local, non-threshold GSY replay at project commit `2b6c490`, tool commit
+`080d720`, Flutter 3.44.1 / Dart 3.12.1, and one warm-up plus three measured
+samples attributed the hash-lookup change independently. Median analysis fell
+from 127.442 s to 101.543 s (20.3%), and observed process-tree peak RSS fell
+from 2,538.6 MiB to 2,002.0 MiB (21.1%). Every sample retained exactly 932
+nodes, 24,489 edges, 3,510 blockers, 186 findings, and identical per-adapter
+node/edge/blocker counts. These local numbers describe that pinned replay only;
+they are not committed release thresholds.
+
 The corrected O3/O4 graph-oracle admission gates now pass their regression and
 independent-review evidence. This does not turn graph replay scans into an
 independent natural accuracy denominator: no refreshed confusion matrix,
@@ -82,6 +95,20 @@ one-to-one grading is accepted. Scanner findings remain observations rather
 than ground truth.
 
 ## Deferred after feasibility review
+
+- Context-indexed directive closure: a deterministic profile counter confirms
+  that candidate-edge examinations currently grow quadratically with context
+  count (16x work when contexts scale 4x in the fixed-topology benchmark). The
+  experimental index reduced that counter to linear growth, but the pinned GSY
+  replay regressed median analysis by 7.9% versus hash lookup alone and raised
+  peak RSS slightly. The representation-preserving experiment was reverted.
+- Real-project apply/rollback timing on GSY: the controlled declaration fixture
+  is retained by incomplete runtime/test auxiliary contexts and has active
+  dynamic blockers, so current HEAD correctly classifies it as REVIEW and
+  refuses mutation before verification. No apply timing is claimed. Creating a
+  benchmark number by suppressing those facts would weaken the fail-closed
+  contract; apply/rollback correctness remains covered by the controlled test
+  suite until an independently apply-eligible real-project fixture exists.
 
 - Medium, Large, and XL baseline execution: the generator is available, but
   this run has no designated reference machine or accepted CPU/RAM/time budget.

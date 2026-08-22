@@ -98,6 +98,10 @@ environment:
           'invocations': 1,
         }),
       );
+      expect(
+        dartProfile['counters'],
+        containsPair('executionClosureCandidateEdges', 0),
+      );
     } finally {
       project.deleteSync(recursive: true);
     }
