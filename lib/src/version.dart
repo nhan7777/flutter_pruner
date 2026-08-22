@@ -1,2 +1,2 @@
 /// Current tool version. Keep in sync with `pubspec.yaml`.
-const String packageVersion = '1.4.0';
+const String packageVersion = '1.5.0';
