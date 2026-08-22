@@ -835,6 +835,490 @@ void main() {
     });
   });
 
+  group('POSIX launch manifest', () {
+    setUp(_requirePosixResolverHost);
+    setUp(() {
+      _installFixture(project, 'fvmrc/.fvmrc', '.fvmrc');
+    });
+
+    test(
+      'resolve rejects same-realpath update-engine overwrite during probe',
+      () async {
+        final stable = _fixtureBytes('machine/flutter_3_38_7.json');
+        final updateEngine = _sdkArtifact(
+          flutter38,
+          'bin/internal/update_engine_version.sh',
+        );
+        final runner = _FakeProcessRunner([
+          _ProcessReply.result(_successfulProbe(stable)),
+          _ProcessReply.result(
+            _successfulProbe(stable),
+            beforeReturn: () {
+              updateEngine.writeAsStringSync('changed update engine\n');
+              _makeExecutable(updateEngine);
+            },
+          ),
+        ]);
+
+        final resolution = await _resolve38(project, flutter38, runner);
+
+        _expectRejected(
+          resolution,
+          code: L10nEvidenceRejectionCode.toolchainUnavailable,
+          detailCode: 'canonical-sdk-changed-during-probe',
+        );
+      },
+    );
+
+    test('revalidate detects update-engine overwrite between runs', () async {
+      final stable = _fixtureBytes('machine/flutter_3_38_7.json');
+      final runner = _FakeProcessRunner([
+        for (var index = 0; index < 4; index++)
+          _ProcessReply.result(_successfulProbe(stable)),
+      ]);
+      final resolver = DefaultL10nToolchainResolver(processRunner: runner);
+      final expected = await _resolved38(project, flutter38, resolver);
+      final updateEngine = _sdkArtifact(
+        flutter38,
+        'bin/internal/update_engine_version.sh',
+      )..writeAsStringSync('changed update engine\n');
+      _makeExecutable(updateEngine);
+
+      final result = await resolver.revalidate(
+        originalProjectRoot: project,
+        expected: expected,
+      );
+
+      _expectChanged(result, detailCode: 'identity-drift');
+      expect(runner.calls, hasLength(4));
+    });
+
+    test('resolve rejects bootstrap hook creation during probe', () async {
+      final stable = _fixtureBytes('machine/flutter_3_38_7.json');
+      final bootstrap = _sdkArtifact(flutter38, 'bin/internal/bootstrap.sh');
+      final runner = _FakeProcessRunner([
+        _ProcessReply.result(
+          _successfulProbe(stable),
+          beforeReturn: () {
+            bootstrap.writeAsStringSync('arbitrary bootstrap hook\n');
+            _makeExecutable(bootstrap);
+          },
+        ),
+        _ProcessReply.result(_successfulProbe(stable)),
+      ]);
+
+      final resolution = await _resolve38(project, flutter38, runner);
+
+      _expectRejected(
+        resolution,
+        code: L10nEvidenceRejectionCode.toolchainUnavailable,
+        detailCode: 'canonical-sdk-changed-during-probe',
+      );
+      expect(runner.calls, hasLength(1));
+    });
+
+    test('rejects a pre-existing bootstrap hook before probing', () async {
+      final bootstrap = _sdkArtifact(flutter38, 'bin/internal/bootstrap.sh')
+        ..writeAsStringSync('arbitrary bootstrap hook\n');
+      _makeExecutable(bootstrap);
+      final runner = _FakeProcessRunner(const []);
+
+      final resolution = await _resolve38(project, flutter38, runner);
+
+      _expectRejected(
+        resolution,
+        code: L10nEvidenceRejectionCode.unsupportedConfiguration,
+        detailCode: 'registry-sdk-bootstrap-unsupported',
+      );
+      expect(runner.calls, isEmpty);
+    });
+
+    test('revalidate rejects bootstrap hook creation between runs', () async {
+      final stable = _fixtureBytes('machine/flutter_3_38_7.json');
+      final runner = _FakeProcessRunner([
+        for (var index = 0; index < 4; index++)
+          _ProcessReply.result(_successfulProbe(stable)),
+      ]);
+      final resolver = DefaultL10nToolchainResolver(processRunner: runner);
+      final expected = await _resolved38(project, flutter38, resolver);
+      final bootstrap = _sdkArtifact(flutter38, 'bin/internal/bootstrap.sh')
+        ..writeAsStringSync('arbitrary bootstrap hook\n');
+      _makeExecutable(bootstrap);
+
+      final result = await resolver.revalidate(
+        originalProjectRoot: project,
+        expected: expected,
+      );
+
+      _expectChanged(result, detailCode: 'canonical-sdk-drift');
+      expect(runner.calls, hasLength(2));
+    });
+
+    test(
+      'resolve rejects another internal helper mutation during probe',
+      () async {
+        final stable = _fixtureBytes('machine/flutter_3_38_7.json');
+        final contentHash = _sdkArtifact(
+          flutter38,
+          'bin/internal/content_aware_hash.sh',
+        );
+        final runner = _FakeProcessRunner([
+          _ProcessReply.result(_successfulProbe(stable)),
+          _ProcessReply.result(
+            _successfulProbe(stable),
+            beforeReturn: () {
+              contentHash.writeAsStringSync('changed content hash helper\n');
+              _makeExecutable(contentHash);
+            },
+          ),
+        ]);
+
+        final resolution = await _resolve38(project, flutter38, runner);
+
+        _expectRejected(
+          resolution,
+          code: L10nEvidenceRejectionCode.toolchainUnavailable,
+          detailCode: 'canonical-sdk-changed-during-probe',
+        );
+      },
+    );
+
+    test(
+      'revalidate detects an unknown internal file added between runs',
+      () async {
+        final stable = _fixtureBytes('machine/flutter_3_38_7.json');
+        final runner = _FakeProcessRunner([
+          for (var index = 0; index < 4; index++)
+            _ProcessReply.result(_successfulProbe(stable)),
+        ]);
+        final resolver = DefaultL10nToolchainResolver(processRunner: runner);
+        final expected = await _resolved38(project, flutter38, resolver);
+        _sdkArtifact(
+          flutter38,
+          'bin/internal/future_internal_input.version',
+        ).writeAsStringSync('new entry\n');
+
+        final result = await resolver.revalidate(
+          originalProjectRoot: project,
+          expected: expected,
+        );
+
+        _expectChanged(result, detailCode: 'identity-drift');
+        expect(runner.calls, hasLength(4));
+      },
+    );
+
+    test('resolve rejects control-stamp drift during probe', () async {
+      final stable = _fixtureBytes('machine/flutter_3_38_7.json');
+      final engineStamp = _sdkArtifact(flutter38, 'bin/cache/engine.stamp');
+      final runner = _FakeProcessRunner([
+        _ProcessReply.result(_successfulProbe(stable)),
+        _ProcessReply.result(
+          _successfulProbe(stable),
+          beforeReturn: () {
+            engineStamp.writeAsStringSync('changed engine stamp\n');
+          },
+        ),
+      ]);
+
+      final resolution = await _resolve38(project, flutter38, runner);
+
+      _expectRejected(
+        resolution,
+        code: L10nEvidenceRejectionCode.toolchainUnavailable,
+        detailCode: 'canonical-sdk-changed-during-probe',
+      );
+    });
+
+    test('rejects a Flutter-tools pubspec newer than its lock', () async {
+      final pubspec = _sdkArtifact(
+        flutter38,
+        'packages/flutter_tools/pubspec.yaml',
+      );
+      final lock = _sdkArtifact(
+        flutter38,
+        'packages/flutter_tools/pubspec.lock',
+      );
+      pubspec.setLastModifiedSync(
+        lock.lastModifiedSync().add(const Duration(seconds: 1)),
+      );
+      final runner = _FakeProcessRunner(const []);
+
+      final resolution = await _resolve38(project, flutter38, runner);
+
+      _expectRejected(
+        resolution,
+        code: L10nEvidenceRejectionCode.toolchainUnavailable,
+        detailCode: 'registry-sdk-cache-freshness-invalid',
+      );
+      expect(runner.calls, isEmpty);
+    });
+
+    test('rejects a nested symlink in the internal tree', () async {
+      final nested = Directory(
+        _sdkArtifact(flutter38, 'bin/internal/nested').path,
+      )..createSync();
+      final outside = File(p.join(scratch.path, 'outside-internal-input'))
+        ..writeAsStringSync('outside\n');
+      Link(p.join(nested.path, 'linked-input')).createSync(outside.path);
+      final runner = _FakeProcessRunner(const []);
+
+      final resolution = await _resolve38(project, flutter38, runner);
+
+      _expectRejected(
+        resolution,
+        code: L10nEvidenceRejectionCode.toolchainUnavailable,
+        detailCode: 'registry-sdk-structure-invalid',
+      );
+      expect(runner.calls, isEmpty);
+    });
+  });
+
+  group('POSIX launch control semantics', () {
+    setUp(_requirePosixResolverHost);
+    setUp(() {
+      _installFixture(project, 'fvmrc/.fvmrc', '.fvmrc');
+    });
+
+    for (final relativePath in const [
+      'bin/cache/engine.stamp',
+      'bin/internal/engine.version',
+    ]) {
+      test(
+        'rejects $relativePath that disagrees with machine identity',
+        () async {
+          _sdkArtifact(
+            flutter38,
+            relativePath,
+          ).writeAsStringSync('stale-engine-revision\n');
+          final stable = _fixtureBytes('machine/flutter_3_38_7.json');
+          final runner = _FakeProcessRunner([
+            _ProcessReply.result(_successfulProbe(stable)),
+            _ProcessReply.result(_successfulProbe(stable)),
+          ]);
+
+          final resolution = await _resolve38(project, flutter38, runner);
+
+          _expectRejected(
+            resolution,
+            code: L10nEvidenceRejectionCode.toolchainUnavailable,
+            detailCode: 'registry-sdk-engine-identity-mismatch',
+          );
+          expect(runner.calls, hasLength(1));
+          expect(runner.calls.single.executable, 'fvm');
+        },
+      );
+    }
+
+    test('rejects a Dart SDK stamp that disagrees with engine stamp', () async {
+      _sdkArtifact(
+        flutter38,
+        'bin/cache/engine-dart-sdk.stamp',
+      ).writeAsStringSync('stale-dart-engine\n');
+      final stable = _fixtureBytes('machine/flutter_3_38_7.json');
+      final runner = _FakeProcessRunner([
+        _ProcessReply.result(_successfulProbe(stable)),
+        _ProcessReply.result(_successfulProbe(stable)),
+      ]);
+
+      final resolution = await _resolve38(project, flutter38, runner);
+
+      _expectRejected(
+        resolution,
+        code: L10nEvidenceRejectionCode.toolchainUnavailable,
+        detailCode: 'registry-sdk-dart-stamp-mismatch',
+      );
+      expect(runner.calls, hasLength(1));
+      expect(runner.calls.single.executable, 'fvm');
+    });
+
+    test('rejects a nonempty engine realm', () async {
+      _sdkArtifact(
+        flutter38,
+        'bin/cache/engine.realm',
+      ).writeAsStringSync('custom-realm\n');
+      final stable = _fixtureBytes('machine/flutter_3_38_7.json');
+      final runner = _FakeProcessRunner([
+        _ProcessReply.result(_successfulProbe(stable)),
+        _ProcessReply.result(_successfulProbe(stable)),
+      ]);
+
+      final resolution = await _resolve38(project, flutter38, runner);
+
+      _expectRejected(
+        resolution,
+        code: L10nEvidenceRejectionCode.unsupportedConfiguration,
+        detailCode: 'registry-sdk-engine-realm-unsupported',
+      );
+      expect(runner.calls, hasLength(1));
+      expect(runner.calls.single.executable, 'fvm');
+    });
+
+    test('rejects an incompatible Flutter-tools stamp', () async {
+      _sdkArtifact(
+        flutter38,
+        'bin/cache/flutter_tools.stamp',
+      ).writeAsStringSync('stale-framework-revision:\n');
+      final stable = _fixtureBytes('machine/flutter_3_38_7.json');
+      final runner = _FakeProcessRunner([
+        _ProcessReply.result(_successfulProbe(stable)),
+        _ProcessReply.result(_successfulProbe(stable)),
+      ]);
+
+      final resolution = await _resolve38(project, flutter38, runner);
+
+      _expectRejected(
+        resolution,
+        code: L10nEvidenceRejectionCode.toolchainUnavailable,
+        detailCode: 'registry-sdk-flutter-tools-stamp-incompatible',
+      );
+      expect(runner.calls, hasLength(1));
+      expect(runner.calls.single.executable, 'fvm');
+    });
+
+    test('rejects an empty Flutter-tools snapshot', () async {
+      _sdkArtifact(
+        flutter38,
+        'bin/cache/flutter_tools.snapshot',
+      ).writeAsBytesSync(const []);
+      final stable = _fixtureBytes('machine/flutter_3_38_7.json');
+      final runner = _FakeProcessRunner([
+        _ProcessReply.result(_successfulProbe(stable)),
+        _ProcessReply.result(_successfulProbe(stable)),
+      ]);
+
+      final resolution = await _resolve38(project, flutter38, runner);
+
+      _expectRejected(
+        resolution,
+        code: L10nEvidenceRejectionCode.toolchainUnavailable,
+        detailCode: 'registry-sdk-cache-state-invalid',
+      );
+      expect(runner.calls, isEmpty);
+    });
+
+    test('rejects an empty Flutter-tools package configuration', () async {
+      _sdkArtifact(
+        flutter38,
+        'packages/flutter_tools/.dart_tool/package_config.json',
+      ).writeAsBytesSync(const []);
+      final stable = _fixtureBytes('machine/flutter_3_38_7.json');
+      final runner = _FakeProcessRunner([
+        _ProcessReply.result(_successfulProbe(stable)),
+        _ProcessReply.result(_successfulProbe(stable)),
+      ]);
+
+      final resolution = await _resolve38(project, flutter38, runner);
+
+      _expectRejected(
+        resolution,
+        code: L10nEvidenceRejectionCode.toolchainUnavailable,
+        detailCode: 'registry-sdk-package-config-invalid',
+      );
+      expect(runner.calls, isEmpty);
+    });
+
+    test('requires the Flutter-tools pubspec to be strictly older', () async {
+      final pubspec = _sdkArtifact(
+        flutter38,
+        'packages/flutter_tools/pubspec.yaml',
+      );
+      final lock = _sdkArtifact(
+        flutter38,
+        'packages/flutter_tools/pubspec.lock',
+      );
+      final sameTime = DateTime.utc(2026, 1, 1);
+      pubspec.setLastModifiedSync(sameTime);
+      lock.setLastModifiedSync(sameTime);
+      final runner = _FakeProcessRunner(const []);
+
+      final resolution = await _resolve38(project, flutter38, runner);
+
+      _expectRejected(
+        resolution,
+        code: L10nEvidenceRejectionCode.toolchainUnavailable,
+        detailCode: 'registry-sdk-cache-freshness-invalid',
+      );
+      expect(runner.calls, isEmpty);
+    });
+
+    test('checks retained controls before invoking the registry binary', () async {
+      _sdkArtifact(
+        flutter38,
+        'bin/cache/engine.stamp',
+      ).writeAsStringSync('stale-engine-revision\n');
+      final runner = _FakeProcessRunner(const []);
+
+      final resolution =
+          await DefaultL10nToolchainResolver(processRunner: runner).resolve(
+            originalProjectRoot: project,
+            sdkRegistry: L10nSdkRegistry({Version(3, 38, 7): flutter38}),
+            selection: RetainedEvidenceSelection(
+              expectedIdentity: FlutterMachineIdentity(
+                frameworkVersion: Version(3, 38, 7),
+                frameworkRevision: 'framework-3.38.7',
+                engineRevision: 'engine-3.38.7',
+                dartSdkVersion: '3.10.7',
+              ),
+              evidenceSha256:
+                  'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+              probeOutputSha256:
+                  'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+            ),
+          );
+
+      _expectRejected(
+        resolution,
+        code: L10nEvidenceRejectionCode.toolchainUnavailable,
+        detailCode: 'registry-sdk-engine-identity-mismatch',
+      );
+      expect(runner.calls, isEmpty);
+    });
+
+    test('revalidation checks stale controls before another probe', () async {
+      final stable = _fixtureBytes('machine/flutter_3_38_7.json');
+      final runner = _FakeProcessRunner([
+        _ProcessReply.result(_successfulProbe(stable)),
+        _ProcessReply.result(_successfulProbe(stable)),
+      ]);
+      final resolver = DefaultL10nToolchainResolver(processRunner: runner);
+      final expected = await _resolved38(project, flutter38, resolver);
+      _sdkArtifact(
+        flutter38,
+        'bin/cache/engine.stamp',
+      ).writeAsStringSync('stale-engine-revision\n');
+
+      final result = await resolver.revalidate(
+        originalProjectRoot: project,
+        expected: expected,
+      );
+
+      _expectChanged(
+        result,
+        detailCode: 'registry-sdk-engine-identity-mismatch',
+      );
+      expect(runner.calls, hasLength(2));
+    });
+
+    test('rejects a nonempty inherited FLUTTER_TOOL_ARGS', () async {
+      final inherited = Platform.environment['FLUTTER_TOOL_ARGS'];
+      if (inherited == null || inherited.isEmpty) {
+        markTestSkipped('Requires a nonempty inherited FLUTTER_TOOL_ARGS.');
+        return;
+      }
+      final runner = _FakeProcessRunner(const []);
+
+      final resolution = await _resolve38(project, flutter38, runner);
+
+      _expectRejected(
+        resolution,
+        code: L10nEvidenceRejectionCode.unsupportedConfiguration,
+        detailCode: 'parent-flutter-tool-args-unsupported',
+      );
+      expect(runner.calls, isEmpty);
+    });
+  });
+
   group('within-probe temporal drift', () {
     setUp(_requirePosixResolverHost);
     setUp(() {
@@ -1516,6 +2000,8 @@ void _expectCall(
 
 String _createFlutterSdk(Directory scratch, String name) {
   final sdk = Directory(p.join(scratch.path, name))..createSync();
+  final frameworkRevision = _fixtureFrameworkRevision(name);
+  final engineRevision = _fixtureEngineRevision(name);
   final flutter = File(p.join(sdk.path, 'bin', _flutterExecutableName));
   final dartLauncher = File(p.join(sdk.path, 'bin', _dartLauncherName));
   final bundledDart = File(
@@ -1526,14 +2012,101 @@ String _createFlutterSdk(Directory scratch, String name) {
     executable.writeAsStringSync('toolchain fixture\n');
     if (!Platform.isWindows) _makeExecutable(executable);
   }
-  File(p.join(sdk.path, 'bin', 'internal', 'shared.sh'))
+  for (final relativePath in _fixtureInternalFiles) {
+    final file = File(p.join(sdk.path, relativePath))
+      ..createSync(recursive: true)
+      ..writeAsStringSync('fixture for $relativePath\n');
+    if (_requiredExecutableInternalFiles.contains(relativePath)) {
+      _makeExecutable(file);
+    }
+  }
+  File(
+    p.join(sdk.path, 'bin/internal/engine.version'),
+  ).writeAsStringSync('$engineRevision\n');
+  final controlContents = <String, String>{
+    'bin/cache/flutter_tools.snapshot': 'fixture snapshot\n',
+    'bin/cache/flutter_tools.stamp': '$frameworkRevision:\n',
+    'bin/cache/engine.stamp': '$engineRevision\n',
+    'bin/cache/engine.realm': '\n',
+    'bin/cache/engine-dart-sdk.stamp': '$engineRevision\n',
+  };
+  for (final entry in controlContents.entries) {
+    File(p.join(sdk.path, entry.key))
+      ..createSync(recursive: true)
+      ..writeAsStringSync(entry.value);
+  }
+  final pubspec =
+      File(p.join(sdk.path, 'packages', 'flutter_tools', 'pubspec.yaml'))
+        ..createSync(recursive: true)
+        ..writeAsStringSync('name: flutter_tools\n');
+  final lock =
+      File(p.join(sdk.path, 'packages', 'flutter_tools', 'pubspec.lock'))
+        ..createSync(recursive: true)
+        ..writeAsStringSync('packages: {}\n');
+  pubspec.setLastModifiedSync(DateTime.utc(2026, 1, 1));
+  lock.setLastModifiedSync(DateTime.utc(2026, 1, 1, 0, 0, 2));
+  File(
+      p.join(
+        sdk.path,
+        'packages',
+        'flutter_tools',
+        '.dart_tool',
+        'package_config.json',
+      ),
+    )
     ..createSync(recursive: true)
-    ..writeAsStringSync('shared launch fixture\n');
-  File(p.join(sdk.path, 'bin', 'cache', 'flutter_tools.snapshot'))
-    ..createSync(recursive: true)
-    ..writeAsStringSync('Flutter tools snapshot fixture\n');
+    ..writeAsStringSync('{"configVersion":2,"packages":[]}\n');
   return flutter.resolveSymbolicLinksSync();
 }
+
+String _fixtureFrameworkRevision(String sdkName) => switch (sdkName) {
+  final String name when name.contains('3.38.7') => 'framework-3.38.7',
+  final String name when name.contains('3.41.5') => 'framework-3.41.5',
+  final String name when name.contains('3.44.1') => 'framework-3.44.1',
+  _ => throw ArgumentError.value(sdkName, 'sdkName'),
+};
+
+String _fixtureEngineRevision(String sdkName) => switch (sdkName) {
+  final String name when name.contains('3.38.7') => 'engine-3.38.7',
+  final String name when name.contains('3.41.5') => 'engine-3.41.5',
+  final String name when name.contains('3.44.1') => 'engine-3.44.1',
+  _ => throw ArgumentError.value(sdkName, 'sdkName'),
+};
+
+const _fixtureInternalFiles = <String>[
+  'bin/internal/README.md',
+  'bin/internal/canvaskit.version',
+  'bin/internal/content_aware_hash.ps1',
+  'bin/internal/content_aware_hash.sh',
+  'bin/internal/engine.version',
+  'bin/internal/exit_with_errorlevel.bat',
+  'bin/internal/flutter_packages.version',
+  'bin/internal/fuchsia-linux.version',
+  'bin/internal/gradle_wrapper.version',
+  'bin/internal/ios-deploy.version',
+  'bin/internal/last_engine_commit.ps1',
+  'bin/internal/last_engine_commit.sh',
+  'bin/internal/libimobiledevice.version',
+  'bin/internal/libimobiledeviceglue.version',
+  'bin/internal/libplist.version',
+  'bin/internal/libusbmuxd.version',
+  'bin/internal/libzip.version',
+  'bin/internal/material_fonts.version',
+  'bin/internal/openssl.version',
+  'bin/internal/release-candidate-branch.version',
+  'bin/internal/shared.bat',
+  'bin/internal/shared.sh',
+  'bin/internal/update_dart_sdk.ps1',
+  'bin/internal/update_dart_sdk.sh',
+  'bin/internal/update_engine_version.ps1',
+  'bin/internal/update_engine_version.sh',
+];
+
+const _requiredExecutableInternalFiles = <String>{
+  'bin/internal/content_aware_hash.sh',
+  'bin/internal/update_dart_sdk.sh',
+  'bin/internal/update_engine_version.sh',
+};
 
 File _sdkArtifact(String canonicalFlutter, String relativePath) =>
     File(p.join(p.dirname(p.dirname(canonicalFlutter)), relativePath));

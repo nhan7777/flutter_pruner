@@ -226,6 +226,7 @@ final class DefaultL10nToolchainResolver implements L10nToolchainResolver {
       );
     }
     try {
+      _requireSupportedParentFlutterToolArgs();
       final workingDirectory = _validatedProjectRoot(originalProjectRoot);
       final selected = switch (selection) {
         ProjectSelectorSelection() => _projectSelection(
@@ -257,7 +258,16 @@ final class DefaultL10nToolchainResolver implements L10nToolchainResolver {
             detailCode: 'selection-probe-identity-mismatch',
           );
         }
+        _requireSdkStillMatches(
+          selected.registeredExecutable,
+          sdk,
+          detailCode: 'canonical-sdk-changed-during-probe',
+        );
       }
+      _requireLaunchControlsCompatible(sdk.launchManifest, switch (selection) {
+        ProjectSelectorSelection() => delegatedProbe!.identity,
+        RetainedEvidenceSelection() => selection.expectedIdentity,
+      });
 
       final directProbe = await _probe(
         executable: sdk.executable,
@@ -306,6 +316,7 @@ final class DefaultL10nToolchainResolver implements L10nToolchainResolver {
       );
 
       final machineIdentity = directProbe.identity;
+      _requireLaunchControlsCompatible(sdk.launchManifest, machineIdentity);
       final originalSelectionProbeSha256 = switch (selection) {
         ProjectSelectorSelection() => _probeEvidenceSha256(
           delegatedProbe!,
@@ -360,6 +371,11 @@ final class DefaultL10nToolchainResolver implements L10nToolchainResolver {
     if (Platform.isWindows) {
       return _changed('windows-command-model-unsupported');
     }
+    try {
+      _requireSupportedParentFlutterToolArgs();
+    } on _ResolutionSignal catch (signal) {
+      return _changed(signal.detailCode);
+    }
     if (!_validFrozenCommands(expected)) {
       return _changed('frozen-command-drift');
     }
@@ -409,8 +425,12 @@ final class DefaultL10nToolchainResolver implements L10nToolchainResolver {
       late final _CanonicalSdk sdk;
       try {
         sdk = _canonicalSdkFor(expected.canonicalFlutterExecutable);
-      } on _ResolutionSignal {
-        return _changed('canonical-executable-drift');
+      } on _ResolutionSignal catch (signal) {
+        return _changed(
+          signal.detailCode == 'registry-executable-unavailable'
+              ? 'canonical-executable-drift'
+              : 'canonical-sdk-drift',
+        );
       }
       if (sdk.executable != expected.canonicalFlutterExecutable) {
         return _changed('canonical-executable-drift');
@@ -418,6 +438,10 @@ final class DefaultL10nToolchainResolver implements L10nToolchainResolver {
       if (sdk.root != expected.canonicalSdkRoot) {
         return _changed('canonical-sdk-drift');
       }
+      _requireLaunchControlsCompatible(
+        sdk.launchManifest,
+        expected.machineIdentity,
+      );
 
       if (expected.selection is ProjectSelectorSelection) {
         try {
@@ -434,6 +458,11 @@ final class DefaultL10nToolchainResolver implements L10nToolchainResolver {
         if (!_sameIdentity(delegatedProbe.identity, expected.machineIdentity)) {
           return _changed('delegated-probe-drift');
         }
+        _requireSdkStillMatches(
+          expected.canonicalFlutterExecutable,
+          sdk,
+          detailCode: 'canonical-sdk-changed-during-probe',
+        );
       }
 
       late final _ProbeEvidence directProbe;
@@ -464,6 +493,10 @@ final class DefaultL10nToolchainResolver implements L10nToolchainResolver {
         expected.canonicalFlutterExecutable,
         sdk,
         detailCode: 'canonical-sdk-changed-during-probe',
+      );
+      _requireLaunchControlsCompatible(
+        sdk.launchManifest,
+        expected.machineIdentity,
       );
 
       final originalSelectionProbeSha256 = switch (expected.selection) {
@@ -785,9 +818,9 @@ void _requireSdkStillMatches(
   }
   if (current.executable != expected.executable ||
       current.root != expected.root ||
-      !_sameLaunchArtifacts(
-        current.launchArtifactsByRelativePath,
-        expected.launchArtifactsByRelativePath,
+      !_samePosixLaunchManifest(
+        current.launchManifest,
+        expected.launchManifest,
       )) {
     throw _ResolutionSignal(
       code: L10nEvidenceRejectionCode.toolchainUnavailable,
@@ -815,7 +848,10 @@ _CanonicalSdk _canonicalSdkFor(String registeredExecutable) {
     );
     if (FileSystemEntity.typeSync(requested.path, followLinks: true) !=
         FileSystemEntityType.file) {
-      throw const FormatException();
+      throw const _ResolutionSignal(
+        code: L10nEvidenceRejectionCode.toolchainUnavailable,
+        detailCode: 'registry-executable-unavailable',
+      );
     }
     final executable = p.normalize(requested.resolveSymbolicLinksSync());
     final executableFile = File(executable);
@@ -841,9 +877,9 @@ _CanonicalSdk _canonicalSdkFor(String registeredExecutable) {
       throw const FormatException();
     }
 
-    final launchArtifacts = _captureLaunchArtifacts(root);
-    final canonicalFlutter =
-        launchArtifacts[p.join('bin', _flutterExecutableName)];
+    final launchManifest = _capturePosixLaunchManifest(root);
+    final canonicalFlutter = launchManifest
+        .entriesByRelativePath[p.join('bin', _flutterExecutableName)];
     if (canonicalFlutter == null ||
         canonicalFlutter.canonicalPath != executable) {
       throw const FormatException();
@@ -851,7 +887,7 @@ _CanonicalSdk _canonicalSdkFor(String registeredExecutable) {
     return _CanonicalSdk(
       executable: executable,
       root: root,
-      launchArtifactsByRelativePath: launchArtifacts,
+      launchManifest: launchManifest,
     );
   } on FileSystemException {
     throw const _ResolutionSignal(
@@ -866,53 +902,55 @@ _CanonicalSdk _canonicalSdkFor(String registeredExecutable) {
   }
 }
 
-Map<String, _LaunchArtifactFingerprint> _captureLaunchArtifacts(String root) {
-  final fingerprints = SplayTreeMap<String, _LaunchArtifactFingerprint>();
-  for (final spec in _launchArtifactSpecs) {
-    fingerprints[spec.relativePath] = _captureLaunchArtifact(root, spec);
-  }
-  return Map<String, _LaunchArtifactFingerprint>.unmodifiable(fingerprints);
-}
-
-_LaunchArtifactFingerprint _captureLaunchArtifact(
-  String root,
-  _LaunchArtifactSpec spec,
-) {
+_PosixLaunchManifest _capturePosixLaunchManifest(String root) {
   try {
-    final components = p.split(spec.relativePath);
-    var current = root;
-    for (var index = 0; index < components.length; index++) {
-      current = p.join(current, components[index]);
-      final type = FileSystemEntity.typeSync(current, followLinks: false);
-      final expectedType = index == components.length - 1
-          ? FileSystemEntityType.file
-          : FileSystemEntityType.directory;
-      if (type != expectedType) throw const FormatException();
+    final entries = SplayTreeMap<String, _LaunchManifestEntry>();
+    for (final spec in _fixedLaunchFileSpecs) {
+      entries[spec.relativePath] = _captureLaunchFile(root, spec);
     }
+    _captureInternalTree(root, 'bin/internal', entries);
+    _requireStableInternalFiles(entries);
 
-    final file = File(current);
-    final canonicalPath = p.normalize(file.resolveSymbolicLinksSync());
-    if (!p.isWithin(root, canonicalPath)) throw const FormatException();
-    final before = file.statSync();
-    final executable = _isExecutable(before);
-    if (before.type != FileSystemEntityType.file ||
-        (spec.requiresExecutable && !executable)) {
-      throw const FormatException();
-    }
-
-    final bytes = file.readAsBytesSync();
-    final after = file.statSync();
-    final canonicalPathAfterRead = p.normalize(file.resolveSymbolicLinksSync());
-    if (!_sameArtifactFileState(before, after) ||
-        canonicalPathAfterRead != canonicalPath) {
-      throw const FormatException();
-    }
-    return _LaunchArtifactFingerprint(
-      canonicalPath: canonicalPath,
-      sha256: sha256.convert(bytes).toString(),
-      requiresExecutable: spec.requiresExecutable,
-      executable: executable,
+    final pubspec = File(p.join(root, _flutterToolsPubspecPath));
+    final lock = File(p.join(root, _flutterToolsLockPath));
+    final pubspecOlderThanLock = pubspec.lastModifiedSync().isBefore(
+      lock.lastModifiedSync(),
     );
+    if (!pubspecOlderThanLock) {
+      throw const _ResolutionSignal(
+        code: L10nEvidenceRejectionCode.toolchainUnavailable,
+        detailCode: 'registry-sdk-cache-freshness-invalid',
+      );
+    }
+    final snapshotNonEmpty =
+        _manifestFileEntry(entries, _flutterToolsSnapshotPath).byteLength! > 0;
+    if (!snapshotNonEmpty) {
+      throw const _ResolutionSignal(
+        code: L10nEvidenceRejectionCode.toolchainUnavailable,
+        detailCode: 'registry-sdk-cache-state-invalid',
+      );
+    }
+    final packageConfigNonEmpty =
+        _manifestFileEntry(
+          entries,
+          _flutterToolsPackageConfigPath,
+        ).byteLength! >
+        0;
+    if (!packageConfigNonEmpty) {
+      throw const _ResolutionSignal(
+        code: L10nEvidenceRejectionCode.toolchainUnavailable,
+        detailCode: 'registry-sdk-package-config-invalid',
+      );
+    }
+    return _PosixLaunchManifest(
+      entriesByRelativePath: entries,
+      bootstrapHookAbsent: true,
+      flutterToolsPubspecOlderThanLock: pubspecOlderThanLock,
+      flutterToolsSnapshotNonEmpty: snapshotNonEmpty,
+      flutterToolsPackageConfigNonEmpty: packageConfigNonEmpty,
+    );
+  } on _ResolutionSignal {
+    rethrow;
   } on FileSystemException {
     throw const _ResolutionSignal(
       code: L10nEvidenceRejectionCode.toolchainUnavailable,
@@ -921,27 +959,331 @@ _LaunchArtifactFingerprint _captureLaunchArtifact(
   }
 }
 
-List<_LaunchArtifactSpec> get _launchArtifactSpecs => [
-  _LaunchArtifactSpec(
+void _captureInternalTree(
+  String root,
+  String relativeDirectory,
+  SplayTreeMap<String, _LaunchManifestEntry> entries,
+) {
+  entries[relativeDirectory] = _captureLaunchDirectory(root, relativeDirectory);
+  final children =
+      Directory(p.join(root, relativeDirectory)).listSync(followLinks: false)
+        ..sort(
+          (left, right) => p
+              .normalize(left.absolute.path)
+              .compareTo(p.normalize(right.absolute.path)),
+        );
+  for (final child in children) {
+    final childPath = p.normalize(File(child.path).absolute.path);
+    if (!p.isWithin(root, childPath)) {
+      throw const FormatException();
+    }
+    final relativePath = p.normalize(p.relative(childPath, from: root));
+    if (p.isAbsolute(relativePath) || p.split(relativePath).contains('..')) {
+      throw const FormatException();
+    }
+    if (relativePath == _bootstrapHookPath) {
+      throw const _ResolutionSignal(
+        code: L10nEvidenceRejectionCode.unsupportedConfiguration,
+        detailCode: 'registry-sdk-bootstrap-unsupported',
+      );
+    }
+    final type = FileSystemEntity.typeSync(child.path, followLinks: false);
+    if (type == FileSystemEntityType.file) {
+      entries[relativePath] = _captureLaunchFile(
+        root,
+        _LaunchFileSpec(
+          relativePath: relativePath,
+          requiresExecutable: _requiredExecutableInternalFiles.contains(
+            relativePath,
+          ),
+        ),
+      );
+    } else if (type == FileSystemEntityType.directory) {
+      _captureInternalTree(root, relativePath, entries);
+    } else {
+      throw const FormatException();
+    }
+  }
+}
+
+_LaunchManifestEntry _captureLaunchDirectory(String root, String relativePath) {
+  final path = _requireSafeLaunchPath(
+    root,
+    relativePath,
+    FileSystemEntityType.directory,
+  );
+  final directory = Directory(path);
+  final canonicalPath = p.normalize(directory.resolveSymbolicLinksSync());
+  if (!p.isWithin(root, canonicalPath)) throw const FormatException();
+  final stat = directory.statSync();
+  if (stat.type != FileSystemEntityType.directory) {
+    throw const FormatException();
+  }
+  return _LaunchManifestEntry(
+    canonicalPath: canonicalPath,
+    type: _LaunchManifestEntryType.directory,
+    sha256: null,
+    byteLength: null,
+    requiresExecutable: false,
+    executable: null,
+    semanticContent: null,
+  );
+}
+
+_LaunchManifestEntry _captureLaunchFile(String root, _LaunchFileSpec spec) {
+  final path = _requireSafeLaunchPath(
+    root,
+    spec.relativePath,
+    FileSystemEntityType.file,
+  );
+  final file = File(path);
+  final canonicalPath = p.normalize(file.resolveSymbolicLinksSync());
+  if (!p.isWithin(root, canonicalPath)) throw const FormatException();
+  final before = file.statSync();
+  final executable = _isExecutable(before);
+  if (before.type != FileSystemEntityType.file ||
+      (spec.requiresExecutable && !executable)) {
+    throw const FormatException();
+  }
+
+  final bytes = file.readAsBytesSync();
+  final after = file.statSync();
+  final canonicalPathAfterRead = p.normalize(file.resolveSymbolicLinksSync());
+  if (!_sameArtifactFileState(before, after) ||
+      canonicalPathAfterRead != canonicalPath) {
+    throw const FormatException();
+  }
+  return _LaunchManifestEntry(
+    canonicalPath: canonicalPath,
+    type: _LaunchManifestEntryType.regularFile,
+    sha256: sha256.convert(bytes).toString(),
+    byteLength: bytes.length,
+    requiresExecutable: spec.requiresExecutable,
+    executable: executable,
+    semanticContent: _semanticControlContentPaths.contains(spec.relativePath)
+        ? bytes
+        : null,
+  );
+}
+
+_LaunchManifestEntry _manifestFileEntry(
+  Map<String, _LaunchManifestEntry> entries,
+  String relativePath,
+) {
+  final entry = entries[relativePath];
+  if (entry == null || entry.type != _LaunchManifestEntryType.regularFile) {
+    throw const FormatException();
+  }
+  return entry;
+}
+
+List<int> _manifestFileContent(
+  Map<String, _LaunchManifestEntry> entries,
+  String relativePath,
+) {
+  final content = _manifestFileEntry(entries, relativePath).semanticContent;
+  if (content == null) throw const FormatException();
+  return content;
+}
+
+void _requireSupportedParentFlutterToolArgs() {
+  final inherited = Platform.environment['FLUTTER_TOOL_ARGS'];
+  if (inherited != null && inherited.isNotEmpty) {
+    throw const _ResolutionSignal(
+      code: L10nEvidenceRejectionCode.unsupportedConfiguration,
+      detailCode: 'parent-flutter-tool-args-unsupported',
+    );
+  }
+}
+
+void _requireLaunchControlsCompatible(
+  _PosixLaunchManifest manifest,
+  FlutterMachineIdentity machineIdentity,
+) {
+  final engineStamp = _trimmedManifestText(
+    manifest,
+    _engineStampPath,
+    detailCode: 'registry-sdk-engine-identity-mismatch',
+  );
+  final engineVersion = _trimmedManifestText(
+    manifest,
+    _engineVersionPath,
+    detailCode: 'registry-sdk-engine-identity-mismatch',
+  );
+  if (engineStamp.isEmpty ||
+      engineStamp != machineIdentity.engineRevision ||
+      engineVersion != machineIdentity.engineRevision) {
+    throw const _ResolutionSignal(
+      code: L10nEvidenceRejectionCode.toolchainUnavailable,
+      detailCode: 'registry-sdk-engine-identity-mismatch',
+    );
+  }
+
+  final dartStamp = _trimmedManifestText(
+    manifest,
+    _engineDartSdkStampPath,
+    detailCode: 'registry-sdk-dart-stamp-mismatch',
+  );
+  if (dartStamp != engineStamp) {
+    throw const _ResolutionSignal(
+      code: L10nEvidenceRejectionCode.toolchainUnavailable,
+      detailCode: 'registry-sdk-dart-stamp-mismatch',
+    );
+  }
+
+  final engineRealm = _trimmedManifestText(
+    manifest,
+    _engineRealmPath,
+    detailCode: 'registry-sdk-engine-realm-unsupported',
+  );
+  if (engineRealm.isNotEmpty) {
+    throw const _ResolutionSignal(
+      code: L10nEvidenceRejectionCode.unsupportedConfiguration,
+      detailCode: 'registry-sdk-engine-realm-unsupported',
+    );
+  }
+
+  final flutterToolsStamp = _shellCommandSubstitutionText(
+    manifest,
+    _flutterToolsStampPath,
+    detailCode: 'registry-sdk-flutter-tools-stamp-incompatible',
+  );
+  if (flutterToolsStamp != '${machineIdentity.frameworkRevision}:') {
+    throw const _ResolutionSignal(
+      code: L10nEvidenceRejectionCode.toolchainUnavailable,
+      detailCode: 'registry-sdk-flutter-tools-stamp-incompatible',
+    );
+  }
+}
+
+String _trimmedManifestText(
+  _PosixLaunchManifest manifest,
+  String relativePath, {
+  required String detailCode,
+}) {
+  try {
+    return utf8
+        .decode(
+          _manifestFileContent(manifest.entriesByRelativePath, relativePath),
+        )
+        .trim();
+  } on FormatException {
+    throw _ResolutionSignal(
+      code: L10nEvidenceRejectionCode.toolchainUnavailable,
+      detailCode: detailCode,
+    );
+  }
+}
+
+String _shellCommandSubstitutionText(
+  _PosixLaunchManifest manifest,
+  String relativePath, {
+  required String detailCode,
+}) {
+  final bytes = _manifestFileContent(
+    manifest.entriesByRelativePath,
+    relativePath,
+  );
+  var end = bytes.length;
+  while (end > 0 && bytes[end - 1] == 0x0a) {
+    end--;
+  }
+  try {
+    return utf8.decode(bytes.sublist(0, end));
+  } on FormatException {
+    throw _ResolutionSignal(
+      code: L10nEvidenceRejectionCode.toolchainUnavailable,
+      detailCode: detailCode,
+    );
+  }
+}
+
+String _requireSafeLaunchPath(
+  String root,
+  String relativePath,
+  FileSystemEntityType finalType,
+) {
+  final components = p.split(relativePath);
+  var current = root;
+  for (var index = 0; index < components.length; index++) {
+    current = p.join(current, components[index]);
+    final type = FileSystemEntity.typeSync(current, followLinks: false);
+    final expectedType = index == components.length - 1
+        ? finalType
+        : FileSystemEntityType.directory;
+    if (type != expectedType) throw const FormatException();
+  }
+  return current;
+}
+
+void _requireStableInternalFiles(Map<String, _LaunchManifestEntry> entries) {
+  for (final relativePath in _requiredStableInternalFiles) {
+    final entry = entries[relativePath];
+    if (entry == null || entry.type != _LaunchManifestEntryType.regularFile) {
+      throw const FormatException();
+    }
+  }
+}
+
+List<_LaunchFileSpec> get _fixedLaunchFileSpecs => [
+  _LaunchFileSpec(
     relativePath: p.join('bin', _flutterExecutableName),
     requiresExecutable: true,
   ),
-  _LaunchArtifactSpec(
+  _LaunchFileSpec(
     relativePath: p.join('bin', _dartLauncherName),
     requiresExecutable: true,
   ),
-  _LaunchArtifactSpec(
+  _LaunchFileSpec(
     relativePath: p.join('bin', 'cache', 'dart-sdk', 'bin', _bundledDartName),
     requiresExecutable: true,
   ),
-  _LaunchArtifactSpec(
-    relativePath: p.join('bin', 'internal', 'shared.sh'),
-    requiresExecutable: false,
-  ),
-  _LaunchArtifactSpec(
+  _LaunchFileSpec(
     relativePath: p.join('bin', 'cache', 'flutter_tools.snapshot'),
     requiresExecutable: false,
   ),
+  for (final relativePath in _controlInputPaths)
+    _LaunchFileSpec(relativePath: relativePath, requiresExecutable: false),
+];
+
+const _bootstrapHookPath = 'bin/internal/bootstrap.sh';
+const _flutterToolsPubspecPath = 'packages/flutter_tools/pubspec.yaml';
+const _flutterToolsLockPath = 'packages/flutter_tools/pubspec.lock';
+const _flutterToolsPackageConfigPath =
+    'packages/flutter_tools/.dart_tool/package_config.json';
+const _flutterToolsSnapshotPath = 'bin/cache/flutter_tools.snapshot';
+const _flutterToolsStampPath = 'bin/cache/flutter_tools.stamp';
+const _engineStampPath = 'bin/cache/engine.stamp';
+const _engineRealmPath = 'bin/cache/engine.realm';
+const _engineDartSdkStampPath = 'bin/cache/engine-dart-sdk.stamp';
+const _engineVersionPath = 'bin/internal/engine.version';
+const _semanticControlContentPaths = <String>{
+  _flutterToolsStampPath,
+  _engineStampPath,
+  _engineRealmPath,
+  _engineDartSdkStampPath,
+  _engineVersionPath,
+};
+const _requiredStableInternalFiles = <String>{
+  'bin/internal/shared.sh',
+  'bin/internal/update_engine_version.sh',
+  'bin/internal/update_dart_sdk.sh',
+  'bin/internal/content_aware_hash.sh',
+  'bin/internal/engine.version',
+};
+const _requiredExecutableInternalFiles = <String>{
+  'bin/internal/update_engine_version.sh',
+  'bin/internal/update_dart_sdk.sh',
+  'bin/internal/content_aware_hash.sh',
+};
+const _controlInputPaths = <String>[
+  _flutterToolsStampPath,
+  _engineStampPath,
+  _engineRealmPath,
+  _engineDartSdkStampPath,
+  _flutterToolsPubspecPath,
+  _flutterToolsLockPath,
+  _flutterToolsPackageConfigPath,
 ];
 
 bool _sameArtifactFileState(FileStat left, FileStat right) =>
@@ -1077,21 +1419,44 @@ String _toolchainIdentitySha256({
   hasher.addText('canonicalFlutterExecutable', sdk.executable);
   hasher.addText('canonicalSdkRoot', sdk.root);
   hasher.addText(
-    'launchArtifactCount',
-    sdk.launchArtifactsByRelativePath.length.toString(),
+    'launchManifestEntryCount',
+    sdk.launchManifest.entriesByRelativePath.length.toString(),
   );
-  for (final entry in sdk.launchArtifactsByRelativePath.entries) {
-    hasher.addText('launchArtifact.relativePath', entry.key);
-    hasher.addText('launchArtifact.canonicalPath', entry.value.canonicalPath);
-    hasher.addText('launchArtifact.sha256', entry.value.sha256);
-    hasher.addText('launchArtifact.fileType', 'regular');
+  hasher.addText(
+    'launchManifest.bootstrapHookAbsent',
+    sdk.launchManifest.bootstrapHookAbsent.toString(),
+  );
+  hasher.addText(
+    'launchManifest.flutterToolsPubspecOlderThanLock',
+    sdk.launchManifest.flutterToolsPubspecOlderThanLock.toString(),
+  );
+  hasher.addText(
+    'launchManifest.flutterToolsSnapshotNonEmpty',
+    sdk.launchManifest.flutterToolsSnapshotNonEmpty.toString(),
+  );
+  hasher.addText(
+    'launchManifest.flutterToolsPackageConfigNonEmpty',
+    sdk.launchManifest.flutterToolsPackageConfigNonEmpty.toString(),
+  );
+  for (final entry in sdk.launchManifest.entriesByRelativePath.entries) {
+    hasher.addText('launchManifest.relativePath', entry.key);
+    hasher.addText('launchManifest.canonicalPath', entry.value.canonicalPath);
+    hasher.addText('launchManifest.entryType', entry.value.type.name);
     hasher.addText(
-      'launchArtifact.requiresExecutable',
+      'launchManifest.sha256',
+      entry.value.sha256 ?? 'not-applicable',
+    );
+    hasher.addText(
+      'launchManifest.byteLength',
+      entry.value.byteLength?.toString() ?? 'not-applicable',
+    );
+    hasher.addText(
+      'launchManifest.requiresExecutable',
       entry.value.requiresExecutable.toString(),
     );
     hasher.addText(
-      'launchArtifact.executable',
-      entry.value.executable.toString(),
+      'launchManifest.executable',
+      entry.value.executable?.toString() ?? 'not-applicable',
     );
   }
   for (final entry in SplayTreeMap<String, String>.of(selectorHashes).entries) {
@@ -1227,21 +1592,34 @@ final class _CanonicalSdk {
   _CanonicalSdk({
     required this.executable,
     required this.root,
-    required Map<String, _LaunchArtifactFingerprint>
-    launchArtifactsByRelativePath,
-  }) : launchArtifactsByRelativePath = Map.unmodifiable(
-         SplayTreeMap<String, _LaunchArtifactFingerprint>.of(
-           launchArtifactsByRelativePath,
-         ),
-       );
+    required this.launchManifest,
+  });
 
   final String executable;
   final String root;
-  final Map<String, _LaunchArtifactFingerprint> launchArtifactsByRelativePath;
+  final _PosixLaunchManifest launchManifest;
 }
 
-final class _LaunchArtifactSpec {
-  const _LaunchArtifactSpec({
+final class _PosixLaunchManifest {
+  _PosixLaunchManifest({
+    required Map<String, _LaunchManifestEntry> entriesByRelativePath,
+    required this.bootstrapHookAbsent,
+    required this.flutterToolsPubspecOlderThanLock,
+    required this.flutterToolsSnapshotNonEmpty,
+    required this.flutterToolsPackageConfigNonEmpty,
+  }) : entriesByRelativePath = Map<String, _LaunchManifestEntry>.unmodifiable(
+         SplayTreeMap<String, _LaunchManifestEntry>.of(entriesByRelativePath),
+       );
+
+  final Map<String, _LaunchManifestEntry> entriesByRelativePath;
+  final bool bootstrapHookAbsent;
+  final bool flutterToolsPubspecOlderThanLock;
+  final bool flutterToolsSnapshotNonEmpty;
+  final bool flutterToolsPackageConfigNonEmpty;
+}
+
+final class _LaunchFileSpec {
+  const _LaunchFileSpec({
     required this.relativePath,
     required this.requiresExecutable,
   });
@@ -1250,30 +1628,50 @@ final class _LaunchArtifactSpec {
   final bool requiresExecutable;
 }
 
-final class _LaunchArtifactFingerprint {
-  const _LaunchArtifactFingerprint({
+enum _LaunchManifestEntryType { directory, regularFile }
+
+final class _LaunchManifestEntry {
+  _LaunchManifestEntry({
     required this.canonicalPath,
+    required this.type,
     required this.sha256,
+    required this.byteLength,
     required this.requiresExecutable,
     required this.executable,
-  });
+    required List<int>? semanticContent,
+  }) : semanticContent = semanticContent == null
+           ? null
+           : List<int>.unmodifiable(semanticContent);
 
   final String canonicalPath;
-  final String sha256;
+  final _LaunchManifestEntryType type;
+  final String? sha256;
+  final int? byteLength;
   final bool requiresExecutable;
-  final bool executable;
+  final bool? executable;
+  final List<int>? semanticContent;
 }
 
-bool _sameLaunchArtifacts(
-  Map<String, _LaunchArtifactFingerprint> left,
-  Map<String, _LaunchArtifactFingerprint> right,
+bool _samePosixLaunchManifest(
+  _PosixLaunchManifest left,
+  _PosixLaunchManifest right,
 ) {
-  if (left.length != right.length) return false;
-  for (final entry in left.entries) {
-    final other = right[entry.key];
+  if (left.bootstrapHookAbsent != right.bootstrapHookAbsent ||
+      left.flutterToolsPubspecOlderThanLock !=
+          right.flutterToolsPubspecOlderThanLock ||
+      left.flutterToolsSnapshotNonEmpty != right.flutterToolsSnapshotNonEmpty ||
+      left.flutterToolsPackageConfigNonEmpty !=
+          right.flutterToolsPackageConfigNonEmpty ||
+      left.entriesByRelativePath.length != right.entriesByRelativePath.length) {
+    return false;
+  }
+  for (final entry in left.entriesByRelativePath.entries) {
+    final other = right.entriesByRelativePath[entry.key];
     if (other == null ||
         entry.value.canonicalPath != other.canonicalPath ||
+        entry.value.type != other.type ||
         entry.value.sha256 != other.sha256 ||
+        entry.value.byteLength != other.byteLength ||
         entry.value.requiresExecutable != other.requiresExecutable ||
         entry.value.executable != other.executable) {
       return false;
