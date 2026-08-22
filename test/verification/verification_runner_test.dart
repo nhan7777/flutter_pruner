@@ -677,26 +677,22 @@ class _TruncatingRunner implements ProcessExecutionRunner {
     required String workingDirectory,
     required Duration timeout,
     required int maxOutputBytesPerStream,
+    Map<String, String> environmentOverrides = const {},
+    bool includeParentEnvironment = true,
   }) async {
     final output = arguments.single == '--version'
-        ? const BoundedProcessOutput(
-            text: 'tool 1.0',
-            capturedBytes: 8,
+        ? BoundedProcessOutput(
+            capturedPayload: utf8.encode('tool 1.0'),
             omittedBytes: 0,
           )
-        : const BoundedProcessOutput(
-            text: 'partial failure',
-            capturedBytes: 15,
+        : BoundedProcessOutput(
+            capturedPayload: utf8.encode('partial failure'),
             omittedBytes: 1,
           );
     return ManagedProcessResult(
       exitCode: arguments.single == '--version' ? 0 : 1,
       stdout: output,
-      stderr: const BoundedProcessOutput(
-        text: '',
-        capturedBytes: 0,
-        omittedBytes: 0,
-      ),
+      stderr: BoundedProcessOutput(capturedPayload: const [], omittedBytes: 0),
     );
   }
 }
@@ -728,6 +724,8 @@ class _FixedOutputRunner implements ProcessExecutionRunner {
     required String workingDirectory,
     required Duration timeout,
     required int maxOutputBytesPerStream,
+    Map<String, String> environmentOverrides = const {},
+    bool includeParentEnvironment = true,
   }) async {
     final isVersionProbe =
         arguments.length == 1 && arguments.single == '--version';
@@ -735,15 +733,10 @@ class _FixedOutputRunner implements ProcessExecutionRunner {
     return ManagedProcessResult(
       exitCode: isVersionProbe ? 0 : 1,
       stdout: BoundedProcessOutput(
-        text: text,
-        capturedBytes: text.length,
+        capturedPayload: utf8.encode(text),
         omittedBytes: 0,
       ),
-      stderr: const BoundedProcessOutput(
-        text: '',
-        capturedBytes: 0,
-        omittedBytes: 0,
-      ),
+      stderr: BoundedProcessOutput(capturedPayload: const [], omittedBytes: 0),
     );
   }
 }
@@ -758,6 +751,8 @@ class _ChangingVersionRunner implements ProcessExecutionRunner {
     required String workingDirectory,
     required Duration timeout,
     required int maxOutputBytesPerStream,
+    Map<String, String> environmentOverrides = const {},
+    bool includeParentEnvironment = true,
   }) async {
     final isVersionProbe =
         arguments.length == 1 && arguments.single == '--version';
@@ -767,15 +762,10 @@ class _ChangingVersionRunner implements ProcessExecutionRunner {
     return ManagedProcessResult(
       exitCode: 0,
       stdout: BoundedProcessOutput(
-        text: output,
-        capturedBytes: output.length,
+        capturedPayload: utf8.encode(output),
         omittedBytes: 0,
       ),
-      stderr: const BoundedProcessOutput(
-        text: '',
-        capturedBytes: 0,
-        omittedBytes: 0,
-      ),
+      stderr: BoundedProcessOutput(capturedPayload: const [], omittedBytes: 0),
     );
   }
 }

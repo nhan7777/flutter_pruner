@@ -250,6 +250,8 @@ class _UnconfirmedTerminationRunner implements ProcessExecutionRunner {
     required String workingDirectory,
     required Duration timeout,
     required int maxOutputBytesPerStream,
+    Map<String, String> environmentOverrides = const {},
+    bool includeParentEnvironment = true,
   }) async {
     throw const ProcessTerminationUnconfirmedException(
       processId: 4242,
