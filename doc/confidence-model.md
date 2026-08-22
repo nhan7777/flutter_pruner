@@ -47,11 +47,14 @@ in a PR description.
 
 ## Hard gates and explicit HIGH risks
 
-`SAFE` requires all eight predicates below: complete selected-boundary and target
-coverage, complete incoming graph evidence, and an action the core owns. A
-blocker, protection, unsupported action, missing inverse, incomplete scope or a
-dangling incoming edge on the candidate always produces `REVIEW`/`PROTECTED`;
-none can fall through to `HIGH`.
+`SAFE` and `HIGH` require all eight hard gates described below. The ninth named
+predicate, `noPublicApiRisk`, records whether external-consumer risk remains; a
+false value can produce an allowlisted `HIGH` result instead of failing the
+shared hard gates. `SAFE` additionally requires no manual risk, while `HIGH`
+requires exactly one allowlisted risk. A blocker, protection, unsupported
+action, missing inverse, incomplete scope or a dangling incoming edge on the
+candidate always produces `REVIEW`/`PROTECTED`; none can fall through to
+`HIGH`.
 
 **`ruleAllowsAutoFix`** — the rule itself has a mechanical fix. Some findings are
 informational by nature; a rule that cannot express its own fix never produces
@@ -72,9 +75,9 @@ system working as intended.
 deletion of code that appears unused but is actually wired by frameworks at
 runtime. See [Framework Protection Rules](#framework-protection-rules) below.
 
-**`noPublicApiRisk`** — removing it cannot break an external consumer. Matters
-for published packages, where an unreferenced public symbol is API surface
-rather than dead code.
+**`noPublicApiRisk`** *(risk predicate, not a shared hard gate)* — removing it
+cannot break an external consumer. Matters for published packages, where an
+unreferenced public symbol is API surface rather than dead code.
 
 **`hasDeterministicInverse`** — the change can be undone exactly. If the tool
 cannot describe how to reverse an edit, it does not get to apply it

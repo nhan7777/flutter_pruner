@@ -40,12 +40,12 @@ without that marker blocks a later apply unless a verified full rollback proves
 the older run is terminal.
 
 Every completed scan and handled apply outcome writes a unique immutable report
-object. Managed scan output uses `.flutter_pruner/reports/objects/` with its
-authority record in `.flutter_pruner/reports/commits/`. Apply keeps monotonic
-canonical JSON objects with the quarantine and exports the selected terminal
-format separately. Self-contained HTML is the default, with a JSON v3 payload
-embedded in the report. The terminal renders the human summary and highlights
-the actual committed object path.
+object. Managed scan output uses `.flutter_pruner/reports/store/objects/` with
+its authority record in `.flutter_pruner/reports/store/commits/`. Apply keeps
+monotonic canonical JSON objects with the quarantine and exports the selected
+terminal format separately. Self-contained HTML is the default, with a JSON v3
+payload embedded in the report. The terminal renders the human summary and
+highlights the actual committed object path.
 `--format`/`apply --report-format` select another representation;
 `--output`/`apply --report-output` override the automatic destination. Relative
 overrides remain contained below the report directory, while absolute

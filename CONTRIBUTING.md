@@ -4,12 +4,12 @@ Contributions are welcome. The architecture was designed so that adding analysis
 capability does not require touching the engine, and so that a first PR can be
 small.
 
-Flutter Pruner is `1.3.0` and solo-maintained. Built-in asset, duplicate-file,
-Dart declaration, `go_router`, direct base-scope `GetIt`, and current
-ARB/real-source `gen-l10n` adapters are implemented. The latter two remain
-review-only and deliberately block unmodeled runtime or generated boundaries.
-If you want to build something substantial, open a draft PR or a discussion
-first so we do not duplicate work.
+Flutter Pruner is solo-maintained. Built-in analyzers cover assets, exact
+duplicates, Dart declarations, `go_router`, direct base-scope `GetIt`, and
+current ARB/real-source `gen-l10n`. Route, GetIt, localization, and duplicate
+findings remain review-only; unmodeled runtime or generated boundaries fail
+closed. If you want to build something substantial, open a draft PR or a
+discussion first so we do not duplicate work.
 
 ---
 
@@ -75,8 +75,8 @@ the ones relevant to your change:
 
 - [graph-model.md](doc/graph-model.md) — nodes, edges, conditional reachability,
   blockers. Explains why reachability is per build target.
-- [confidence-model.md](doc/confidence-model.md) — the eight predicates gating
-  `SAFE`, and why tiers rather than a score.
+- [confidence-model.md](doc/confidence-model.md) — the shared hard gates,
+  explicit risks, and why tiers are used instead of a score.
 - [profiling.md](doc/performance/profiling.md) — reproducible synthetic benchmarks,
   subphase profiling, and rules for sharing results safely.
 

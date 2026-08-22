@@ -47,6 +47,13 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   fails, and retained the failed object role so canonical batch failures are
   not mislabeled as external-export warnings.
 
+### Documentation
+
+- Reworked the README into a short first-run workflow with prominent safety
+  warnings, and moved modes, CI, apply, report, and recovery guidance into a
+  dedicated operational guide. Core architecture and contribution material now
+  stay in their focused documents.
+
 ## [1.4.0] - 2026-08-19
 
 ### Added
