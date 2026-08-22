@@ -21,7 +21,10 @@ abstract interface class ProcessExecutionRunner {
 /// Default process executor used by mutating and verification workflows.
 class ManagedProcessRunner implements ProcessExecutionRunner {
   /// Creates a managed process runner.
-  const ManagedProcessRunner();
+  const ManagedProcessRunner({String posixProcessTableExecutable = '/bin/ps'})
+    : _posixProcessTableExecutable = posixProcessTableExecutable;
+
+  final String _posixProcessTableExecutable;
 
   @override
   Future<ManagedProcessResult> run(
@@ -64,7 +67,10 @@ class ManagedProcessRunner implements ProcessExecutionRunner {
       process.stderr,
       maxOutputBytesPerStream,
     );
-    final observer = _ProcessTreeObserver(process.pid)..start();
+    final observer = _ProcessTreeObserver(
+      process.pid,
+      posixProcessTableExecutable: _posixProcessTableExecutable,
+    )..start();
 
     try {
       final completed = await Future.wait<Object>([
@@ -272,9 +278,13 @@ Future<BoundedProcessOutput> _collectBounded(
 }
 
 class _ProcessTreeObserver {
-  _ProcessTreeObserver(this.rootPid);
+  _ProcessTreeObserver(
+    this.rootPid, {
+    required this.posixProcessTableExecutable,
+  });
 
   final int rootPid;
+  final String posixProcessTableExecutable;
   final Map<int, PosixProcessIdentity> _observedProcesses = {};
   var _inspectionReliable = true;
   var _capturedRootIdentity = false;
@@ -313,7 +323,9 @@ class _ProcessTreeObserver {
   Future<void> _observe() async {
     while (!_stopping) {
       try {
-        final processTable = await _readPosixProcessTable();
+        final processTable = await _readPosixProcessTable(
+          executable: posixProcessTableExecutable,
+        );
         if (processTable == null) {
           _inspectionReliable = false;
         } else {
@@ -532,12 +544,16 @@ Future<bool> _waitForProcessesToExit(
   return false;
 }
 
-Future<PosixProcessTableSnapshot?> _readPosixProcessTable() async {
+Future<PosixProcessTableSnapshot?> _readPosixProcessTable({
+  String executable = '/bin/ps',
+}) async {
   try {
-    final result = await _runInspectionCommand('ps', const [
-      '-axo',
-      'pid=,ppid=,lstart=,state=,rss=',
-    ]);
+    final result = await _runInspectionCommand(
+      executable,
+      const ['-axo', 'pid=,ppid=,lstart=,state=,rss='],
+      environment: const {'LANG': 'C', 'LC_ALL': 'C'},
+      includeParentEnvironment: false,
+    );
     if (result == null || result.exitCode != 0) return null;
     return PosixProcessTableSnapshot.parse(result.stdout);
   } catch (_) {
@@ -547,11 +563,18 @@ Future<PosixProcessTableSnapshot?> _readPosixProcessTable() async {
 
 Future<_InspectionResult?> _runInspectionCommand(
   String executable,
-  List<String> arguments,
-) async {
+  List<String> arguments, {
+  Map<String, String> environment = const {},
+  bool includeParentEnvironment = true,
+}) async {
   Process process;
   try {
-    process = await Process.start(executable, arguments);
+    process = await Process.start(
+      executable,
+      arguments,
+      environment: environment,
+      includeParentEnvironment: includeParentEnvironment,
+    );
   } catch (_) {
     return null;
   }

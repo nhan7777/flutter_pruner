@@ -250,6 +250,167 @@ void main() {
   });
 
   test(
+    'POSIX observer default does not execute a PATH ps shim',
+    () async {
+      final marker = File(p.join(tempDir.path, 'path-ps-shim-executed'));
+      expect(marker.path, isNot(contains("'")));
+      final shimDirectory = Directory(p.join(tempDir.path, 'path-shim'))
+        ..createSync();
+      final psShim = _writeScript(shimDirectory, 'ps', '''#!/bin/sh
+: > '${marker.path}'
+exec /bin/ps "\$@"
+''');
+      final chmod = await Process.run(
+        '/bin/chmod',
+        ['755', psShim.path],
+        environment: const {'LANG': 'C', 'LC_ALL': 'C'},
+        includeParentEnvironment: false,
+      );
+      expect(chmod.exitCode, 0, reason: '${chmod.stderr}');
+
+      final workload = _writeScript(
+        tempDir,
+        'default_observer_workload.dart',
+        r'''
+import 'dart:async';
+
+Future<void> main() async {
+  await Future<void>.delayed(const Duration(seconds: 2));
+}
+''',
+      );
+      final helper = _writeScript(tempDir, 'default_observer_helper.dart', r'''
+import 'dart:io';
+
+import 'package:flutter_pruner/src/core/process/managed_process_runner.dart';
+
+Future<void> main(List<String> arguments) async {
+  final result = await const ManagedProcessRunner().run(
+    Platform.resolvedExecutable,
+    [arguments[0]],
+    workingDirectory: arguments[1],
+    timeout: const Duration(seconds: 5),
+    maxOutputBytesPerStream: 4096,
+    includeParentEnvironment: false,
+  );
+  stdout.write(result.resourceObservation.sampleCount);
+}
+''');
+      final packageConfig = p.join(
+        Directory.current.path,
+        '.dart_tool',
+        'package_config.json',
+      );
+
+      final helperResult = await Process.run(
+        Platform.resolvedExecutable,
+        ['--packages=$packageConfig', helper.path, workload.path, tempDir.path],
+        environment: {'PATH': shimDirectory.path},
+      );
+
+      expect(helperResult.exitCode, 0, reason: '${helperResult.stderr}');
+      expect(int.parse('${helperResult.stdout}'), greaterThan(0));
+      expect(marker.existsSync(), isFalse);
+    },
+    skip: !Platform.isLinux && !Platform.isMacOS
+        ? 'POSIX process observation is supported only on Linux and macOS.'
+        : false,
+  );
+
+  test(
+    'POSIX observer launches its inspector with an isolated environment',
+    () async {
+      final marker = File(p.join(tempDir.path, 'inspection-environment'));
+      expect(marker.path, isNot(contains("'")));
+      final inspector = _writeScript(tempDir, 'controlled_ps', '''#!/bin/sh
+/usr/bin/env > '${marker.path}'
+exec /bin/ps "\$@"
+''');
+      final chmod = await Process.run(
+        '/bin/chmod',
+        ['755', inspector.path],
+        environment: const {'LANG': 'C', 'LC_ALL': 'C'},
+        includeParentEnvironment: false,
+      );
+      expect(chmod.exitCode, 0, reason: '${chmod.stderr}');
+
+      final workload = _writeScript(tempDir, 'observer_workload.dart', r'''
+import 'dart:async';
+import 'dart:io';
+
+Future<void> main(List<String> arguments) async {
+  for (var attempt = 0; attempt < 100; attempt++) {
+    if (File(arguments[0]).existsSync()) return;
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+  }
+  throw StateError('The process observer did not launch its inspector.');
+}
+''');
+      final helper = _writeScript(tempDir, 'observer_helper.dart', r'''
+import 'dart:io';
+
+import 'package:flutter_pruner/src/core/process/managed_process_runner.dart';
+
+Future<void> main(List<String> arguments) async {
+  final result = await ManagedProcessRunner(
+    posixProcessTableExecutable: arguments[2],
+  ).run(
+    Platform.resolvedExecutable,
+    [arguments[0], arguments[3]],
+    workingDirectory: arguments[1],
+    timeout: const Duration(seconds: 5),
+    maxOutputBytesPerStream: 4096,
+    includeParentEnvironment: false,
+  );
+  stdout.write(result.exitCode);
+}
+''');
+      final packageConfig = p.join(
+        Directory.current.path,
+        '.dart_tool',
+        'package_config.json',
+      );
+
+      final helperResult = await Process.run(
+        Platform.resolvedExecutable,
+        [
+          '--packages=$packageConfig',
+          helper.path,
+          workload.path,
+          tempDir.path,
+          inspector.path,
+          marker.path,
+        ],
+        environment: {
+          'PATH': tempDir.path,
+          'LANG': 'hostile-locale',
+          'LC_ALL': 'hostile-locale',
+          'LD_LIBRARY_PATH': tempDir.path,
+          'DYLD_LIBRARY_PATH': tempDir.path,
+          'FLUTTER_PRUNER_PARENT_SENTINEL': 'must-not-be-inherited',
+        },
+      );
+
+      expect(helperResult.exitCode, 0, reason: '${helperResult.stderr}');
+      expect(helperResult.stdout, '0');
+      expect(marker.existsSync(), isTrue);
+      final inspectorEnvironment = marker.readAsLinesSync().toSet();
+      expect(inspectorEnvironment, containsAll(const ['LANG=C', 'LC_ALL=C']));
+      for (final inheritedValue in <String>[
+        'PATH=${tempDir.path}',
+        'LD_LIBRARY_PATH=${tempDir.path}',
+        'DYLD_LIBRARY_PATH=${tempDir.path}',
+        'FLUTTER_PRUNER_PARENT_SENTINEL=must-not-be-inherited',
+      ]) {
+        expect(inspectorEnvironment, isNot(contains(inheritedValue)));
+      }
+    },
+    skip: !Platform.isLinux && !Platform.isMacOS
+        ? 'POSIX process observation is supported only on Linux and macOS.'
+        : false,
+  );
+
+  test(
     'measures RSS for a live POSIX parent and child process',
     () async {
       final child = _writeScript(tempDir, 'rss_child.dart', r'''
