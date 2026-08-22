@@ -318,6 +318,57 @@ void main() {
     }
     expect(normalization, isNot(contains('thirdPartySourceBytes')));
   });
+
+  test('freezes private staging identity normalization and cleanup policy', () {
+    final manifest = _readJson(
+      'benchmark/accuracy/manifests/l10n-mutation-readiness-v1.json',
+    );
+    final publicSurface = _objectMap(manifest['publicSurfaceBaseline']);
+
+    expect(publicSurface['stagingRootNormalization'], {
+      'creation': 'Directory.systemTemp.createTempSync',
+      'stablePlaceholder': '<PUBLIC_SURFACE_STAGING_ROOT>',
+      'linkPolicy': 'reject-all-links',
+      'cleanupIdentity': 'canonical-path-and-exclusive-marker',
+    });
+  });
+
+  test('freezes verified corpus-relative fixture overlay provenance', () {
+    final manifest = _readJson(
+      'benchmark/accuracy/manifests/l10n-mutation-readiness-v1.json',
+    );
+    final families = _objectList(manifest['families']);
+    final overlaysByProject = {
+      for (final family in families)
+        family['project'] as String: family['fixtureOverlays'],
+    };
+
+    expect(overlaysByProject, {
+      'smooth': <Object?>[],
+      'gsy': [
+        {
+          'relativePath': 'lib/common/config/ignoreConfig.dart',
+          'sourceIdentity':
+              'worktrees/v2-natural-accuracy/gsy/lib/common/config/ignoreConfig.dart',
+          'purpose': 'non-secret ignored configuration stub',
+          'sha256':
+              'cb2b8ad720d95f0f0c8e633c389a5ae0dc8876e274b7455d77bb6ed9350efbbe',
+          'containsSecrets': false,
+        },
+      ],
+      'gitjournal': [
+        {
+          'relativePath': 'lib/.env.dart',
+          'sourceIdentity':
+              'worktrees/v2-natural-accuracy/gitjournal/lib/.env.dart',
+          'purpose': 'non-secret environment stub',
+          'sha256':
+              'a4aee8e49b8ae44f874ae182b464cbba1d00ba3045eaf37c14d745849da98b33',
+          'containsSecrets': false,
+        },
+      ],
+    });
+  });
 }
 
 final _sha256 = RegExp(r'^[0-9a-f]{64}$');

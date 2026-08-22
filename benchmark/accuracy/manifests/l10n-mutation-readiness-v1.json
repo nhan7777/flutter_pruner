@@ -175685,7 +175685,8 @@
           "containsSecrets": false,
           "purpose": "non-secret environment stub",
           "relativePath": "lib/.env.dart",
-          "sha256": "a4aee8e49b8ae44f874ae182b464cbba1d00ba3045eaf37c14d745849da98b33"
+          "sha256": "a4aee8e49b8ae44f874ae182b464cbba1d00ba3045eaf37c14d745849da98b33",
+          "sourceIdentity": "worktrees/v2-natural-accuracy/gitjournal/lib/.env.dart"
         }
       ],
       "normalizationOverlays": [],
@@ -175746,7 +175747,8 @@
           "containsSecrets": false,
           "purpose": "non-secret ignored configuration stub",
           "relativePath": "lib/common/config/ignoreConfig.dart",
-          "sha256": "cb2b8ad720d95f0f0c8e633c389a5ae0dc8876e274b7455d77bb6ed9350efbbe"
+          "sha256": "cb2b8ad720d95f0f0c8e633c389a5ae0dc8876e274b7455d77bb6ed9350efbbe",
+          "sourceIdentity": "worktrees/v2-natural-accuracy/gsy/lib/common/config/ignoreConfig.dart"
         }
       ],
       "normalizationOverlays": [
@@ -176044,8 +176046,8 @@
       }
     ],
     "fixture": "test/fixtures/l10n_test",
-    "htmlScanSha256": "b8bf0ddc98ef6c7776f2ed5d6b0887157cb0f3727f1bc9694c6cf41f208ccb60",
-    "jsonScanSha256": "ed435e220bba6d5bca05585e587945c069a005105e7ab1177e8ef33dbee5ce92",
+    "htmlScanSha256": "2b4a631d38b95109a387f3af824d554249b83e64d854293a2a901fd0a2dcf324",
+    "jsonScanSha256": "bf56926413c91429f2afe46f59a90ded92aa6b07d6aaeb6485cae14a5783ff40",
     "reportSchemaKeys": [
       "analysisCoverage",
       "analysisCoverage.analysisMode",
@@ -176263,7 +176265,13 @@
       "version"
     ],
     "scanHelpSha256": "551387e3129abe3ff46abe8c89f388643290cf96e09d75bf4ebc3bd0f56388d8",
-    "terminalScanSha256": "6a5cc1a02c1159c9fdbb43a6277e40c7bf21ef3c2336fd134aec1b085c94520e",
+    "stagingRootNormalization": {
+      "cleanupIdentity": "canonical-path-and-exclusive-marker",
+      "creation": "Directory.systemTemp.createTempSync",
+      "linkPolicy": "reject-all-links",
+      "stablePlaceholder": "<PUBLIC_SURFACE_STAGING_ROOT>"
+    },
+    "terminalScanSha256": "2f0e6115fb2242008d606ba4c8cf7f050db19a49142e88f8854f993d11307652",
     "timingFieldsRemoved": [
       "execution.analysisPasses[].adapters[].elapsedMicros",
       "execution.analysisPasses[].elapsedMicros",

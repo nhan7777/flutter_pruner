@@ -1,6 +1,7 @@
 import 'dart:collection';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
@@ -64,10 +65,14 @@ const _gitjournalCiEvidenceHash =
     '4980a6207c2caa7a0f65cbc7b1390eb1fffe18f3dad3e7bb0b072cf033dd94d3';
 const _gitjournalProbeHash =
     'f1635a2a13f5ca240c48dc4fb8e0fab82758ce6aedeb66a3664af7d38844989c';
+const _publicSurfaceStagingPlaceholder = '<PUBLIC_SURFACE_STAGING_ROOT>';
 
 Future<void> main(List<String> arguments) async {
   final options = _parseArguments(arguments);
-  final evidenceRoot = Directory(options['evidence-root']!);
+  final evidenceRoot = _canonicalEvidenceRoot(
+    Directory(options['evidence-root']!),
+  );
+  final corpusRoot = _retainedCorpusRoot(evidenceRoot);
   final outputDirectory = Directory(options['output-directory']!);
   final repositories = {
     'smooth': Directory(options['smooth-repository']!),
@@ -191,6 +196,7 @@ Future<void> main(List<String> arguments) async {
       _familyRecord(
         spec,
         repository,
+        corpusRoot,
         arbPaths,
         project == 'gitjournal' ? gitjournalToolchain : null,
       ),
@@ -616,6 +622,7 @@ Map<String, Object?> _probeGitjournalToolchain(
 Map<String, Object?> _familyRecord(
   _FamilySpec spec,
   Directory repository,
+  Directory corpusRoot,
   List<String> arbPaths,
   Map<String, Object?>? gitjournalToolchain,
 ) {
@@ -657,27 +664,7 @@ Map<String, Object?> _familyRecord(
       });
     }
   }
-  final fixtureOverlays = switch (spec.project) {
-    'gsy' => <Map<String, Object?>>[
-      {
-        'relativePath': 'lib/common/config/ignoreConfig.dart',
-        'purpose': 'non-secret ignored configuration stub',
-        'sha256':
-            'cb2b8ad720d95f0f0c8e633c389a5ae0dc8876e274b7455d77bb6ed9350efbbe',
-        'containsSecrets': false,
-      },
-    ],
-    'gitjournal' => <Map<String, Object?>>[
-      {
-        'relativePath': 'lib/.env.dart',
-        'purpose': 'non-secret environment stub',
-        'sha256':
-            'a4aee8e49b8ae44f874ae182b464cbba1d00ba3045eaf37c14d745849da98b33',
-        'containsSecrets': false,
-      },
-    ],
-    _ => <Map<String, Object?>>[],
-  };
+  final fixtureOverlays = _verifiedFixtureOverlays(spec.project, corpusRoot);
   return {
     'project': spec.project,
     'repositorySha': spec.revision,
@@ -698,6 +685,123 @@ Map<String, Object?> _familyRecord(
             },
           ]
         : <Map<String, Object?>>[],
+  };
+}
+
+Directory _canonicalEvidenceRoot(Directory supplied) {
+  _require(
+    FileSystemEntity.typeSync(supplied.path, followLinks: false) ==
+        FileSystemEntityType.directory,
+    'evidence root must be an existing non-link directory: ${supplied.path}',
+  );
+  return Directory(supplied.resolveSymbolicLinksSync());
+}
+
+Directory _retainedCorpusRoot(Directory evidenceRoot) {
+  final resultsRoot = Directory(p.dirname(evidenceRoot.path));
+  _require(
+    p.basename(resultsRoot.path) == 'results',
+    'evidence root must be directly below the retained results directory',
+  );
+  final corpusRoot = Directory(p.dirname(resultsRoot.path));
+  _require(
+    FileSystemEntity.typeSync(corpusRoot.path, followLinks: false) ==
+        FileSystemEntityType.directory,
+    'retained corpus root is not a directory',
+  );
+  _require(
+    p.isWithin(corpusRoot.path, evidenceRoot.path),
+    'evidence root escapes retained corpus root',
+  );
+  return corpusRoot;
+}
+
+List<Map<String, Object?>> _verifiedFixtureOverlays(
+  String project,
+  Directory corpusRoot,
+) {
+  return switch (project) {
+    'gsy' => [
+      _verifiedFixtureOverlay(
+        corpusRoot: corpusRoot,
+        relativePath: 'lib/common/config/ignoreConfig.dart',
+        sourceIdentity:
+            'worktrees/v2-natural-accuracy/gsy/lib/common/config/ignoreConfig.dart',
+        purpose: 'non-secret ignored configuration stub',
+        expectedSha256:
+            'cb2b8ad720d95f0f0c8e633c389a5ae0dc8876e274b7455d77bb6ed9350efbbe',
+      ),
+    ],
+    'gitjournal' => [
+      _verifiedFixtureOverlay(
+        corpusRoot: corpusRoot,
+        relativePath: 'lib/.env.dart',
+        sourceIdentity:
+            'worktrees/v2-natural-accuracy/gitjournal/lib/.env.dart',
+        purpose: 'non-secret environment stub',
+        expectedSha256:
+            'a4aee8e49b8ae44f874ae182b464cbba1d00ba3045eaf37c14d745849da98b33',
+      ),
+    ],
+    _ => <Map<String, Object?>>[],
+  };
+}
+
+Map<String, Object?> _verifiedFixtureOverlay({
+  required Directory corpusRoot,
+  required String relativePath,
+  required String sourceIdentity,
+  required String purpose,
+  required String expectedSha256,
+}) {
+  _require(
+    p.posix.normalize(sourceIdentity) == sourceIdentity &&
+        !p.posix.isAbsolute(sourceIdentity) &&
+        !p.posix.split(sourceIdentity).contains('..'),
+    'fixture overlay source identity is not canonical: $sourceIdentity',
+  );
+  var currentPath = corpusRoot.path;
+  for (final segment in p.posix.split(sourceIdentity)) {
+    currentPath = p.join(currentPath, segment);
+    final type = FileSystemEntity.typeSync(currentPath, followLinks: false);
+    _require(type != FileSystemEntityType.link, 'overlay path contains a link');
+  }
+  final source = File(currentPath);
+  _require(
+    FileSystemEntity.typeSync(source.path, followLinks: false) ==
+        FileSystemEntityType.file,
+    'retained fixture overlay is missing or not a regular file: $sourceIdentity',
+  );
+  final canonicalSource = source.resolveSymbolicLinksSync();
+  _require(
+    p.isWithin(corpusRoot.path, canonicalSource) &&
+        canonicalSource == p.normalize(source.absolute.path),
+    'retained fixture overlay escapes its canonical corpus root',
+  );
+  final before = source.statSync();
+  final bytes = source.readAsBytesSync();
+  final after = source.statSync();
+  _require(
+    before.type == FileSystemEntityType.file &&
+        after.type == FileSystemEntityType.file &&
+        before.size == after.size &&
+        before.modified == after.modified &&
+        before.changed == after.changed &&
+        source.resolveSymbolicLinksSync() == canonicalSource,
+    'retained fixture overlay identity changed while reading',
+  );
+  final actualSha256 = _sha256(bytes);
+  _require(
+    actualSha256 == expectedSha256,
+    'retained fixture overlay SHA-256 mismatch for $sourceIdentity: '
+    '$actualSha256',
+  );
+  return {
+    'relativePath': relativePath,
+    'sourceIdentity': sourceIdentity,
+    'purpose': purpose,
+    'sha256': expectedSha256,
+    'containsSecrets': false,
   };
 }
 
@@ -722,12 +826,8 @@ Map<String, Object?> _fvmToolchainSelectionEvidence(
 Future<Map<String, Object?>> _capturePublicSurface() async {
   final scriptDirectory = p.dirname(Platform.script.toFilePath());
   final repositoryRoot = p.normalize(p.join(scriptDirectory, '..', '..'));
-  final fixtureRoot = Directory('/tmp/flutter_pruner_l10n_public_surface_v1');
-  _require(
-    !fixtureRoot.existsSync(),
-    'public-surface fixture path already exists',
-  );
-  fixtureRoot.createSync(recursive: true);
+  final staging = _PrivateStagingRoot.create();
+  final fixtureRoot = staging.directory;
   try {
     _copyDirectory(
       Directory(p.join(repositoryRoot, 'test', 'fixtures', 'l10n_test')),
@@ -801,16 +901,23 @@ target_matrix:
       fixtureRoot.path,
     ]);
 
-    final terminal = _stripAnsi(
-      terminalFile.readAsStringSync(),
-    ).replaceAll('\r\n', '\n');
+    final terminal = staging.normalize(
+      _stripAnsi(terminalFile.readAsStringSync()).replaceAll('\r\n', '\n'),
+    );
     final report = _jsonObject(jsonDecode(jsonFile.readAsStringSync()));
     _removeTimingFields(report);
-    final normalizedJson = _canonicalCompact(report);
-    final normalizedHtml = _normalizeHtml(htmlFile.readAsStringSync(), report);
-    final blockers = _jsonObject(report['blockers']);
+    final normalizedReport = _jsonObject(staging.normalizeObject(report));
+    final normalizedJson = _canonicalCompact(normalizedReport);
+    final normalizedHtml = _normalizeHtml(
+      staging.normalize(htmlFile.readAsStringSync()),
+      normalizedReport,
+    );
+    staging.requireNormalized(terminal);
+    staging.requireNormalized(normalizedJson);
+    staging.requireNormalized(normalizedHtml);
+    final blockers = _jsonObject(normalizedReport['blockers']);
     final findings = <Map<String, Object?>>[];
-    for (final finding in _jsonObjectList(report['findings'])) {
+    for (final finding in _jsonObjectList(normalizedReport['findings'])) {
       final node = _jsonObject(finding['node']);
       final blockerIds = (finding['blockerIds'] as List<Object?>? ?? const [])
           .cast<String>();
@@ -834,10 +941,16 @@ target_matrix:
       );
     }
     final schemaKeys = <String>{};
-    _collectSchemaKeys(report, '', schemaKeys);
+    _collectSchemaKeys(normalizedReport, '', schemaKeys);
     return {
       'fixture': 'test/fixtures/l10n_test',
       'captureBoundary': 'argv-only-child-process',
+      'stagingRootNormalization': {
+        'creation': 'Directory.systemTemp.createTempSync',
+        'stablePlaceholder': _publicSurfaceStagingPlaceholder,
+        'linkPolicy': 'reject-all-links',
+        'cleanupIdentity': 'canonical-path-and-exclusive-marker',
+      },
       'timingFieldsRemoved': [
         'execution.analysisPasses[].adapters[].elapsedMicros',
         'execution.analysisPasses[].elapsedMicros',
@@ -856,7 +969,7 @@ target_matrix:
       'reportSchemaKeys': schemaKeys.toList()..sort(),
     };
   } finally {
-    fixtureRoot.deleteSync(recursive: true);
+    staging.deleteVerified();
   }
 }
 
@@ -1009,6 +1122,165 @@ bool _bytesEqual(List<int> left, List<int> right) {
 
 void _require(bool condition, String message) {
   if (!condition) throw StateError(message);
+}
+
+final class _PrivateStagingRoot {
+  _PrivateStagingRoot._({
+    required this.directory,
+    required this.canonicalPath,
+    required this.systemTempCanonicalPath,
+    required this.marker,
+    required this.markerToken,
+    required this.normalizationIdentities,
+  });
+
+  static const _prefix = 'flutter_pruner_l10n_public_surface_';
+  static const _markerName = '.flutter_pruner_staging_identity';
+
+  final Directory directory;
+  final String canonicalPath;
+  final String systemTempCanonicalPath;
+  final File marker;
+  final String markerToken;
+  final List<String> normalizationIdentities;
+
+  static _PrivateStagingRoot create() {
+    final systemTempCanonicalPath = Directory.systemTemp
+        .resolveSymbolicLinksSync();
+    final directory = Directory.systemTemp.createTempSync(_prefix);
+    _require(
+      FileSystemEntity.typeSync(directory.path, followLinks: false) ==
+          FileSystemEntityType.directory,
+      'private staging root is not a non-link directory',
+    );
+    final canonicalPath = directory.resolveSymbolicLinksSync();
+    _require(
+      p.dirname(canonicalPath) == systemTempCanonicalPath &&
+          p.basename(canonicalPath).startsWith(_prefix),
+      'private staging root identity is outside canonical system temp',
+    );
+    if (!Platform.isWindows) {
+      _require(
+        directory.statSync().mode & 0x3f == 0,
+        'private staging root grants group or world permissions',
+      );
+    }
+
+    final random = Random.secure();
+    final markerToken = base64Url.encode(
+      List<int>.generate(32, (_) => random.nextInt(256)),
+    );
+    final marker = File(p.join(directory.path, _markerName));
+    marker.createSync(exclusive: true);
+    final markerHandle = marker.openSync(mode: FileMode.writeOnly);
+    try {
+      markerHandle
+        ..writeStringSync(markerToken)
+        ..flushSync();
+    } finally {
+      markerHandle.closeSync();
+    }
+    _require(
+      FileSystemEntity.typeSync(marker.path, followLinks: false) ==
+              FileSystemEntityType.file &&
+          marker.resolveSymbolicLinksSync() ==
+              p.join(canonicalPath, _markerName),
+      'private staging marker identity is uncertain',
+    );
+
+    final identities =
+        <String>{
+            directory.absolute.path,
+            canonicalPath,
+            Uri.file(directory.absolute.path).toString(),
+            Uri.file(canonicalPath).toString(),
+          }.where((value) => value.isNotEmpty).toList()
+          ..sort((left, right) => right.length.compareTo(left.length));
+    return _PrivateStagingRoot._(
+      directory: directory,
+      canonicalPath: canonicalPath,
+      systemTempCanonicalPath: systemTempCanonicalPath,
+      marker: marker,
+      markerToken: markerToken,
+      normalizationIdentities: identities,
+    );
+  }
+
+  String normalize(String source) {
+    var result = source;
+    for (final identity in normalizationIdentities) {
+      result = result.replaceAll(identity, _publicSurfaceStagingPlaceholder);
+    }
+    return result;
+  }
+
+  Object? normalizeObject(Object? value) {
+    if (value is String) return normalize(value);
+    if (value is Map) {
+      return <String, Object?>{
+        for (final entry in value.entries)
+          entry.key as String: normalizeObject(entry.value),
+      };
+    }
+    if (value is List) {
+      return value.map(normalizeObject).toList(growable: false);
+    }
+    return value;
+  }
+
+  void requireNormalized(String source) {
+    for (final identity in normalizationIdentities) {
+      _require(
+        !source.contains(identity),
+        'public-surface output retained a private staging identity',
+      );
+    }
+  }
+
+  void deleteVerified() {
+    _verifyIdentity();
+    for (final entity in directory.listSync(
+      recursive: true,
+      followLinks: false,
+    )) {
+      final type = FileSystemEntity.typeSync(entity.path, followLinks: false);
+      _require(
+        type == FileSystemEntityType.file ||
+            type == FileSystemEntityType.directory,
+        'private staging cleanup rejected a link or uncertain entity type',
+      );
+      final resolved = entity.resolveSymbolicLinksSync();
+      _require(
+        p.isWithin(canonicalPath, resolved),
+        'private staging cleanup entity escaped the created root',
+      );
+    }
+    _verifyIdentity();
+    directory.deleteSync(recursive: true);
+    _require(
+      FileSystemEntity.typeSync(directory.path, followLinks: false) ==
+          FileSystemEntityType.notFound,
+      'private staging cleanup did not remove the created root',
+    );
+  }
+
+  void _verifyIdentity() {
+    _require(
+      FileSystemEntity.typeSync(directory.path, followLinks: false) ==
+              FileSystemEntityType.directory &&
+          directory.resolveSymbolicLinksSync() == canonicalPath &&
+          p.dirname(canonicalPath) == systemTempCanonicalPath,
+      'private staging root identity changed before cleanup',
+    );
+    _require(
+      FileSystemEntity.typeSync(marker.path, followLinks: false) ==
+              FileSystemEntityType.file &&
+          marker.resolveSymbolicLinksSync() ==
+              p.join(canonicalPath, _markerName) &&
+          marker.readAsStringSync() == markerToken,
+      'private staging marker changed before cleanup',
+    );
+  }
 }
 
 final class _FamilySpec {
