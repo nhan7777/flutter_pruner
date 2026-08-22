@@ -1,0 +1,3 @@
+class Native {
+  const Native();
+}

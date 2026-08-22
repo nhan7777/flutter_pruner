@@ -42,7 +42,9 @@ verification:
 
 Unknown keys, duplicate target names or conditions, unsupported platforms,
 missing files, absolute or out-of-project source paths, and non-string Dart
-defines are rejected before analysis.
+defines are rejected before analysis. The full target identity is `name`,
+`platform`, `entrypoint`, optional `flavor`, and `dart_defines`; do not reuse a
+name for a different tuple.
 
 ## Analysis modes
 
@@ -76,9 +78,21 @@ part of the target identity. Supported platforms are `android`, `ios`, `web`,
 
 `target_matrix.complete: true` is an owner assertion that every supported
 platform, flavor, entrypoint, and Dart-define combination is represented. An
-inferred or partial matrix cannot produce `SAFE` or `HIGH`. Conditional Dart
-imports or exports currently force the effective matrix back to partial because
-their branches are not yet modelled per target.
+inferred or partial matrix cannot produce `SAFE` or `HIGH`.
+
+Conditional Dart imports and exports are evaluated per exact target. The
+SDK-owned condition keys are `dart.library.io`, `dart.library.html`, and
+`dart.library.js_interop`; their values come from the target platform, not from
+`dart_defines`. Other condition keys must be declared as string
+`dart_defines` on every relevant target. Flutter Pruner does not discover
+arbitrary custom environment declarations. A missing/unknown key or incomplete
+test/runtime/external environment retains every possible branch and emits a
+blocker, so it cannot supply exact reachability or `SAFE`/`HIGH` authority.
+
+Auxiliary execution targets are discovered evidence for tests, runtime
+callbacks, and external public surfaces; they are not YAML application targets.
+Their identity and completeness are preserved in reports. Duplicate or
+conflicting auxiliary identities are graph integrity issues.
 
 ## Verification policy
 

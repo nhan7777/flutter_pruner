@@ -21,6 +21,8 @@ class Finding {
     List<String> protectionReasons = const [],
     List<String> unreachableIn = const [],
     List<String> reachableIn = const [],
+    List<String> retainedIn = const [],
+    List<String> auxiliaryRetainedIn = const [],
     String? proposedAction,
     int? sourceBytes,
     List<ClassificationReason> classificationReasons = const [],
@@ -35,8 +37,10 @@ class Finding {
     evidence: List<Evidence>.unmodifiable(evidence),
     blockers: List<Blocker>.unmodifiable(blockers),
     protectionReasons: List<String>.unmodifiable(protectionReasons),
-    unreachableIn: List<String>.unmodifiable(unreachableIn),
-    reachableIn: List<String>.unmodifiable(reachableIn),
+    unreachableIn: _canonicalIdentities(unreachableIn),
+    reachableIn: _canonicalIdentities(reachableIn),
+    retainedIn: _canonicalIdentities(retainedIn),
+    auxiliaryRetainedIn: _canonicalIdentities(auxiliaryRetainedIn),
     proposedAction: proposedAction,
     sourceBytes: sourceBytes,
     classificationReasons: List<ClassificationReason>.unmodifiable(
@@ -57,6 +61,8 @@ class Finding {
     required this.protectionReasons,
     required this.unreachableIn,
     required this.reachableIn,
+    required this.retainedIn,
+    required this.auxiliaryRetainedIn,
     required this.proposedAction,
     required this.sourceBytes,
     required this.classificationReasons,
@@ -97,6 +103,12 @@ class Finding {
   /// Names of targets where the node is reachable.
   final List<String> reachableIn;
 
+  /// Configured target names whose fail-closed closure retains this node.
+  final List<String> retainedIn;
+
+  /// Full auxiliary execution-context IDs that retain this node.
+  final List<String> auxiliaryRetainedIn;
+
   /// What the tool proposes to do, when it proposes anything.
   final String? proposedAction;
 
@@ -130,4 +142,9 @@ class Finding {
 
   @override
   String toString() => '[$ruleId ${confidence.label}] ${node.id}';
+}
+
+List<String> _canonicalIdentities(Iterable<String> values) {
+  final canonical = values.toSet().toList()..sort();
+  return List<String>.unmodifiable(canonical);
 }

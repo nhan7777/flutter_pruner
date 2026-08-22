@@ -4,6 +4,7 @@ import '../core/graph/blocker_identity.dart';
 import '../core/graph/evidence.dart';
 import '../core/graph/node.dart';
 import '../core/graph/reachability_graph.dart';
+import '../core/graph/root.dart';
 import '../core/project/project_context.dart';
 import '../core/project/project_path_policy.dart';
 import '../reporting/run_report.dart';
@@ -14,6 +15,7 @@ class AnalysisSnapshot {
   const AnalysisSnapshot({
     required this.project,
     required this.graph,
+    required this.graphIntegrity,
     required this.findings,
     required this.adapterIds,
     required this.adapterRuns,
@@ -27,6 +29,9 @@ class AnalysisSnapshot {
 
   /// Complete cross-adapter graph.
   final ReachabilityGraph graph;
+
+  /// Aggregate graph-health value used by finding classification.
+  final GraphIntegrity graphIntegrity;
 
   /// Stable confidence-sorted findings derived from [graph].
   final List<Finding> findings;
@@ -172,6 +177,28 @@ class AnalysisSnapshot {
               {for (final tier in Confidence.values) tier.label: 0},
       ...findingStatistics.byReportingAdapterAndTier,
     };
+    final integrityEntries = graphIntegrity.byExecutionTarget.entries.toList()
+      ..sort((left, right) => left.key.compareTo(right.key));
+    final integrityByExecutionTarget = {
+      for (final entry in integrityEntries)
+        entry.key: ExecutionTargetIntegrityReport(
+          id: entry.value.id,
+          domain: entry.value.domain.name,
+          complete: entry.value.complete,
+          danglingEdgeCount: entry.value.danglingEdges.length,
+          danglingRootCount: entry.value.danglingRootIds.length,
+          incompleteReasons: entry.value.incompleteReasons.toList()..sort(),
+        ),
+    };
+    final unattributedIntegrity = ExecutionTargetIntegrityReport(
+      id: 'unattributed',
+      domain: 'unattributed',
+      complete:
+          graphIntegrity.unattributedDanglingEdges.isEmpty &&
+          graphIntegrity.unattributedDanglingRootIds.isEmpty,
+      danglingEdgeCount: graphIntegrity.unattributedDanglingEdges.length,
+      danglingRootCount: graphIntegrity.unattributedDanglingRootIds.length,
+    );
 
     return AnalysisPassReport(
       id: id,
@@ -182,8 +209,12 @@ class AnalysisSnapshot {
       edgeCount: graph.edgeCount,
       rootCount: graph.rootCount,
       recordedBlockerCount: graph.blockers.length,
-      danglingEdgeCount: graph.danglingEdgesFor(project.targets).length,
-      danglingRootCount: graph.danglingRootIdsFor(project.targets).length,
+      danglingEdgeCount: graphIntegrity.danglingEdges.length,
+      danglingRootCount: graphIntegrity.danglingRootIds.length,
+      integrityByExecutionTarget: integrityByExecutionTarget,
+      unattributedIntegrity: unattributedIntegrity,
+      auxiliaryExecutionTargets: graph.auxiliaryExecutionTargets,
+      auxiliaryExecutionTargetIssues: graphIntegrity.auxiliaryRegistryIssues,
       adapterRuns: adapterRuns,
       findingStatistics: FindingStatistics(
         total: findingStatistics.total,

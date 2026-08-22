@@ -5,7 +5,9 @@ import 'package:analyzer/dart/analysis/utilities.dart';
 import 'package:analyzer/dart/ast/ast.dart';
 import 'package:path/path.dart' as p;
 
+import 'generated_dart_path.dart';
 import 'project_language_version.dart';
+import 'project_path_policy.dart';
 
 /// The semantic role expected from a project-owned Dart source path.
 enum ProjectSourceKind {
@@ -32,6 +34,8 @@ class ProjectSourcePath {
     required String field,
     required ProjectSourceKind kind,
     bool allowAbsoluteInput = false,
+    bool allowGenerated = false,
+    ProjectPathPolicy? pathPolicy,
   }) {
     if (input.trim().isEmpty) {
       throw ProjectSourcePathException('$field must not be empty.');
@@ -78,9 +82,16 @@ class ProjectSourcePath {
     }
 
     final normalized = relative.replaceAll(r'\', '/');
-    if (_isGenerated(normalized)) {
+    if (!allowGenerated && isGeneratedDartPath(normalized)) {
       throw ProjectSourcePathException(
         '$field must not point at generated Dart output: $input.',
+      );
+    }
+    final effectivePathPolicy =
+        pathPolicy ?? ProjectPathPolicy(root: projectRoot);
+    if (effectivePathPolicy.shouldExclude(absoluteCandidate)) {
+      throw ProjectSourcePathException(
+        '$field is excluded by project path policy: $input.',
       );
     }
     _validateDartRole(
@@ -192,16 +203,6 @@ class ProjectSourcePath {
 
   static bool _containsControlCharacter(String value) =>
       value.codeUnits.any((unit) => unit < 0x20 || unit == 0x7f);
-
-  static bool _isGenerated(String path) {
-    final lower = path.toLowerCase();
-    return lower.endsWith('.g.dart') ||
-        lower.endsWith('.freezed.dart') ||
-        lower.endsWith('.gen.dart') ||
-        lower.endsWith('.mocks.dart') ||
-        lower.contains('/generated/') ||
-        lower.contains('/gen/');
-  }
 }
 
 /// A project-owned source path violates the analysis boundary or role.

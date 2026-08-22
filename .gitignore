@@ -4,6 +4,20 @@
 !test/fixtures/go_router_test/.dart_tool/package_config.json
 !test/fixtures/get_it*/.dart_tool/
 !test/fixtures/get_it*/.dart_tool/package_config.json
+!test/fixtures/benchmark_accuracy_oracle/.dart_tool/
+!test/fixtures/benchmark_accuracy_oracle/.dart_tool/package_config.json
+!test/fixtures/benchmark_accuracy_oracle/lib/nested/.dart_tool/
+!test/fixtures/benchmark_accuracy_oracle/lib/nested/.dart_tool/package_config.json
+!test/fixtures/dart_graph_correctness_test/.dart_tool/
+!test/fixtures/dart_graph_correctness_test/.dart_tool/package_config.json
+!test/fixtures/dart_graph_correctness_test/nested/.dart_tool/
+!test/fixtures/dart_graph_correctness_test/nested/.dart_tool/package_config.json
+!test/fixtures/callback_safety_test/.dart_tool/
+!test/fixtures/callback_safety_test/.dart_tool/package_config.json
+!test/fixtures/asset_test/.dart_tool/
+!test/fixtures/asset_test/.dart_tool/package_config.json
+!test/fixtures/asset_safety_test/.dart_tool/
+!test/fixtures/asset_safety_test/.dart_tool/package_config.json
 .packages
 build/
 

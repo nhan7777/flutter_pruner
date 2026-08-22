@@ -57,6 +57,7 @@ class SafetyPredicates {
   const SafetyPredicates({
     required this.ruleAllowsAutoFix,
     required this.unreachableAcrossAllTargets,
+    this.notRetained = false,
     required this.noDynamicBlockers,
     required this.notProtected,
     required this.noPublicApiRisk,
@@ -70,6 +71,12 @@ class SafetyPredicates {
 
   /// The node is unreachable under every configured build target.
   final bool unreachableAcrossAllTargets;
+
+  /// No configured or auxiliary execution context requires this node to stay.
+  ///
+  /// This defaults to `false` so callers compiled against the additive API
+  /// fail closed until they supply explicit retention evidence.
+  final bool notRetained;
 
   /// No unresolved dynamic construct could address this node.
   final bool noDynamicBlockers;
@@ -96,6 +103,7 @@ class SafetyPredicates {
   bool get allHold =>
       ruleAllowsAutoFix &&
       unreachableAcrossAllTargets &&
+      notRetained &&
       noDynamicBlockers &&
       notProtected &&
       noPublicApiRisk &&
@@ -107,6 +115,8 @@ class SafetyPredicates {
   List<String> get failedPredicates => [
     if (!ruleAllowsAutoFix) 'rule not on auto-fix allowlist',
     if (!unreachableAcrossAllTargets) 'reachable in at least one target',
+    if (!notRetained)
+      'node is retained in a configured or auxiliary execution context',
     if (!noDynamicBlockers) 'an unresolved dynamic construct could match',
     if (!notProtected) 'node is protected',
     if (!noPublicApiRisk) 'node may be part of a public API surface',

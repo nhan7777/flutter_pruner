@@ -1,4 +1,5 @@
 import '../graph/build_condition.dart';
+import '../graph/execution_context_identity.dart';
 
 /// Provenance and completeness of the build targets used for reachability.
 enum TargetMatrixStatus {
@@ -23,12 +24,27 @@ class TargetMatrix {
     required TargetMatrixStatus status,
     required String source,
     List<String> issues = const [],
-  }) => TargetMatrix._(
-    targets: List<BuildTarget>.unmodifiable(targets),
-    status: status,
-    source: source,
-    issues: List<String>.unmodifiable(issues),
-  );
+  }) {
+    final snapshots = targets.map(BuildTarget.snapshot).toList(growable: false);
+    final contextIds = <String>{};
+    for (final target in snapshots) {
+      final contextId = configuredExecutionContextId(target.name);
+      if (!contextIds.add(contextId)) {
+        throw ArgumentError.value(
+          targets,
+          'targets',
+          'Build targets must derive unique execution-context identities; '
+              'duplicate $contextId.',
+        );
+      }
+    }
+    return TargetMatrix._(
+      targets: List<BuildTarget>.unmodifiable(snapshots),
+      status: status,
+      source: source,
+      issues: List<String>.unmodifiable(issues),
+    );
+  }
 
   const TargetMatrix._({
     required this.targets,

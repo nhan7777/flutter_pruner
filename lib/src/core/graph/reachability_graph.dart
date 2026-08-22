@@ -1,10 +1,16 @@
+import 'dart:convert';
+
 import 'package:collection/collection.dart';
+import 'package:crypto/crypto.dart';
 
 import 'blocker_identity.dart';
 import 'build_condition.dart';
 import 'edge.dart';
 import 'evidence.dart';
+import 'execution_context_identity.dart';
+import 'execution_target.dart';
 import 'node.dart';
+import 'root.dart';
 
 /// The cross-domain reachability graph.
 ///
@@ -28,7 +34,11 @@ class ReachabilityGraph {
   final Set<GraphEdge> _edges = {};
   final Map<String, Set<GraphEdge>> _outgoing = {};
   final Map<String, Set<GraphEdge>> _incoming = {};
-  final Map<String, List<_RootRecord>> _roots = {};
+  final Map<String, List<GraphRootRecord>> _roots = {};
+  final Map<String, AuxiliaryExecutionTarget> _auxiliaryExecutionTargets = {};
+  final List<AuxiliaryExecutionTargetRegistryIssue>
+  _auxiliaryExecutionTargetIssues = [];
+  final Set<String> _auxiliaryConflictFingerprints = {};
   final Map<String, List<_Protection>> _protections = {};
   final List<Blocker> _blockers = [];
   final Set<BlockerIdentity> _blockerIdentities = {};
@@ -37,6 +47,8 @@ class ReachabilityGraph {
   final Map<Blocker, Set<String>> _nodesByBlocker = {};
   final Set<String> _conflictingNodeIds = {};
   final Map<String, _CachedTargetAnalysis> _targetAnalysisCache = {};
+  _CachedAuxiliaryAnalysis? _auxiliaryAnalysisCache;
+  final Map<String, _CachedGraphIntegrity> _graphIntegrityCache = {};
   int _mutationVersion = 0;
 
   /// All nodes, in insertion order.
@@ -50,6 +62,22 @@ class ReachabilityGraph {
 
   /// Node ids registered as roots.
   Iterable<String> get rootIds => UnmodifiableMapView(_roots).keys;
+
+  /// Immutable configured and auxiliary root facts in insertion order.
+  List<GraphRootRecord> get rootRecords =>
+      List.unmodifiable(_roots.values.expand((records) => records));
+
+  /// Registered auxiliary execution targets in stable ID order.
+  List<AuxiliaryExecutionTarget> get auxiliaryExecutionTargets =>
+      List.unmodifiable(
+        _auxiliaryExecutionTargets.values.toList()
+          ..sort((left, right) => left.id.compareTo(right.id)),
+      );
+
+  /// Rejected conflicting auxiliary definitions in observation order.
+  List<AuxiliaryExecutionTargetRegistryIssue>
+  get auxiliaryExecutionTargetIssues =>
+      List.unmodifiable(_auxiliaryExecutionTargetIssues);
 
   /// Number of root node IDs registered in the graph.
   int get rootCount => _roots.length;
@@ -219,12 +247,45 @@ class ReachabilityGraph {
   /// may reference nodes another adapter contributes. Call [danglingEdges] after
   /// all adapters have run to audit unresolved endpoints.
   void addEdge(GraphEdge edge) {
-    if (_edges.add(edge)) {
+    final existing = _edges.cast<GraphEdge?>().firstWhere(
+      (candidate) => candidate == edge,
+      orElse: () => null,
+    );
+    if (existing == null) {
+      _edges.add(edge);
       (_outgoing[edge.from] ??= {}).add(edge);
       (_incoming[edge.to] ??= {}).add(edge);
       _markMutated();
+      return;
     }
+    if (!_preferEdge(edge, existing)) return;
+    _edges
+      ..remove(existing)
+      ..add(edge);
+    _outgoing[edge.from]!
+      ..remove(existing)
+      ..add(edge);
+    _incoming[edge.to]!
+      ..remove(existing)
+      ..add(edge);
+    _markMutated();
   }
+
+  bool _preferEdge(GraphEdge candidate, GraphEdge accepted) {
+    if (candidate.isExact != accepted.isExact) return candidate.isExact;
+    return _evidenceFingerprint(
+          candidate.evidence,
+        ).compareTo(_evidenceFingerprint(accepted.evidence)) <
+        0;
+  }
+
+  String _evidenceFingerprint(Evidence evidence) => _joinFingerprintParts([
+    evidence.kind.name,
+    evidence.producer,
+    evidence.description,
+    evidence.exact.toString(),
+    evidence.location ?? '',
+  ]);
 
   /// Looks up a node by id.
   GraphNode? node(String id) => _nodes[id];
@@ -248,13 +309,116 @@ class ReachabilityGraph {
     BuildCondition condition = BuildCondition.unconditional,
   }) {
     final records = _roots.putIfAbsent(nodeId, () => []);
-    final duplicate = records.any(
-      (record) => record.reason == reason && record.condition == condition,
+    final record = ConfiguredGraphRootRecord(
+      nodeId: nodeId,
+      reason: reason,
+      condition: condition,
     );
-    if (!duplicate) {
-      records.add(_RootRecord(reason, condition));
+    if (!records.contains(record)) {
+      records.add(record);
       _markMutated();
     }
+  }
+
+  /// Registers an immutable auxiliary target definition.
+  void addAuxiliaryExecutionTarget(AuxiliaryExecutionTarget target) {
+    _registerAuxiliaryExecutionTarget(target);
+  }
+
+  bool _registerAuxiliaryExecutionTarget(AuxiliaryExecutionTarget target) {
+    final frozen = AuxiliaryExecutionTarget(
+      id: target.id,
+      domain: target.domain,
+      environmentValues: target.environmentValues,
+      environmentComplete: target.environmentComplete,
+      reason: target.reason,
+      sourceConfiguredTarget: target.sourceConfiguredTarget,
+    );
+    final accepted = _auxiliaryExecutionTargets[frozen.id];
+    if (accepted == null) {
+      _auxiliaryExecutionTargets[frozen.id] = frozen;
+      _markMutated();
+      return true;
+    }
+    if (accepted == frozen) return true;
+
+    final acceptedHash = _auxiliaryDefinitionSha256(accepted);
+    final rejectedHash = _auxiliaryDefinitionSha256(frozen);
+    final conflictKey = '$acceptedHash:$rejectedHash';
+    if (_auxiliaryConflictFingerprints.add(conflictKey)) {
+      _auxiliaryExecutionTargetIssues.add(
+        AuxiliaryExecutionTargetRegistryIssue(
+          id: frozen.id,
+          acceptedDefinitionSha256: acceptedHash,
+          rejectedDefinitionSha256: rejectedHash,
+          reason: 'conflicting auxiliary execution target definition',
+        ),
+      );
+      addBlocker(
+        Blocker(
+          producer: 'graph',
+          reason:
+              'conflicting auxiliary execution target definition for ${frozen.id}',
+        ),
+      );
+      _markMutated();
+    }
+    return false;
+  }
+
+  /// Atomically registers [executionTarget] and adds an exact auxiliary root.
+  void addAuxiliaryRoot(
+    String nodeId, {
+    required String reason,
+    required AuxiliaryExecutionTarget executionTarget,
+  }) {
+    if (!_registerAuxiliaryExecutionTarget(executionTarget)) return;
+    final accepted = _auxiliaryExecutionTargets[executionTarget.id]!;
+    final records = _roots.putIfAbsent(nodeId, () => []);
+    final record = AuxiliaryGraphRootRecord(
+      nodeId: nodeId,
+      reason: reason,
+      executionTargetId: accepted.id,
+    );
+    if (!records.contains(record)) {
+      records.add(record);
+      _markMutated();
+    }
+  }
+
+  String _auxiliaryDefinitionSha256(AuxiliaryExecutionTarget target) {
+    final environment = target.environmentValues.entries.toList()
+      ..sort((left, right) => left.key.compareTo(right.key));
+    final source = target.sourceConfiguredTarget;
+    final sourceDefines = source?.dartDefines.entries.toList()
+      ?..sort((left, right) => left.key.compareTo(right.key));
+    return sha256
+        .convert(
+          utf8.encode(
+            jsonEncode({
+              'id': target.id,
+              'domain': target.domain.name,
+              'environmentValues': {
+                for (final entry in environment) entry.key: entry.value,
+              },
+              'environmentComplete': target.environmentComplete,
+              'reason': target.reason,
+              'sourceConfiguredTarget': source == null
+                  ? null
+                  : {
+                      'name': source.name,
+                      'platform': source.platform,
+                      'entrypoint': source.entrypoint,
+                      'flavor': source.flavor,
+                      'dartDefines': {
+                        for (final entry in sourceDefines!)
+                          entry.key: entry.value,
+                      },
+                    },
+            }),
+          ),
+        )
+        .toString();
   }
 
   /// Marks [nodeId] as protected — never eligible for automatic removal.
@@ -289,9 +453,9 @@ class ReachabilityGraph {
   }
 
   /// Reasons [nodeId] is protected, empty when it is not.
-  List<String> protectionReasons(String nodeId) =>
-      _protections[nodeId]?.map((p) => p.reason).toList(growable: false) ??
-      const [];
+  List<String> protectionReasons(String nodeId) => List.unmodifiable(
+    _protections[nodeId]?.map((p) => p.reason) ?? const <String>[],
+  );
 
   /// Whether [nodeId] is protected.
   bool isProtected(String nodeId) => _protections.containsKey(nodeId);
@@ -301,9 +465,9 @@ class ReachabilityGraph {
     if (_nodes.containsKey(nodeId)) {
       return List<Blocker>.unmodifiable(_blockersByNode[nodeId] ?? const []);
     }
-    return _blockers
-        .where((blocker) => blocker.couldAddress(nodeId))
-        .toList(growable: false);
+    return List.unmodifiable(
+      _blockers.where((blocker) => blocker.couldAddress(nodeId)),
+    );
   }
 
   /// Whether a recorded [blocker] addresses at least one registered node.
@@ -346,7 +510,9 @@ class ReachabilityGraph {
           (entry) =>
               !_nodes.containsKey(entry.key) &&
               entry.value.any(
-                (record) => targetList.any(record.condition.appliesTo),
+                (record) =>
+                    record is ConfiguredGraphRootRecord &&
+                    targetList.any(record.condition.appliesTo),
               ),
         )
         .map((entry) => entry.key);
@@ -357,52 +523,160 @@ class ReachabilityGraph {
   /// Traverses breadth-first from the roots that apply to [target], following
   /// only edges whose condition applies to [target].
   Set<String> reachableFor(BuildTarget target) {
-    return Set<String>.of(_analyzeTarget(target).reachable);
+    return Set<String>.unmodifiable(analyzeFor(target).legacyReachable);
   }
 
-  _CachedTargetAnalysis _analyzeTarget(BuildTarget target) {
-    final key = _targetKey(target);
+  /// Computes all configured, auxiliary, proven and retained projections.
+  TargetReachability analyzeFor(BuildTarget target) {
+    final frozenTarget = BuildTarget.snapshot(target);
+    final key = _targetKey(frozenTarget);
     final cached = _targetAnalysisCache[key];
     if (cached != null && cached.mutationVersion == _mutationVersion) {
-      return cached;
+      return cached.analysis;
     }
 
-    final retained = _computeRetained(target);
+    final auxiliary = analyzeAuxiliary();
+    final configuredProven = _computeConfiguredProven(frozenTarget);
+    final configuredRetained = _computeConfiguredRetained(frozenTarget);
+    final provenReachable = <String>{...configuredProven, ...auxiliary.proven};
+    final retained = <String>{...configuredRetained, ...auxiliary.retained};
+    final analysis = TargetReachability(
+      configuredProven: configuredProven,
+      configuredRetained: configuredRetained,
+      auxiliaryProven: auxiliary.proven,
+      auxiliaryRetained: auxiliary.retained,
+      provenReachable: provenReachable,
+      retained: retained,
+      legacyReachable: _computeLegacyReachable(
+        frozenTarget,
+        configuredRetained,
+        auxiliary.retained,
+      ),
+    );
+    _targetAnalysisCache[key] = _CachedTargetAnalysis(
+      mutationVersion: _mutationVersion,
+      analysis: analysis,
+    );
+    return analysis;
+  }
+
+  /// Computes and caches every registered auxiliary closure.
+  AuxiliaryReachability analyzeAuxiliary() {
+    _materializeAuxiliaryConditionBlockers();
+    final cached = _auxiliaryAnalysisCache;
+    if (cached != null && cached.mutationVersion == _mutationVersion) {
+      return cached.analysis;
+    }
+
+    final provenByTarget = <String, Set<String>>{};
+    final retainedByTarget = <String, Set<String>>{};
+    final proven = <String>{};
+    final retained = <String>{};
+    final incomplete = <String>{};
+    for (final target in auxiliaryExecutionTargets) {
+      final targetProven = _computeAuxiliaryProven(target);
+      final targetRetained = _computeAuxiliaryRetained(target);
+      provenByTarget[target.id] = targetProven;
+      retainedByTarget[target.id] = targetRetained;
+      proven.addAll(targetProven);
+      retained.addAll(targetRetained);
+      if (!target.environmentComplete ||
+          _edges.any(
+            (edge) =>
+                edge.condition.applicabilityToAuxiliaryTarget(target) ==
+                ConditionApplicability.unknown,
+          )) {
+        incomplete.add(target.id);
+      }
+    }
+    final analysis = AuxiliaryReachability(
+      provenByExecutionTarget: provenByTarget,
+      retainedByExecutionTarget: retainedByTarget,
+      proven: proven,
+      retained: retained,
+      incompleteExecutionTargetIds: incomplete,
+      registryIssues: _auxiliaryExecutionTargetIssues,
+    );
+    _auxiliaryAnalysisCache = _CachedAuxiliaryAnalysis(
+      mutationVersion: _mutationVersion,
+      analysis: analysis,
+    );
+    return analysis;
+  }
+
+  void _materializeAuxiliaryConditionBlockers() {
+    final facts = <({AuxiliaryExecutionTarget target, GraphEdge edge})>[];
+    for (final target in _auxiliaryExecutionTargets.values) {
+      for (final edge in _edges) {
+        if (edge.condition.applicabilityToAuxiliaryTarget(target) ==
+            ConditionApplicability.unknown) {
+          facts.add((target: target, edge: edge));
+        }
+      }
+    }
+    for (final fact in facts) {
+      addBlocker(
+        Blocker(
+          producer: 'graph',
+          reason:
+              'condition applicability is incomplete for ${fact.target.id}: '
+              '${fact.edge.from} -> ${fact.edge.to}',
+          affectedNodeIds: {fact.edge.to},
+        ),
+      );
+    }
+  }
+
+  Set<String> _computeConfiguredProven(BuildTarget target) {
+    final seeds = <String>{
+      for (final entry in _roots.entries)
+        if (entry.value.any(
+          (record) =>
+              record is ConfiguredGraphRootRecord &&
+              record.condition.appliesTo(target),
+        ))
+          entry.key,
+    };
+    return _traverse(seeds, (edge) {
+      return edge.isExact && edge.condition.appliesTo(target);
+    });
+  }
+
+  Set<String> _computeAuxiliaryProven(AuxiliaryExecutionTarget target) {
+    if (!target.environmentComplete) return const <String>{};
+    final seeds = <String>{
+      for (final entry in _roots.entries)
+        if (entry.value.any(
+          (record) =>
+              record is AuxiliaryGraphRootRecord &&
+              record.executionTargetId == target.id,
+        ))
+          entry.key,
+    };
+    return _traverse(seeds, (edge) {
+      return edge.isExact &&
+          edge.condition.applicabilityToAuxiliaryTarget(target) ==
+              ConditionApplicability.applies;
+    });
+  }
+
+  Set<String> _traverse(
+    Iterable<String> seeds,
+    bool Function(GraphEdge edge) follows,
+  ) {
     final reached = <String>{};
     final queue = <String>[];
-
-    for (final entry in _roots.entries) {
-      if (entry.value.any((record) => record.condition.appliesTo(target))) {
-        if (reached.add(entry.key)) queue.add(entry.key);
-      }
+    for (final seed in seeds) {
+      if (reached.add(seed)) queue.add(seed);
     }
-
-    // Protected and actively blocked nodes remain reportable in their own
-    // confidence tiers, but their dependencies cannot be deleted
-    // independently. Seed traversal from the full retention closure without
-    // marking each retained seed itself reachable.
-    for (final seed in retained) {
-      for (final edge in outgoingFrom(seed)) {
-        if (!edge.condition.appliesTo(target)) continue;
-        if (reached.add(edge.to)) queue.add(edge.to);
-      }
-    }
-
     while (queue.isNotEmpty) {
       final current = queue.removeLast();
-      for (final edge in outgoingFrom(current)) {
-        if (!edge.condition.appliesTo(target)) continue;
+      for (final edge in _outgoing[current] ?? const <GraphEdge>{}) {
+        if (!follows(edge)) continue;
         if (reached.add(edge.to)) queue.add(edge.to);
       }
     }
-
-    final analysis = _CachedTargetAnalysis(
-      mutationVersion: _mutationVersion,
-      retained: Set<String>.unmodifiable(retained),
-      reachable: Set<String>.unmodifiable(reached),
-    );
-    _targetAnalysisCache[key] = analysis;
-    return analysis;
+    return reached;
   }
 
   /// Computes nodes that must be retained for [target].
@@ -416,10 +690,48 @@ class ReachabilityGraph {
   /// The least fixed point prevents both unsafe under-propagation (a blocker
   /// sourced from a blocked node remains active) and needless over-propagation
   /// (a blocker sourced only from a removable node stays inactive).
-  Set<String> retainedFor(BuildTarget target) =>
-      Set<String>.of(_analyzeTarget(target).retained);
+  Set<String> retainedFor(BuildTarget target) => analyzeFor(target).retained;
 
-  Set<String> _computeRetained(BuildTarget target) {
+  /// Configured-target retention excluding every auxiliary context.
+  Set<String> configuredRetainedFor(BuildTarget target) =>
+      analyzeFor(target).configuredRetained;
+
+  /// Exact configured-target closure excluding every auxiliary context.
+  Set<String> configuredProvenFor(BuildTarget target) =>
+      analyzeFor(target).configuredProven;
+
+  /// Union of configured and auxiliary exact closures.
+  Set<String> provenReachableFor(BuildTarget target) =>
+      analyzeFor(target).provenReachable;
+
+  /// Union of exact closures for every registered auxiliary target.
+  Set<String> auxiliaryProven() => analyzeAuxiliary().proven;
+
+  /// Union of fail-closed retention for every auxiliary target.
+  Set<String> auxiliaryRetained() => analyzeAuxiliary().retained;
+
+  Set<String> _computeConfiguredRetained(BuildTarget target) =>
+      _computeRetained(
+        rootApplies: (record) =>
+            record is ConfiguredGraphRootRecord &&
+            record.condition.appliesTo(target),
+        edgeApplies: (edge) => edge.condition.appliesTo(target),
+      );
+
+  Set<String> _computeAuxiliaryRetained(AuxiliaryExecutionTarget target) =>
+      _computeRetained(
+        rootApplies: (record) =>
+            record is AuxiliaryGraphRootRecord &&
+            record.executionTargetId == target.id,
+        edgeApplies: (edge) =>
+            edge.condition.applicabilityToAuxiliaryTarget(target) !=
+            ConditionApplicability.doesNotApply,
+      );
+
+  Set<String> _computeRetained({
+    required bool Function(GraphRootRecord record) rootApplies,
+    required bool Function(GraphEdge edge) edgeApplies,
+  }) {
     final retained = <String>{};
     final queue = <String>[];
     final activatedBlockers = <Blocker>{};
@@ -436,7 +748,7 @@ class ReachabilityGraph {
     }
 
     for (final entry in _roots.entries) {
-      if (entry.value.any((record) => record.condition.appliesTo(target))) {
+      if (entry.value.any(rootApplies)) {
         retain(entry.key);
       }
     }
@@ -454,7 +766,7 @@ class ReachabilityGraph {
     while (queue.isNotEmpty) {
       final current = queue.removeLast();
       for (final edge in outgoingFrom(current)) {
-        if (!edge.condition.appliesTo(target)) continue;
+        if (!edgeApplies(edge)) continue;
         retain(edge.to);
       }
       for (final blocker
@@ -465,6 +777,178 @@ class ReachabilityGraph {
 
     return retained;
   }
+
+  Set<String> _computeLegacyReachable(
+    BuildTarget target,
+    Set<String> configuredRetained,
+    Set<String> auxiliaryRetained,
+  ) {
+    bool edgeApplies(GraphEdge edge) {
+      if (edge.condition.appliesTo(target)) return true;
+      return _auxiliaryExecutionTargets.values.any(
+        (auxiliary) =>
+            edge.condition.applicabilityToAuxiliaryTarget(auxiliary) !=
+            ConditionApplicability.doesNotApply,
+      );
+    }
+
+    final reached = <String>{
+      for (final entry in _roots.entries)
+        if (entry.value.any(
+          (record) =>
+              record is AuxiliaryGraphRootRecord ||
+              (record is ConfiguredGraphRootRecord &&
+                  record.condition.appliesTo(target)),
+        ))
+          entry.key,
+    };
+    final queue = reached.toList();
+    for (final seed in {...configuredRetained, ...auxiliaryRetained}) {
+      for (final edge in _outgoing[seed] ?? const <GraphEdge>{}) {
+        if (!edgeApplies(edge)) continue;
+        if (reached.add(edge.to)) queue.add(edge.to);
+      }
+    }
+    while (queue.isNotEmpty) {
+      final current = queue.removeLast();
+      for (final edge in _outgoing[current] ?? const <GraphEdge>{}) {
+        if (!edgeApplies(edge)) continue;
+        if (reached.add(edge.to)) queue.add(edge.to);
+      }
+    }
+    return reached;
+  }
+
+  /// Computes one immutable integrity snapshot over every execution context.
+  GraphIntegrity integrityFor(Iterable<BuildTarget> configuredTargets) {
+    // Integrity is the graph's final preparation boundary. Condition facts
+    // must exist before the immutable snapshot is cached so later reachability
+    // and finding reads cannot invalidate the instance consumed by reports.
+    _materializeAuxiliaryConditionBlockers();
+    final targets = configuredTargets.map(BuildTarget.snapshot).toList();
+    if (targets.map((target) => target.name).toSet().length != targets.length) {
+      throw ArgumentError.value(
+        configuredTargets,
+        'configuredTargets',
+        'Build target names must be unique.',
+      );
+    }
+    final executionTargetIds = targets
+        .map(_configuredExecutionTargetId)
+        .toList(growable: false);
+    if (executionTargetIds.toSet().length != executionTargetIds.length) {
+      throw ArgumentError.value(
+        configuredTargets,
+        'configuredTargets',
+        'Build targets must produce unique app execution-context IDs.',
+      );
+    }
+    final targetKey = targets.map(_targetKey).toList()..sort();
+    final cacheKey = targetKey.join('||');
+    final cached = _graphIntegrityCache[cacheKey];
+    if (cached != null && cached.mutationVersion == _mutationVersion) {
+      return cached.integrity;
+    }
+
+    final dangling = danglingEdges().toSet();
+    final byTarget = <String, ExecutionTargetIntegrity>{};
+    for (final target in targets) {
+      final danglingRoots = <String>{
+        for (final entry in _roots.entries)
+          if (!_nodes.containsKey(entry.key) &&
+              entry.value.any(
+                (record) =>
+                    record is ConfiguredGraphRootRecord &&
+                    record.condition.appliesTo(target),
+              ))
+            entry.key,
+      };
+      final executionTargetId = _configuredExecutionTargetId(target);
+      byTarget[executionTargetId] = ExecutionTargetIntegrity(
+        id: executionTargetId,
+        domain: RootDomain.configuredTarget,
+        danglingEdges: {
+          for (final edge in dangling)
+            if (edge.condition.appliesTo(target)) edge,
+        },
+        danglingRootIds: danglingRoots,
+      );
+    }
+
+    for (final target in auxiliaryExecutionTargets) {
+      final unknownEdges = <GraphEdge>{
+        for (final edge in _edges)
+          if (edge.condition.applicabilityToAuxiliaryTarget(target) ==
+              ConditionApplicability.unknown)
+            edge,
+      };
+      byTarget[target.id] = ExecutionTargetIntegrity(
+        id: target.id,
+        domain: RootDomain.auxiliary,
+        danglingEdges: {
+          for (final edge in dangling)
+            if (edge.condition.applicabilityToAuxiliaryTarget(target) !=
+                ConditionApplicability.doesNotApply)
+              edge,
+        },
+        danglingRootIds: {
+          for (final entry in _roots.entries)
+            if (!_nodes.containsKey(entry.key) &&
+                entry.value.any(
+                  (record) =>
+                      record is AuxiliaryGraphRootRecord &&
+                      record.executionTargetId == target.id,
+                ))
+              entry.key,
+        },
+        incompleteReasons: {
+          if (unknownEdges.isNotEmpty) 'condition-applicability-unknown',
+        },
+      );
+    }
+
+    bool edgeHasContext(GraphEdge edge) =>
+        targets.any(edge.condition.appliesTo) ||
+        _auxiliaryExecutionTargets.values.any(
+          (target) =>
+              edge.condition.applicabilityToAuxiliaryTarget(target) !=
+              ConditionApplicability.doesNotApply,
+        );
+    final unattributedEdges = {
+      for (final edge in dangling)
+        if (!edgeHasContext(edge)) edge,
+    };
+    final unattributedRoots = <String>{};
+    for (final entry in _roots.entries) {
+      if (_nodes.containsKey(entry.key)) continue;
+      for (final record in entry.value) {
+        final attributed = switch (record) {
+          ConfiguredGraphRootRecord() => targets.any(
+            record.condition.appliesTo,
+          ),
+          AuxiliaryGraphRootRecord() => _auxiliaryExecutionTargets.containsKey(
+            record.executionTargetId,
+          ),
+        };
+        if (!attributed) unattributedRoots.add(entry.key);
+      }
+    }
+    final integrity = GraphIntegrity(
+      configuredTargets: targets.toSet(),
+      byExecutionTarget: byTarget,
+      unattributedDanglingEdges: unattributedEdges,
+      unattributedDanglingRootIds: unattributedRoots,
+      auxiliaryRegistryIssues: _auxiliaryExecutionTargetIssues,
+    );
+    _graphIntegrityCache[cacheKey] = _CachedGraphIntegrity(
+      mutationVersion: _mutationVersion,
+      integrity: integrity,
+    );
+    return integrity;
+  }
+
+  static String _configuredExecutionTargetId(BuildTarget target) =>
+      configuredExecutionContextId(target.name);
 
   String _targetKey(BuildTarget target) {
     final defines = target.dartDefines.entries.toList()
@@ -483,6 +967,8 @@ class ReachabilityGraph {
   void _markMutated() {
     _mutationVersion++;
     _targetAnalysisCache.clear();
+    _auxiliaryAnalysisCache = null;
+    _graphIntegrityCache.clear();
   }
 
   /// Computes reachability across [targets], keyed by target name.
@@ -498,7 +984,7 @@ class ReachabilityGraph {
       }
       result[target.name] = reachableFor(target);
     }
-    return result;
+    return Map.unmodifiable(result);
   }
 
   /// Node ids unreachable under **every** target in [targets].
@@ -522,15 +1008,10 @@ class ReachabilityGraph {
       reachableAnywhere.addAll(reachableFor(target));
     }
 
-    return _nodes.keys.where((id) => !reachableAnywhere.contains(id)).toSet();
+    return Set.unmodifiable(
+      _nodes.keys.where((id) => !reachableAnywhere.contains(id)),
+    );
   }
-}
-
-class _RootRecord {
-  const _RootRecord(this.reason, this.condition);
-
-  final String reason;
-  final BuildCondition condition;
 }
 
 class _Protection {
@@ -543,11 +1024,29 @@ class _Protection {
 class _CachedTargetAnalysis {
   const _CachedTargetAnalysis({
     required this.mutationVersion,
-    required this.retained,
-    required this.reachable,
+    required this.analysis,
   });
 
   final int mutationVersion;
-  final Set<String> retained;
-  final Set<String> reachable;
+  final TargetReachability analysis;
+}
+
+class _CachedAuxiliaryAnalysis {
+  const _CachedAuxiliaryAnalysis({
+    required this.mutationVersion,
+    required this.analysis,
+  });
+
+  final int mutationVersion;
+  final AuxiliaryReachability analysis;
+}
+
+class _CachedGraphIntegrity {
+  const _CachedGraphIntegrity({
+    required this.mutationVersion,
+    required this.integrity,
+  });
+
+  final int mutationVersion;
+  final GraphIntegrity integrity;
 }

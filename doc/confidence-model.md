@@ -59,7 +59,10 @@ informational by nature; a rule that cannot express its own fix never produces
 
 **`unreachableAcrossAllTargets`** — dead in *every* configured build target, not
 just the default one. See [`graph-model.md`](graph-model.md) for the formula.
-Code live only under `--dart-define=ENABLE_BETA=true` is still live.
+Code live only under `--dart-define=ENABLE_BETA=true` is still live. Exact
+auxiliary test, runtime, and external contexts also contribute to the global
+retained union; an incomplete auxiliary context retains with a blocker rather
+than proving absence.
 
 **`noDynamicBlockers`** — no unresolved dynamic construct could reach this node.
 This is the predicate that fails most often on real projects, and that is the
@@ -80,6 +83,23 @@ automatically.
 **`analysisCoverageComplete`** — every selected target and internal root
 boundary was explicitly declared and is complete. A partial target matrix or
 inferred roots cannot authorize a `SAFE` finding.
+
+**`notRetained`** — the candidate is absent from every retained context, not
+only every proven configured target. The evidence records both
+`configuredProvenUnitPaths`/`configuredRetainedUnitPaths` per target and
+`auxiliaryProvenUnitPaths`/`auxiliaryRetainedUnitPaths` per auxiliary context.
+`globalUsageUnitPaths` is the configured-plus-auxiliary retained union. A
+retained-only context, unknown condition, unresolved endpoint, or incomplete
+environment makes `notRetained` false and hard-gates `SAFE`, `HIGH`, and any
+apply action.
+
+The public finding/report fields are intentionally narrower and distinct:
+`retainedIn` lists the configured target names retaining the candidate, while
+`auxiliaryRetainedIn` lists the exact `aux:*` context IDs retaining it.
+`notRetained` is true only when both lists are empty. The `*UnitPaths` maps and
+`globalUsageUnitPaths` above are internal pass-snapshot path evidence, not
+aliases for the public finding fields; consumers must not collapse configured
+and auxiliary retention or infer absence from a compatibility path projection.
 
 **`actionSupported`** — the core has a specific, reversible implementation for
 this adapter and node kind. Report metadata alone never grants mutation

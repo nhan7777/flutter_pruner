@@ -4,7 +4,9 @@ import 'dart:io';
 import 'package:flutter_pruner/src/adapters/analyzer_adapter.dart';
 import 'package:flutter_pruner/src/adapters/dart/dart_adapter.dart';
 import 'package:flutter_pruner/src/adapters/dart/dart_analysis_workspace.dart';
+import 'package:flutter_pruner/src/adapters/dart/dart_execution_reachability_service.dart';
 import 'package:flutter_pruner/src/adapters/dart/dart_ids.dart';
+import 'package:flutter_pruner/src/adapters/dart/dart_package_ownership.dart';
 import 'package:flutter_pruner/src/adapters/get_it/di_inventory.dart';
 import 'package:flutter_pruner/src/adapters/get_it/get_it_adapter.dart';
 import 'package:flutter_pruner/src/analysis/project_analyzer.dart';
@@ -15,6 +17,7 @@ import 'package:flutter_pruner/src/core/confidence/finding.dart';
 import 'package:flutter_pruner/src/core/confidence/finding_generator.dart';
 import 'package:flutter_pruner/src/core/graph/build_condition.dart';
 import 'package:flutter_pruner/src/core/graph/edge.dart';
+import 'package:flutter_pruner/src/core/graph/execution_context_identity.dart';
 import 'package:flutter_pruner/src/core/graph/node.dart';
 import 'package:flutter_pruner/src/core/graph/reachability_graph.dart';
 import 'package:flutter_pruner/src/core/project/project_context.dart';
@@ -85,6 +88,18 @@ RunReport _reportFor(ProjectContext project, Finding finding) {
         rootCount: 0,
         recordedBlockerCount: 0,
         danglingEdgeCount: 0,
+        integrityByExecutionTarget: {
+          for (final target in project.targetMatrix.targets)
+            configuredExecutionContextId(
+              target.name,
+            ): ExecutionTargetIntegrityReport(
+              id: configuredExecutionContextId(target.name),
+              domain: 'configuredTarget',
+              complete: true,
+              danglingEdgeCount: 0,
+              danglingRootCount: 0,
+            ),
+        },
         adapterRuns: const [],
         findingStatistics: FindingStatistics.fromFindings(findings),
         blockerStatistics: BlockerStatistics(
@@ -159,6 +174,7 @@ void main() {
         final findings = const FindingGenerator().generate(
           graph: graph,
           project: project,
+          graphIntegrity: graph.integrityFor(project.targets),
           reportingNodeSchemes: const {'di'},
         );
         final unused = findings.singleWhere(
@@ -168,6 +184,7 @@ void main() {
 
         expect(findings, isNotEmpty);
         expect(project.analysisCoverageComplete, isTrue);
+        expect(unused.reportingAdapterId, 'get_it');
         expect(unused.ruleId, 'PRN-DI-001');
         expect(unused.confidence, Confidence.review);
         expect(unused.proposedAction, isNull);
@@ -196,6 +213,7 @@ void main() {
         final namedFinding = (const FindingGenerator().generate(
           graph: graph,
           project: project,
+          graphIntegrity: graph.integrityFor(project.targets),
           reportingNodeSchemes: const {'di'},
           adapterReportDefinitions: {
             'get_it': const GetItAdapter().reportDefinition,
@@ -286,31 +304,49 @@ void main() {
       },
     );
 
-    test('forwards GetIt uncertainty only with a bounded scope', () async {
-      final project = await ProjectContext.load(
-        Directory(p.absolute('test/fixtures/get_it_runtime_test')),
-      );
-      final graph = ReachabilityGraph();
+    test(
+      'keeps full selected-package GetIt analysis independent of target closure',
+      () async {
+        final project = await ProjectContext.load(
+          Directory(p.absolute('test/fixtures/get_it_runtime_test')),
+        );
+        final graph = ReachabilityGraph();
+        final reachability = _ThrowingReachabilityService();
 
-      await const DartAdapter().analyze(project, GraphBuilder(graph, 'dart'));
-      await const GetItAdapter().analyze(
-        project,
-        GraphBuilder(graph, 'get_it'),
-      );
+        await const DartAdapter().analyze(project, GraphBuilder(graph, 'dart'));
+        await const GetItAdapter().analyzeWithServices(
+          project,
+          GraphBuilder(graph, 'get_it'),
+          AdapterServices(
+            dartWorkspace: DartAnalysisWorkspace(project),
+            dartExecutionReachabilityService: reachability,
+          ),
+        );
 
-      final blockers = graph.blockers
-          .where((blocker) => blocker.producer == 'get_it')
-          .toList();
-      expect(blockers, isNotEmpty);
-      expect(
-        blockers.every(
-          (blocker) =>
-              blocker.affectedNamespace != null ||
-              blocker.affectedNodeIds.isNotEmpty,
-        ),
-        isTrue,
-      );
-    });
+        final blockers = graph.blockers
+            .where((blocker) => blocker.producer == 'get_it')
+            .toList();
+        expect(blockers, isNotEmpty);
+        expect(
+          blockers.every(
+            (blocker) =>
+                blocker.affectedNamespace != null ||
+                blocker.affectedNodeIds.isNotEmpty,
+          ),
+          isTrue,
+        );
+        expect(
+          blockers.where(
+            (blocker) =>
+                blocker.location?.startsWith('lib/unresolved.dart') ?? false,
+          ),
+          isNotEmpty,
+          reason:
+              'GetIt intentionally scans unreachable selected-package units',
+        );
+        expect(reachability.resolveCalls, 0);
+      },
+    );
 
     test(
       'adds resolver callers only when Dart contributes their graph nodes',
@@ -390,6 +426,14 @@ void main() {
       'blocks generated GetIt wiring and its exact Dart output namespaces',
       () async {
         final project = await _loadGeneratedFixture();
+        final owner = DartPackageOwnership.discover(
+          project,
+        ).ownerOf(project.resolve('lib/injection.dart'));
+        expect(
+          owner.ownership,
+          DartSourceOwnership.selectedPackage,
+          reason: owner.reason,
+        );
         final graph = ReachabilityGraph();
 
         await const DartAdapter().analyze(project, GraphBuilder(graph, 'dart'));
@@ -433,6 +477,7 @@ void main() {
         final findings = const FindingGenerator().generate(
           graph: graph,
           project: project,
+          graphIntegrity: graph.integrityFor(project.targets),
           reportingNodeSchemes: const {'dart'},
         );
         final generatedFindings = findings.where(
@@ -476,6 +521,7 @@ void main() {
         expect(const GetItAdapter().findingNodeSchemes, const {'di'});
         expect(const GetItAdapter().dependsOn, const ['dart']);
         expect(const GetItAdapter().appliesTo(project), isTrue);
+        expect(const GetItAdapter().reportDefinition.adapterId, 'get_it');
         expect(
           const GetItAdapter().reportDefinition.findings.single.ruleId,
           'PRN-DI-001',
@@ -509,4 +555,17 @@ void main() {
       ]);
     });
   });
+}
+
+final class _ThrowingReachabilityService
+    implements DartExecutionReachabilityService {
+  int resolveCalls = 0;
+
+  @override
+  Future<DartExecutionReachabilitySnapshot> resolve(
+    ProjectContext project,
+  ) async {
+    resolveCalls++;
+    throw StateError('GetIt must not consume target-specific reachability');
+  }
 }

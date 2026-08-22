@@ -246,9 +246,11 @@ void main() {
           ),
         ),
       );
+    final integrity = graph.integrityFor(project.targets);
     final snapshot = AnalysisSnapshot(
       project: project,
       graph: graph,
+      graphIntegrity: integrity,
       findings: const [],
       adapterIds: const ['dart'],
       adapterRuns: const [],
@@ -267,8 +269,15 @@ void main() {
       id: 'analysis-001',
       purpose: AnalysisPassPurpose.initial,
     );
-    expect(androidPass.danglingEdgeCount, 0);
-    expect(androidPass.danglingRootCount, 0);
+    expect(androidPass.danglingEdgeCount, 1);
+    expect(androidPass.danglingRootCount, 1);
+    expect(
+      androidPass.integrityByExecutionTarget.values.single.complete,
+      isTrue,
+    );
+    expect(androidPass.unattributedIntegrity.complete, isFalse);
+    expect(androidPass.unattributedIntegrity.danglingEdgeCount, 1);
+    expect(androidPass.unattributedIntegrity.danglingRootCount, 1);
 
     graph.addRoot(
       'dart:test/lib/support.dart#missingRoot',

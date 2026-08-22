@@ -9,7 +9,7 @@ import '../../reporting/run_report.dart';
 import 'report_formatter.dart';
 
 /// Formats a complete run as concise human-readable text.
-class HumanFormatter implements ReportFormatter {
+class HumanFormatter extends ReportFormatter {
   /// Creates a human formatter.
   const HumanFormatter({
     this.verbose = false,
@@ -1392,6 +1392,19 @@ class HumanFormatter implements ReportFormatter {
         continue;
       }
       details.add(reason.humanDescription);
+    }
+    if (!finding.predicates.notRetained) {
+      if (finding.retainedIn.isNotEmpty) {
+        details.add(
+          'Retained by configured targets: ${finding.retainedIn.join(', ')}',
+        );
+      }
+      if (finding.auxiliaryRetainedIn.isNotEmpty) {
+        details.add(
+          'Retained by auxiliary contexts: '
+          '${finding.auxiliaryRetainedIn.join(', ')}',
+        );
+      }
     }
     if (details.isEmpty && finding.whyNotSafe != null) {
       details.add(finding.whyNotSafe!);

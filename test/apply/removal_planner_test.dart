@@ -11,9 +11,10 @@ import 'package:flutter_pruner/src/core/graph/reachability_graph.dart';
 import 'package:flutter_pruner/src/core/project/project_context.dart';
 import 'package:test/test.dart';
 
-const predicates = SafetyPredicates(
+const _actionablePredicates = SafetyPredicates(
   ruleAllowsAutoFix: true,
   unreachableAcrossAllTargets: true,
+  notRetained: true,
   noDynamicBlockers: true,
   notProtected: true,
   noPublicApiRisk: true,
@@ -178,7 +179,7 @@ void main() {
           ),
           confidence: Confidence.safe,
           title: 'duplicate',
-          predicates: predicates,
+          predicates: _actionablePredicates,
           proposedAction: 'Remove duplicate',
           reportingAdapterId: 'duplicates',
         );
@@ -194,6 +195,31 @@ void main() {
         expect(plan.blocked, isEmpty);
       },
     );
+
+    test('retained SAFE finding cannot enter an atomic unit', () {
+      final retained = _finding(
+        'retained',
+        predicates: const SafetyPredicates(
+          ruleAllowsAutoFix: true,
+          unreachableAcrossAllTargets: true,
+          notRetained: false,
+          noDynamicBlockers: true,
+          notProtected: true,
+          noPublicApiRisk: true,
+          hasDeterministicInverse: true,
+        ),
+      );
+      final graph = ReachabilityGraph()..addNode(retained.node);
+
+      final plan = const RemovalPlanner().build(
+        findings: [retained],
+        graph: graph,
+        project: _project,
+      );
+
+      expect(plan.units, isEmpty);
+      expect(plan.blocked, isEmpty);
+    });
   });
 }
 
@@ -210,7 +236,11 @@ final ProjectContext _project = ProjectContext(
   ],
 );
 
-Finding _finding(String id, {String? path}) => Finding(
+Finding _finding(
+  String id, {
+  String? path,
+  SafetyPredicates predicates = _actionablePredicates,
+}) => Finding(
   ruleId: 'PRN-DART-001',
   node: _node(id, path: path),
   confidence: Confidence.safe,
@@ -230,7 +260,7 @@ Finding _emptyLibraryFinding(String id) => Finding(
   ),
   confidence: Confidence.safe,
   title: id,
-  predicates: predicates,
+  predicates: _actionablePredicates,
   proposedAction: 'Remove empty library and stale imports',
   reportingAdapterId: 'dart',
 );

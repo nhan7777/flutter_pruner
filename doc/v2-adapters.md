@@ -20,16 +20,22 @@ nodes instead of becoming dangling graph edges.
 
 ## Application-reachable consumer closure
 
-Route and localization declarations are inventoried across the project, but
-their Dart consumers are narrowed to libraries reachable from every configured
-application target. The closure uses analyzer-resolved imports and exports, is
-package-config aware, and includes part units.
+Route and localization declarations are inventoried across the selected
+package, but their Dart consumers come from one pass-shared analyzer-resolved
+execution snapshot. It holds per-target configured proven/retained paths and
+per-context auxiliary proven/retained paths; `globalUsageUnitPaths` is their
+retained union. The closure is package-config aware and includes part units.
 
-The closure is used as an exclusion boundary only when it is complete. A
-missing entrypoint, unresolved local directive, analyzer resolution failure, or
-conditional import/export makes it incomplete. In that case the adapter scans
-the broader project and emits a domain-scoped blocker. This fallback can add
-review work, but it cannot silently manufacture an unused result.
+Exact test, runtime, and external consumers contribute global usage. An
+incomplete auxiliary context stays retained with its context blocker rather
+than becoming an unused route/key. Sources owned by a nested package are not
+selected candidates in a parent scan; scan that package separately.
+
+The closure is used as an exclusion boundary only when the relevant evidence is
+complete. A missing entrypoint, unresolved local directive, analyzer resolution
+failure, unknown conditional environment, or incomplete auxiliary context
+retains the possible branch and emits a domain-scoped blocker. This fallback
+can add review work, but it cannot silently manufacture an unused result.
 
 `GetIt` does not currently apply this application-closure filter. Its open
 runtime/container model already keeps supported findings review-only and emits
@@ -71,7 +77,9 @@ Dart caller to the registration.
 Multiple containers, runtime or dynamic receivers, non-constant instance names,
 scope APIs, generated `Injectable` wiring, and unsupported registration shapes
 remain uncertainty boundaries. Generated-wiring probes add protection/blocker
-evidence; they do not claim to reproduce the runtime container state.
+evidence; they do not claim to reproduce the runtime container state. Generated
+Dart provenance is not usage by itself: only a modeled artifact chain or exact
+caller edge can retain an observed declaration.
 
 ## Localization (`gen-l10n`)
 

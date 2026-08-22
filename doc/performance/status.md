@@ -56,6 +56,11 @@ the fail-closed safety model and are covered by regression tests.
   oracle grading across Smooth App, GSY and GitJournal. This is a correctness
   replay, not a performance threshold; see
   [`v2-natural-accuracy.md`](v2-natural-accuracy.md).
+- Graph replay observations: frozen AppFlowy and ServerBox detached worktrees
+  can be scanned read-only with their project-matched Flutter/Dart SDKs and
+  external report destinations. These observations record scanner output,
+  toolchain/config/package-config identities, and before/after fingerprints;
+  they are not an independent accuracy denominator or natural mutation test.
 
 The measured Small fixture contains 200 Dart files, 30,000 LOC, 100 asset
 files, and 5,000 graph-reference seeds. Three post-warmup samples measured
@@ -67,6 +72,13 @@ Only synthetic-fixture timing measurements are committed as performance
 baselines. The V2 accuracy baseline contains classifications, corpus pins and
 hashes but no real-project source, absolute path or timing threshold. See
 `profiling.md` for the comparison and redaction protocol for local timing work.
+
+The corrected O3/O4 graph-oracle admission gates now pass their regression and
+independent-review evidence. This does not turn graph replay scans into an
+independent natural accuracy denominator: no refreshed confusion matrix,
+false-positive total, or deletion authority is claimed until the separate O7
+one-to-one grading is accepted. Scanner findings remain observations rather
+than ground truth.
 
 ## Deferred after feasibility review
 

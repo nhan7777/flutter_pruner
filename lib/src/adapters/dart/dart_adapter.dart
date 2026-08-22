@@ -1,13 +1,17 @@
+import 'dart:io';
+
 import 'package:analyzer/dart/analysis/results.dart';
 import 'package:analyzer/dart/analysis/utilities.dart';
 import 'package:analyzer/dart/ast/ast.dart';
 import 'package:analyzer/dart/ast/visitor.dart';
 import 'package:analyzer/dart/element/element.dart';
 import 'package:analyzer/error/error.dart';
+import 'package:path/path.dart' as p;
 
 import '../../core/graph/build_condition.dart';
 import '../../core/graph/edge.dart';
 import '../../core/graph/evidence.dart';
+import '../../core/graph/execution_target.dart';
 import '../../core/graph/node.dart';
 import '../../core/project/project_context.dart';
 import '../../core/project/target_matrix.dart';
@@ -17,9 +21,12 @@ import 'analyzer_ast_compat.dart';
 import 'analyzer_diagnostic_collector.dart';
 import 'dart_adapter_profile.dart';
 import 'dart_analysis_workspace.dart';
+import 'dart_directive_resolver.dart';
+import 'dart_execution_context_service.dart';
+import 'dart_execution_reachability_service.dart';
 import 'dart_ids.dart';
+import 'dart_package_ownership.dart';
 import 'declaration_visitor.dart';
-import 'entry_point_detector.dart';
 import 'reference_collector.dart';
 import 'unresolved_reference_index.dart';
 
@@ -130,7 +137,19 @@ class DartAdapter extends AnalyzerAdapter {
 
   @override
   Future<void> analyze(ProjectContext project, GraphBuilder graph) async {
-    await _analyze(project, graph, DartAnalysisWorkspace(project));
+    final workspace = DartAnalysisWorkspace(project);
+    final contexts = await DefaultDartExecutionContextService(
+      workspace: workspace,
+    ).resolve(project);
+    await _analyze(
+      project,
+      graph,
+      workspace,
+      DefaultDartExecutionReachabilityService(
+        workspace: workspace,
+        contexts: contexts,
+      ),
+    );
   }
 
   @override
@@ -139,10 +158,21 @@ class DartAdapter extends AnalyzerAdapter {
     GraphBuilder graph,
     AdapterServices services,
   ) async {
+    final workspace = services.dartWorkspace ?? DartAnalysisWorkspace(project);
+    final reachabilityService =
+        services.dartExecutionReachabilityService ??
+        DefaultDartExecutionReachabilityService(
+          workspace: workspace,
+          contexts:
+              await (services.dartExecutionContextService ??
+                      DefaultDartExecutionContextService(workspace: workspace))
+                  .resolve(project),
+        );
     await _analyze(
       project,
       graph,
-      services.dartWorkspace ?? DartAnalysisWorkspace(project),
+      workspace,
+      reachabilityService,
       profile: services.dartProfile,
     );
   }
@@ -150,10 +180,13 @@ class DartAdapter extends AnalyzerAdapter {
   Future<void> _analyze(
     ProjectContext project,
     GraphBuilder graph,
-    DartAnalysisWorkspace workspace, {
+    DartAnalysisWorkspace workspace,
+    DartExecutionReachabilityService reachabilityService, {
     DartAdapterProfile? profile,
   }) async {
-    _registerConfiguredRoots(project, graph);
+    final ownership = DartPackageOwnership.discover(project);
+    final reachability = await reachabilityService.resolve(project);
+    _mirrorExecutionContexts(project, graph, reachability.contexts);
     final cliDiagnosticsFuture = profile == null
         ? _collectAnalyzerDiagnostics(project)
         : profile.measureAsync(
@@ -161,39 +194,34 @@ class DartAdapter extends AnalyzerAdapter {
             () => _collectAnalyzerDiagnostics(project),
           );
 
-    final entryPointDetector = EntryPointDetector(
-      project: project,
-      graph: graph,
-    );
     final modeledPaths = <String>{};
-    final conditionalDirectivePaths = <String>{};
     final unresolvedReferenceIndex = UnresolvedReferenceIndex(project);
     final unresolvedReferences = <UnresolvedReferenceFact>{};
     final generatedUnresolvedReferences = <UnresolvedReferenceFact>{};
+    final externalLibraries = <LibraryElement>[];
 
-    final dartFiles =
-        profile?.measure('fileEnumeration', () => workspace.dartFiles) ??
-        workspace.dartFiles;
-    for (final filePath in dartFiles) {
-      final isModeled = DartIds.isModeledProjectPath(project, filePath);
-      final isGenerated = DartIds.isGeneratedProjectPath(project, filePath);
+    final resolvedLibraries = reachability.resolvedLibraries;
+    for (final library in resolvedLibraries) {
+      final filePath = library.element.firstFragment.source.fullName;
+      final owner = ownership.ownerOf(filePath);
+      final isModeled = DartIds.isModeledProjectPath(
+        project,
+        filePath,
+        ownership: ownership,
+      );
+      final isGenerated = DartIds.isGeneratedProjectPath(
+        project,
+        filePath,
+        ownership: ownership,
+      );
       if (!isModeled && !isGenerated) {
+        if (owner.ownership == DartSourceOwnership.unknown) {
+          graph.addBlocker(
+            reason: 'Dart ownership boundary is unknown',
+            affectedNamespace: 'dart:${project.packageName}/',
+          );
+        }
         continue;
-      }
-
-      final library = profile == null
-          ? await workspace.resolveLibrary(filePath)
-          : await profile.measureAsync(
-              'resolveLibrary',
-              () => workspace.resolveLibrary(filePath),
-            );
-
-      if (library is ResolvedLibraryResult) {
-        _collectConditionalDirectivePaths(
-          project,
-          library,
-          conditionalDirectivePaths,
-        );
       }
 
       if (!isModeled) {
@@ -203,15 +231,7 @@ class DartAdapter extends AnalyzerAdapter {
           library,
           filePath,
           generatedUnresolvedReferences,
-        );
-        continue;
-      }
-
-      if (library is NotLibraryButPartResult) continue;
-      if (library is! ResolvedLibraryResult) {
-        graph.addBlocker(
-          reason: 'analyzer could not resolve a Dart library',
-          location: filePath,
+          ownership,
         );
         continue;
       }
@@ -222,10 +242,12 @@ class DartAdapter extends AnalyzerAdapter {
         project,
         graph,
         library,
-        entryPointDetector,
         unresolvedReferenceIndex,
         unresolvedReferences,
         generatedUnresolvedReferences,
+        externalLibraries: externalLibraries,
+        workspace: workspace,
+        ownership: ownership,
         profile: profile,
       );
       if (profile == null) {
@@ -234,6 +256,24 @@ class DartAdapter extends AnalyzerAdapter {
         await profile.measureAsync('analyzeLibrary', analyzeLibrary);
       }
     }
+
+    await _admitExecutionSelectedExternalLibraries(
+      project,
+      graph,
+      workspace,
+      ownership,
+      reachability,
+      externalLibraries,
+    );
+    await _inspectExternalClosure(
+      project,
+      graph,
+      workspace,
+      ownership,
+      externalLibraries,
+    );
+
+    _emitExecutionReachability(project, graph, reachability, ownership);
 
     _addUnresolvedReferenceBlockers(
       project,
@@ -250,20 +290,7 @@ class DartAdapter extends AnalyzerAdapter {
       sourceScoped: false,
     );
 
-    // Dart's analyzer resolves one active conditional branch for the host
-    // process. Until the graph models every target-specific branch, none of
-    // the package's Dart declarations may be considered removable. Keep the
-    // blocker source-less so an unreachable library containing the directive
-    // cannot deactivate the protection.
-    for (final path in conditionalDirectivePaths.toList()..sort()) {
-      graph.addBlocker(
-        reason: 'conditional Dart imports/exports are not modelled per target',
-        location: path,
-        affectedNamespace: 'dart:${project.packageName}/',
-      );
-    }
-
-    _addEmptyFiles(project, graph, modeledPaths);
+    _addEmptyFiles(project, graph, modeledPaths, ownership);
 
     final cliDiagnostics = profile == null
         ? await cliDiagnosticsFuture
@@ -280,6 +307,13 @@ class DartAdapter extends AnalyzerAdapter {
       );
     } else {
       for (final diagnostic in cliDiagnostics.diagnostics) {
+        if (!DartIds.isModeledProjectPath(
+          project,
+          diagnostic.path,
+          ownership: ownership,
+        )) {
+          continue;
+        }
         _addUnusedDiagnosticNode(
           project,
           graph,
@@ -295,55 +329,429 @@ class DartAdapter extends AnalyzerAdapter {
     }
   }
 
-  void _registerConfiguredRoots(ProjectContext project, GraphBuilder graph) {
-    if (project.rootCoverage.mode == RootCoverageMode.applicationEntrypoints) {
-      for (final entrypoint
-          in project.targets.map((target) => target.entrypoint).toSet()) {
-        final libraryId = DartIds.libraryPath(
-          project,
-          project.resolve(entrypoint),
-        );
-        final condition = BuildCondition(entrypoints: {entrypoint});
-        graph.addRoot(
-          libraryId,
-          reason: 'contains main() entry point',
-          condition: condition,
-        );
-        graph.addRoot(
-          '$libraryId#main',
-          reason: 'main() entry point',
-          condition: condition,
-        );
-      }
+  void _mirrorExecutionContexts(
+    ProjectContext project,
+    GraphBuilder graph,
+    DartExecutionContextSnapshot snapshot,
+  ) {
+    final configuredTargets = snapshot.configuredTargets.toSet();
+    if (configuredTargets.length != project.targets.toSet().length ||
+        !configuredTargets.containsAll(project.targets)) {
+      throw StateError(
+        'The Dart execution-context snapshot does not match the project target matrix.',
+      );
     }
 
-    for (final entrypoint in project.rootCoverage.publicEntrypoints) {
-      graph.addRoot(
-        DartIds.libraryPath(project, project.resolve(entrypoint)),
-        reason: 'public package entry library — imported by external consumers',
+    final auxiliaryById = {
+      for (final target in snapshot.auxiliaryExecutionTargets)
+        target.id: target,
+    };
+    for (final target in snapshot.auxiliaryExecutionTargets) {
+      graph.addAuxiliaryExecutionTarget(target);
+    }
+    for (final root in snapshot.roots) {
+      switch (root.domain) {
+        case RootDomain.configuredTarget:
+          graph.addRoot(
+            root.nodeId,
+            reason: root.reason,
+            condition: BuildCondition.forTarget(root.configuredTarget!),
+          );
+        case RootDomain.auxiliary:
+          final executionTarget =
+              auxiliaryById[root.auxiliaryExecutionTargetId];
+          if (executionTarget == null) {
+            throw StateError(
+              'Dart execution root names an unregistered auxiliary target.',
+            );
+          }
+          graph.addAuxiliaryRoot(
+            root.nodeId,
+            reason: root.reason,
+            executionTarget: executionTarget,
+          );
+      }
+    }
+    for (final issue in snapshot.issues) {
+      final scopedIncompleteRoots = {
+        for (final root in snapshot.roots)
+          if (root.auxiliaryExecutionTargetId != null &&
+              auxiliaryById[root.auxiliaryExecutionTargetId]
+                      ?.environmentComplete ==
+                  false)
+            root.nodeId,
+      };
+      graph.addBlocker(
+        reason: '${issue.code}: ${issue.reason}',
+        affectedNodeIds: issue.requiresGlobalBlocker
+            ? const {}
+            : scopedIncompleteRoots,
       );
     }
   }
 
-  void _collectConditionalDirectivePaths(
+  void _emitExecutionReachability(
     ProjectContext project,
-    ResolvedLibraryResult library,
-    Set<String> paths,
+    GraphBuilder graph,
+    DartExecutionReachabilitySnapshot snapshot,
+    DartPackageOwnership ownership,
   ) {
-    for (final unit in library.units) {
-      final isProjectUnit =
-          DartIds.isModeledProjectPath(project, unit.path) ||
-          DartIds.isGeneratedProjectPath(project, unit.path);
-      if (!isProjectUnit) continue;
-      final hasConditionalDirective = unit.unit.directives.any(
-        (directive) =>
-            (directive is ImportDirective &&
-                directive.configurations.isNotEmpty) ||
-            (directive is ExportDirective &&
-                directive.configurations.isNotEmpty),
-      );
-      if (hasConditionalDirective) paths.add(unit.path);
+    final libraryIdsByCanonicalPath = <String, String>{
+      for (final library in snapshot.resolvedLibraries)
+        _canonicalDartPath(library.element.firstFragment.source.fullName):
+            _selectedLibraryNodeId(project, library.element, ownership),
+    };
+    for (final edge in snapshot.directives.edges) {
+      final sourceOwner = ownership.ownerOf(edge.sourcePath);
+      if (sourceOwner.ownership != DartSourceOwnership.selectedPackage) {
+        graph.addBlocker(
+          reason: 'Dart directive source ownership is incomplete',
+          location: edge.sourcePath,
+          affectedNamespace: 'dart:${project.packageName}/',
+        );
+        continue;
+      }
+      final sourceId = libraryIdsByCanonicalPath[edge.sourcePath];
+      if (sourceId == null) {
+        graph.addBlocker(
+          reason: 'Dart directive source has no projected library node',
+          location: edge.sourcePath,
+          affectedNamespace: 'dart:${project.packageName}/',
+        );
+        continue;
+      }
+      final targetOwner = ownership.ownerOf(edge.targetPath);
+      switch (targetOwner.ownership) {
+        case DartSourceOwnership.selectedPackage:
+          final targetId = libraryIdsByCanonicalPath[edge.targetPath];
+          if (targetId == null) {
+            graph.addBlocker(
+              reason: 'Dart directive target has no projected library node',
+              location: edge.targetPath,
+              affectedNamespace: 'dart:${project.packageName}/',
+            );
+            continue;
+          }
+          graph.addEdge(
+            GraphEdge(
+              from: sourceId,
+              to: targetId,
+              kind: EdgeKind.imports,
+              evidence: Evidence(
+                kind: EvidenceKind.semanticReference,
+                producer: 'dart',
+                description: edge.kind == DartDirectiveKind.import
+                    ? 'execution-context import directive'
+                    : 'execution-context export directive',
+                exact: edge.exact,
+                location: edge.sourcePath,
+              ),
+              condition: edge.condition,
+            ),
+          );
+        case DartSourceOwnership.externalPackage:
+          _addExternalPackageBoundaryEdge(
+            project: project,
+            graph: graph,
+            sourceLibraryId: sourceId,
+            owner: targetOwner,
+            description: edge.kind == DartDirectiveKind.import
+                ? 'external package import directive'
+                : 'external package export directive',
+            location: edge.sourcePath,
+            condition: edge.condition,
+            exact: edge.exact,
+          );
+        case DartSourceOwnership.unknown:
+          graph.addBlocker(
+            reason: 'Dart ownership boundary is unknown',
+            location: edge.targetPath,
+            affectedNamespace: 'dart:${project.packageName}/',
+          );
+      }
     }
+    for (final edge in snapshot.publicSurface.edges) {
+      graph.addEdge(
+        GraphEdge(
+          from: edge.publicEntrypointLibraryId,
+          to: edge.declarationId,
+          kind: EdgeKind.references,
+          evidence: Evidence(
+            kind: EvidenceKind.configuration,
+            producer: 'dart',
+            description: 'public package API',
+            exact: edge.exact,
+            location: edge.publicEntrypointLibraryId,
+          ),
+          condition: edge.condition,
+        ),
+      );
+    }
+    for (final issue in snapshot.directives.issues) {
+      graph.addBlocker(
+        reason: issue.reason,
+        location: issue.sourcePath,
+        affectedNamespace: 'dart:${project.packageName}/',
+      );
+    }
+    for (final issue in snapshot.publicSurface.issues) {
+      graph.addBlocker(
+        reason: issue.reason,
+        location: issue.sourcePath,
+        affectedNamespace: 'dart:${project.packageName}/',
+      );
+    }
+    for (final issue in snapshot.issues) {
+      graph.addBlocker(
+        reason: issue,
+        affectedNamespace: 'dart:${project.packageName}/',
+      );
+    }
+  }
+
+  Future<void> _admitExecutionSelectedExternalLibraries(
+    ProjectContext project,
+    GraphBuilder graph,
+    DartAnalysisWorkspace workspace,
+    DartPackageOwnership ownership,
+    DartExecutionReachabilitySnapshot snapshot,
+    List<LibraryElement> externalLibraries,
+  ) async {
+    final selectedLibrariesByPath = <String, LibraryElement>{
+      for (final library in snapshot.resolvedLibraries)
+        _canonicalDartPath(library.element.firstFragment.source.fullName):
+            library.element,
+    };
+    final externalLibraryIds = <String>{
+      for (final library in externalLibraries)
+        workspace.libraryIdentity(library),
+    };
+    final admittedDirectives = <String>{};
+    for (final edge in snapshot.directives.edges) {
+      if (!_edgeSourceIsRetained(snapshot, edge)) continue;
+      if (ownership.ownerOf(edge.targetPath).ownership !=
+          DartSourceOwnership.externalPackage) {
+        continue;
+      }
+      final sourcePath = _canonicalDartPath(edge.sourcePath);
+      final targetPath = _canonicalDartPath(edge.targetPath);
+      if (!admittedDirectives.add('$sourcePath|$targetPath')) continue;
+      if (externalLibraryIds.contains(targetPath)) continue;
+      final fromLibrary = selectedLibrariesByPath[sourcePath];
+      if (fromLibrary == null) {
+        graph.addBlocker(
+          reason: 'Dart directive source has no projected library node',
+          location: edge.sourcePath,
+          affectedNamespace: 'dart:${project.packageName}/',
+        );
+        continue;
+      }
+      final SomeResolvedLibraryResult result;
+      try {
+        result = await workspace.resolveSelectedDirectiveTarget(
+          targetPath,
+          fromLibrary: fromLibrary,
+        );
+      } on Object {
+        graph.addBlocker(
+          reason: 'external package closure could not be inspected',
+          location: targetPath,
+          affectedNamespace: 'dart:${project.packageName}/',
+        );
+        continue;
+      }
+      if (result is! ResolvedLibraryResult) {
+        graph.addBlocker(
+          reason: 'external package closure could not be inspected',
+          location: targetPath,
+          affectedNamespace: 'dart:${project.packageName}/',
+        );
+        continue;
+      }
+      if (externalLibraryIds.add(workspace.libraryIdentity(result.element))) {
+        externalLibraries.add(result.element);
+      }
+    }
+  }
+
+  Future<void> _inspectExternalClosure(
+    ProjectContext project,
+    GraphBuilder graph,
+    DartAnalysisWorkspace workspace,
+    DartPackageOwnership ownership,
+    List<LibraryElement> seeds,
+  ) async {
+    final pending = <String, LibraryElement>{
+      for (final seed in seeds) workspace.libraryIdentity(seed): seed,
+    };
+    final visited = <String>{};
+
+    while (pending.isNotEmpty) {
+      final identity = pending.keys.reduce(
+        (left, right) => left.compareTo(right) <= 0 ? left : right,
+      );
+      final element = pending.remove(identity)!;
+      if (!visited.add(identity)) continue;
+      final source = element.firstFragment.source;
+      final owner = ownership.ownerOf(source.fullName);
+      if (owner.ownership == DartSourceOwnership.unknown) {
+        workspace.recordUnknownOwnershipBoundary(source.fullName);
+        graph.addBlocker(
+          reason: 'Dart ownership boundary is unknown',
+          affectedNamespace: 'dart:${project.packageName}/',
+        );
+        continue;
+      }
+      if (owner.ownership != DartSourceOwnership.externalPackage) continue;
+
+      final SomeResolvedLibraryResult result;
+      try {
+        result = await workspace.resolveBoundedClosureLibrary(element);
+      } on Object {
+        _addExternalClosureIssue(
+          project,
+          graph,
+          workspace,
+          element,
+          kind: DartBoundedClosureIssueKind.uninspectable,
+          reason: 'external package closure could not be inspected',
+          location: source.fullName,
+        );
+        continue;
+      }
+      if (result is! ResolvedLibraryResult) {
+        _addExternalClosureIssue(
+          project,
+          graph,
+          workspace,
+          element,
+          kind: DartBoundedClosureIssueKind.uninspectable,
+          reason: 'external package closure could not be inspected',
+          location: source.fullName,
+        );
+        continue;
+      }
+      if (result.units.any(
+        (unit) => unit.diagnostics.any(
+          (diagnostic) =>
+              diagnostic.diagnosticCode.severity == DiagnosticSeverity.ERROR,
+        ),
+      )) {
+        _addExternalClosureIssue(
+          project,
+          graph,
+          workspace,
+          element,
+          kind: DartBoundedClosureIssueKind.uninspectable,
+          reason: 'external package closure could not be inspected',
+          location: source.fullName,
+        );
+      }
+      final conditionalPaths =
+          result.units
+              .where(
+                (unit) => unit.unit.directives.any(_hasConditionalDirective),
+              )
+              .map((unit) => unit.path)
+              .toList()
+            ..sort();
+      if (conditionalPaths.isNotEmpty) {
+        _addExternalClosureIssue(
+          project,
+          graph,
+          workspace,
+          element,
+          kind: DartBoundedClosureIssueKind.conditionalDirective,
+          reason:
+              'conditional Dart imports/exports are not modelled per target',
+          location: conditionalPaths.first,
+        );
+      }
+
+      final dependencies = <LibraryElement>{
+        ...result.element.firstFragment.importedLibraries,
+        ...result.element.exportedLibraries,
+      };
+      for (final dependency in dependencies) {
+        final dependencySource = dependency.firstFragment.source;
+        if (dependencySource.uri.isScheme('dart')) continue;
+        final dependencyOwner = ownership.ownerOf(dependencySource.fullName);
+        switch (dependencyOwner.ownership) {
+          case DartSourceOwnership.selectedPackage:
+            if (_isCoveredExternalEntrypoint(
+              project,
+              dependencySource.fullName,
+            )) {
+              continue;
+            }
+            graph.addBlocker(
+              reason: 'external package can address selected Dart library',
+              location: source.fullName,
+              affectedNamespace: _selectedLibraryNodeId(
+                project,
+                dependency,
+                ownership,
+              ),
+            );
+          case DartSourceOwnership.externalPackage:
+            final dependencyIdentity = workspace.libraryIdentity(dependency);
+            if (!visited.contains(dependencyIdentity)) {
+              pending.putIfAbsent(dependencyIdentity, () => dependency);
+            }
+          case DartSourceOwnership.unknown:
+            workspace.recordUnknownOwnershipBoundary(dependencySource.fullName);
+            graph.addBlocker(
+              reason: 'Dart ownership boundary is unknown',
+              affectedNamespace: 'dart:${project.packageName}/',
+            );
+        }
+      }
+    }
+  }
+
+  void _addExternalClosureIssue(
+    ProjectContext project,
+    GraphBuilder graph,
+    DartAnalysisWorkspace workspace,
+    LibraryElement library, {
+    required DartBoundedClosureIssueKind kind,
+    required String reason,
+    required String location,
+  }) {
+    workspace.recordBoundedClosureIssue(
+      library: library,
+      kind: kind,
+      location: location,
+    );
+    graph.addBlocker(
+      reason: reason,
+      location: location,
+      affectedNamespace: 'dart:${project.packageName}/',
+    );
+  }
+
+  bool _isCoveredExternalEntrypoint(
+    ProjectContext project,
+    String libraryPath,
+  ) {
+    final relativePath = project.relative(libraryPath);
+    if (project.rootCoverage.publicEntrypoints.contains(relativePath)) {
+      return true;
+    }
+    return project.rootCoverage.mode == RootCoverageMode.inferred &&
+        relativePath == 'lib/${project.packageName}.dart';
+  }
+
+  String _selectedLibraryNodeId(
+    ProjectContext project,
+    LibraryElement library,
+    DartPackageOwnership ownership,
+  ) {
+    final path = library.firstFragment.source.fullName;
+    if (ownership.isSelectedGeneratedSource(path)) {
+      return DartIds.generatedArtifact(project, path);
+    }
+    return DartIds.library(project, library, ownership: ownership);
   }
 
   void _recordGeneratedLibrary(
@@ -352,6 +760,7 @@ class DartAdapter extends AnalyzerAdapter {
     Object library,
     String filePath,
     Set<UnresolvedReferenceFact> unresolvedReferences,
+    DartPackageOwnership ownership,
   ) {
     if (library is NotLibraryButPartResult) return;
     if (library is! ResolvedLibraryResult) {
@@ -362,6 +771,24 @@ class DartAdapter extends AnalyzerAdapter {
       return;
     }
 
+    final generatedLibraryId = DartIds.generatedArtifact(project, filePath);
+    graph.addNode(
+      GraphNode(
+        id: generatedLibraryId,
+        kind: NodeKind.generatedArtifact,
+        displayName: '<generated library>',
+        origin: Uri.file(filePath),
+        metadata: const {
+          'declarationCount': 0,
+          'directiveCount': 0,
+          'generatedPartPaths': <String>[],
+          'externallyAddressable': false,
+          'removalSupported': false,
+          'generated': true,
+        },
+      ),
+    );
+
     final affectedNodeIds = <String>{};
     var hasErrors = false;
     for (final unit in library.units) {
@@ -371,9 +798,9 @@ class DartAdapter extends AnalyzerAdapter {
       final unresolvedCollector = ReferenceCollector(
         project: project,
         graph: graph,
-        libraryId: DartIds.libraryPath(project, unit.path),
+        libraryId: generatedLibraryId,
         location: unit.path,
-        recordReferences: false,
+        collapseCallerToLibrary: true,
       )..visitLibrary(unit.unit);
       unresolvedReferences.addAll(unresolvedCollector.unresolvedReferences);
       hasErrors =
@@ -405,9 +832,14 @@ class DartAdapter extends AnalyzerAdapter {
     ProjectContext project,
     GraphBuilder graph,
     Set<String> modeledPaths,
+    DartPackageOwnership ownership,
   ) {
     for (final file in project.dartFiles) {
-      if (!DartIds.isModeledProjectPath(project, file.path) ||
+      if (!DartIds.isModeledProjectPath(
+            project,
+            file.path,
+            ownership: ownership,
+          ) ||
           modeledPaths.contains(file.path)) {
         continue;
       }
@@ -428,7 +860,7 @@ class DartAdapter extends AnalyzerAdapter {
       }
       graph.addNode(
         GraphNode(
-          id: DartIds.libraryPath(project, file.path),
+          id: DartIds.libraryPath(project, file.path, ownership: ownership),
           kind: NodeKind.dartLibrary,
           displayName: '<empty library>',
           origin: Uri.file(file.path),
@@ -446,20 +878,38 @@ class DartAdapter extends AnalyzerAdapter {
     ProjectContext project,
     GraphBuilder graph,
     ResolvedLibraryResult library,
-    EntryPointDetector entryPointDetector,
     UnresolvedReferenceIndex unresolvedReferenceIndex,
     Set<UnresolvedReferenceFact> unresolvedReferences,
     Set<UnresolvedReferenceFact> generatedUnresolvedReferences, {
+    required List<LibraryElement> externalLibraries,
+    required DartAnalysisWorkspace workspace,
+    required DartPackageOwnership ownership,
     DartAdapterProfile? profile,
   }) async {
     final libraryElement = library.element;
-    final libraryId = DartIds.library(project, libraryElement);
+    final libraryId = DartIds.library(
+      project,
+      libraryElement,
+      ownership: ownership,
+    );
 
     final editableUnits = library.units
-        .where((unit) => DartIds.isModeledProjectPath(project, unit.path))
+        .where(
+          (unit) => DartIds.isModeledProjectPath(
+            project,
+            unit.path,
+            ownership: ownership,
+          ),
+        )
         .toList(growable: false);
     final generatedPartPaths = library.units
-        .where((unit) => DartIds.isGeneratedPath(unit.path))
+        .where(
+          (unit) => DartIds.isGeneratedProjectPath(
+            project,
+            unit.path,
+            ownership: ownership,
+          ),
+        )
         .map((unit) => unit.path)
         .toList(growable: false);
     final declarationCount = editableUnits.fold<int>(
@@ -494,55 +944,42 @@ class DartAdapter extends AnalyzerAdapter {
       ),
     );
 
-    if (relativeLibraryPath.startsWith('test/')) {
-      graph.addRoot(
-        libraryId,
-        reason: 'test library — invoked dynamically by the test runner',
-      );
-    }
-    final publicEntrypoints = project.rootCoverage.publicEntrypoints;
-    final conventionalPublicEntrypoint = 'lib/${project.packageName}.dart';
-    if (publicEntrypoints.contains(relativeLibraryPath) ||
-        (project.rootCoverage.mode == RootCoverageMode.inferred &&
-            relativeLibraryPath == conventionalPublicEntrypoint)) {
-      graph.addRoot(
-        libraryId,
-        reason: 'public package entry library — imported by external consumers',
-      );
-      for (final element
-          in libraryElement.exportNamespace.definedNames2.values) {
-        final fragment = DartIds.declarationFragment(element);
-        if (fragment == null ||
-            !DartIds.isModeledProjectFragment(project, fragment)) {
-          continue;
-        }
-        graph.addEdge(
-          GraphEdge(
-            from: libraryId,
-            to: DartIds.declaration(project, fragment),
-            kind: EdgeKind.references,
-            evidence: Evidence(
-              kind: EvidenceKind.configuration,
-              producer: 'dart',
-              description: 'public package API',
-              exact: true,
-              location: libraryPath,
-            ),
-          ),
+    // Element-model dependency lists validate the bounded external closure;
+    // they are never an import/export edge source.
+    for (final dependency in <LibraryElement>{
+      ...libraryElement.firstFragment.importedLibraries,
+      ...libraryElement.exportedLibraries,
+    }) {
+      final source = dependency.firstFragment.source;
+      if (source.uri.isScheme('dart')) continue;
+      final owner = ownership.ownerOf(source.fullName);
+      if (owner.ownership == DartSourceOwnership.externalPackage) {
+        externalLibraries.add(dependency);
+      } else if (owner.ownership == DartSourceOwnership.unknown) {
+        workspace.recordUnknownOwnershipBoundary(source.fullName);
+        graph.addBlocker(
+          reason: 'Dart ownership boundary is unknown',
+          affectedNamespace: 'dart:${project.packageName}/',
         );
       }
     }
-
-    // Detect entry points (main, @pragma)
-    entryPointDetector.detectInLibrary(libraryElement);
 
     // Visit each unit to collect declarations.
     // A library may include part files (e.g., .g.dart) that should be
     // excluded.  Apply the same exclusion list per-unit, not only at the
     // top-level library path.
     for (final unit in library.units) {
-      if (!DartIds.isModeledProjectPath(project, unit.path)) {
-        if (DartIds.isGeneratedPath(unit.path)) {
+      final unitOwner = ownership.ownerOf(unit.path);
+      if (!DartIds.isModeledProjectPath(
+        project,
+        unit.path,
+        ownership: ownership,
+      )) {
+        if (DartIds.isGeneratedProjectPath(
+          project,
+          unit.path,
+          ownership: ownership,
+        )) {
           final generatedReferences = GeneratedReferenceCollector(
             project: project,
           )..visitLibrary(unit.unit);
@@ -560,7 +997,7 @@ class DartAdapter extends AnalyzerAdapter {
             graph: graph,
             libraryId: libraryId,
             location: unit.path,
-            recordReferences: false,
+            collapseCallerToLibrary: true,
           )..visitLibrary(unit.unit);
           generatedUnresolvedReferences.addAll(
             unresolvedCollector.unresolvedReferences,
@@ -575,6 +1012,19 @@ class DartAdapter extends AnalyzerAdapter {
               location: unit.path,
             );
           }
+        } else if (unitOwner.ownership == DartSourceOwnership.externalPackage) {
+          graph.addBlocker(
+            reason: 'selected Dart library includes a non-selected part',
+            location: unit.path,
+            affectedNamespace: libraryId,
+          );
+        } else if (unitOwner.ownership == DartSourceOwnership.unknown) {
+          graph.addBlocker(
+            reason:
+                'selected Dart library includes a part with unknown ownership',
+            location: unit.path,
+            affectedNamespace: libraryId,
+          );
         }
         continue;
       }
@@ -599,58 +1049,6 @@ class DartAdapter extends AnalyzerAdapter {
         await profile.measureAsync(
           'sessionDiagnostics',
           () => _addUnusedDiagnostics(project, graph, unit),
-        );
-      }
-
-      // Create import edges from LibraryFragment
-      final libraryFragment = libraryElement.firstFragment;
-      final importedLibraries = libraryFragment.importedLibraries;
-
-      if (importedLibraries.isNotEmpty) {
-        final sourceUri = libraryFragment.source.uri;
-        final location = sourceUri.isScheme('file')
-            ? sourceUri.toFilePath()
-            : null;
-
-        for (final importedLibrary in importedLibraries) {
-          if (!DartIds.isModeledProjectLibrary(project, importedLibrary)) {
-            continue;
-          }
-          final targetId = DartIds.library(project, importedLibrary);
-          graph.addEdge(
-            GraphEdge(
-              from: libraryId,
-              to: targetId,
-              kind: EdgeKind.imports,
-              evidence: Evidence(
-                kind: EvidenceKind.semanticReference,
-                producer: 'dart',
-                description: 'import directive',
-                exact: true,
-                location: location,
-              ),
-            ),
-          );
-        }
-      }
-
-      for (final exportedLibrary in libraryElement.exportedLibraries) {
-        if (!DartIds.isModeledProjectLibrary(project, exportedLibrary)) {
-          continue;
-        }
-        graph.addEdge(
-          GraphEdge(
-            from: libraryId,
-            to: DartIds.library(project, exportedLibrary),
-            kind: EdgeKind.imports,
-            evidence: Evidence(
-              kind: EvidenceKind.configuration,
-              producer: 'dart',
-              description: 'export directive',
-              exact: true,
-              location: libraryPath,
-            ),
-          ),
         );
       }
 
@@ -694,6 +1092,51 @@ class DartAdapter extends AnalyzerAdapter {
         );
       }
     }
+  }
+
+  void _addExternalPackageBoundaryEdge({
+    required ProjectContext project,
+    required GraphBuilder graph,
+    required String sourceLibraryId,
+    required DartSourceOwner owner,
+    required String description,
+    required String? location,
+    BuildCondition condition = BuildCondition.unconditional,
+    bool exact = true,
+  }) {
+    final packageName = owner.packageName;
+    if (packageName == null || packageName.isEmpty) {
+      graph.addBlocker(
+        reason: 'Dart ownership boundary is unknown',
+        affectedNamespace: 'dart:${project.packageName}/',
+      );
+      return;
+    }
+    final boundaryId = DartIds.packageBoundary(project, packageName);
+    graph.addNode(
+      GraphNode(
+        id: boundaryId,
+        kind: NodeKind.package,
+        origin: Uri.parse('package:$packageName/'),
+        displayName: packageName,
+        metadata: {'packageName': packageName, 'externalBoundary': true},
+      ),
+    );
+    graph.addEdge(
+      GraphEdge(
+        from: sourceLibraryId,
+        to: boundaryId,
+        kind: EdgeKind.imports,
+        evidence: Evidence(
+          kind: EvidenceKind.semanticReference,
+          producer: 'dart',
+          description: description,
+          exact: exact,
+          location: location,
+        ),
+        condition: condition,
+      ),
+    );
   }
 
   void _addUnresolvedReferenceBlockers(
@@ -851,6 +1294,42 @@ class DartAdapter extends AnalyzerAdapter {
     );
   }
 }
+
+bool _edgeSourceIsRetained(
+  DartExecutionReachabilitySnapshot snapshot,
+  DartDirectiveEdge edge,
+) {
+  for (final target in edge.condition.exactTargets) {
+    if (snapshot.configuredRetainedUnitPaths[target]?.contains(
+          edge.sourcePath,
+        ) ??
+        false) {
+      return true;
+    }
+  }
+  for (final target in edge.condition.exactAuxiliaryTargets) {
+    if (snapshot.auxiliaryRetainedUnitPaths[target.id]?.contains(
+          edge.sourcePath,
+        ) ??
+        false) {
+      return true;
+    }
+  }
+  return false;
+}
+
+String _canonicalDartPath(String path) {
+  final absolute = p.normalize(p.absolute(path));
+  try {
+    return p.normalize(File(absolute).resolveSymbolicLinksSync());
+  } on FileSystemException {
+    return absolute;
+  }
+}
+
+bool _hasConditionalDirective(Directive directive) =>
+    directive is ImportDirective && directive.configurations.isNotEmpty ||
+    directive is ExportDirective && directive.configurations.isNotEmpty;
 
 final class _NamedArgumentAtOffsetFinder extends RecursiveAstVisitor<void> {
   _NamedArgumentAtOffsetFinder(this.offset);

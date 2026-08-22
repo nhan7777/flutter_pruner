@@ -55,7 +55,7 @@ void main() {
         final result = await _resolve(project);
         final resolver = result.resolver;
 
-        expect(resolver.references, hasLength(13));
+        expect(resolver.references, hasLength(14));
         expect(
           resolver.references.map((reference) => reference.callerId),
           containsAll(<String>[
@@ -64,6 +64,7 @@ void main() {
             'dart:get_it_resolution_test/lib/main.dart#resolveTopLevel',
             'dart:get_it_resolution_test/lib/main.dart#Consumer',
             'dart:get_it_resolution_test/lib/main.dart#nestedNonRegistrationClosure',
+            'dart:get_it_resolution_test/lib/generated/handwritten_consumer.dart#handwrittenService',
           ]),
         );
         expect(
@@ -200,7 +201,7 @@ void main() {
     );
 
     test(
-      'blocks generated consumers instead of making dangling references',
+      'blocks generated suffix and models handwritten generated-directory consumers',
       () async {
         final project = await _loadFixture();
         final result = await _resolve(project);
@@ -211,10 +212,24 @@ void main() {
         expect(generated, hasLength(1));
         expect(
           generated.single.location,
-          startsWith('lib/generated/consumer.dart:'),
+          startsWith('lib/generated/consumer.g.dart:'),
         );
         expect(generated.single.sourceNodeId, isNull);
         expect(generated.single.affectedNodeIds, hasLength(1));
+        expect(
+          result.resolver.references.map((reference) => reference.callerId),
+          contains(
+            'dart:get_it_resolution_test/lib/generated/handwritten_consumer.dart#handwrittenService',
+          ),
+        );
+        expect(
+          result.resolver.references.map((reference) => reference.callerId),
+          isNot(
+            contains(
+              'dart:get_it_resolution_test/lib/generated/consumer.g.dart#generatedService',
+            ),
+          ),
+        );
       },
     );
 

@@ -9,6 +9,7 @@ const SafetyPredicates _allHold = SafetyPredicates(
   notProtected: true,
   noPublicApiRisk: true,
   hasDeterministicInverse: true,
+  notRetained: true,
 );
 
 GraphNode _node(String id) =>
@@ -136,6 +137,7 @@ void main() {
               notProtected: true,
               noPublicApiRisk: true,
               hasDeterministicInverse: false,
+              notRetained: true,
               actionSupported: false,
             ),
             capability: const ActionCapability(
@@ -160,6 +162,7 @@ void main() {
               notProtected: true,
               noPublicApiRisk: true,
               hasDeterministicInverse: true,
+              notRetained: true,
               analysisCoverageComplete: false,
             ),
           ),
@@ -188,10 +191,37 @@ void main() {
         Confidence.protected,
       );
     });
+
+    test('retention blocks both otherwise-SAFE and manual-risk HIGH paths', () {
+      const retained = SafetyPredicates(
+        ruleAllowsAutoFix: true,
+        unreachableAcrossAllTargets: true,
+        noDynamicBlockers: true,
+        notProtected: true,
+        noPublicApiRisk: true,
+        hasDeterministicInverse: true,
+        notRetained: false,
+      );
+
+      expect(assessment(predicates: retained).hardGatesHold, isFalse);
+      expect(
+        const ConfidenceClassifier().classify(assessment(predicates: retained)),
+        Confidence.review,
+      );
+      expect(
+        const ConfidenceClassifier().classify(
+          assessment(
+            predicates: retained,
+            risks: {ManualRisk.externalConsumersNotScanned},
+          ),
+        ),
+        Confidence.review,
+      );
+    });
   });
 
   group('safety predicates', () {
-    test('all six holding is the only way allHold is true', () {
+    test('all predicates holding is the only way allHold is true', () {
       expect(_allHold.allHold, isTrue);
       expect(_allHold.failedPredicates, isEmpty);
     });
@@ -205,6 +235,7 @@ void main() {
           notProtected: true,
           noPublicApiRisk: true,
           hasDeterministicInverse: true,
+          notRetained: true,
         ),
         'unreachableAcrossAllTargets': const SafetyPredicates(
           ruleAllowsAutoFix: true,
@@ -213,6 +244,7 @@ void main() {
           notProtected: true,
           noPublicApiRisk: true,
           hasDeterministicInverse: true,
+          notRetained: true,
         ),
         'noDynamicBlockers': const SafetyPredicates(
           ruleAllowsAutoFix: true,
@@ -221,6 +253,7 @@ void main() {
           notProtected: true,
           noPublicApiRisk: true,
           hasDeterministicInverse: true,
+          notRetained: true,
         ),
         'notProtected': const SafetyPredicates(
           ruleAllowsAutoFix: true,
@@ -229,6 +262,7 @@ void main() {
           notProtected: false,
           noPublicApiRisk: true,
           hasDeterministicInverse: true,
+          notRetained: true,
         ),
         'noPublicApiRisk': const SafetyPredicates(
           ruleAllowsAutoFix: true,
@@ -237,6 +271,7 @@ void main() {
           notProtected: true,
           noPublicApiRisk: false,
           hasDeterministicInverse: true,
+          notRetained: true,
         ),
         'hasDeterministicInverse': const SafetyPredicates(
           ruleAllowsAutoFix: true,
@@ -245,6 +280,16 @@ void main() {
           notProtected: true,
           noPublicApiRisk: true,
           hasDeterministicInverse: false,
+          notRetained: true,
+        ),
+        'notRetained': const SafetyPredicates(
+          ruleAllowsAutoFix: true,
+          unreachableAcrossAllTargets: true,
+          noDynamicBlockers: true,
+          notProtected: true,
+          noPublicApiRisk: true,
+          hasDeterministicInverse: true,
+          notRetained: false,
         ),
       };
 
@@ -273,7 +318,7 @@ void main() {
       );
 
       expect(none.allHold, isFalse);
-      expect(none.failedPredicates, hasLength(6));
+      expect(none.failedPredicates, hasLength(7));
     });
 
     test('failure reasons are human-readable, not identifiers', () {
@@ -284,6 +329,7 @@ void main() {
         notProtected: true,
         noPublicApiRisk: true,
         hasDeterministicInverse: true,
+        notRetained: true,
       );
 
       // The explanation is the product for a tool that deletes code, so this
@@ -292,6 +338,23 @@ void main() {
         blocked.failedPredicates.single,
         'an unresolved dynamic construct could match',
       );
+    });
+
+    test('omitting notRetained defaults closed and explains retention', () {
+      const legacyCaller = SafetyPredicates(
+        ruleAllowsAutoFix: true,
+        unreachableAcrossAllTargets: true,
+        noDynamicBlockers: true,
+        notProtected: true,
+        noPublicApiRisk: true,
+        hasDeterministicInverse: true,
+      );
+
+      expect(legacyCaller.notRetained, isFalse);
+      expect(legacyCaller.allHold, isFalse);
+      expect(legacyCaller.failedPredicates, [
+        'node is retained in a configured or auxiliary execution context',
+      ]);
     });
   });
 
@@ -313,6 +376,7 @@ void main() {
           notProtected: true,
           noPublicApiRisk: true,
           hasDeterministicInverse: true,
+          notRetained: true,
         ),
       );
 
@@ -330,6 +394,7 @@ void main() {
           notProtected: true,
           noPublicApiRisk: true,
           hasDeterministicInverse: true,
+          notRetained: true,
         ),
       );
 

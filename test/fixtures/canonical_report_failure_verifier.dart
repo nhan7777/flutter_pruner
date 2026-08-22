@@ -12,5 +12,7 @@ void main() {
 
   final quarantineRoot = Directory(p.join('.flutter_pruner', 'quarantine'));
   final runDirectory = quarantineRoot.listSync().whereType<Directory>().single;
-  Directory(p.join(runDirectory.path, 'run-report.json')).createSync();
+  Directory(
+    p.join(runDirectory.path, 'reports', 'objects', 'run-report-000001.json'),
+  ).createSync();
 }

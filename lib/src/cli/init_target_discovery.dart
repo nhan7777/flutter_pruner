@@ -1,8 +1,13 @@
 import 'dart:io';
 
+import 'package:analyzer/dart/analysis/utilities.dart';
+import 'package:analyzer/dart/ast/ast.dart';
+import 'package:analyzer/error/error.dart';
 import 'package:path/path.dart' as p;
 
 import '../core/graph/build_condition.dart';
+import '../core/project/project_config.dart';
+import '../core/project/project_language_version.dart';
 import '../core/project/project_source_path.dart';
 
 /// One discovery ambiguity that requires an owner decision.
@@ -309,24 +314,100 @@ class InitTargetDiscovery {
   void _addConditionalSourceIssue(List<InitDiscoveryIssue> issues) {
     final lib = Directory(p.join(projectRoot.path, 'lib'));
     if (!lib.existsSync()) return;
+    final featureSet = ProjectLanguageVersion.featureSetFor(projectRoot);
     for (final entity in lib.listSync(recursive: true)) {
       if (entity is! File || !entity.path.endsWith('.dart')) continue;
-      final contents = entity.readAsStringSync();
-      if (RegExp(r'\b(?:import|export)\s+[^;]+\s+if\s*\(').hasMatch(contents)) {
+      final parsed = parseFile(
+        path: entity.path,
+        featureSet: featureSet,
+        throwIfDiagnostics: false,
+      );
+      if (parsed.errors.any(
+        (diagnostic) =>
+            diagnostic.diagnosticCode.severity == DiagnosticSeverity.ERROR,
+      )) {
         issues.add(
           const InitDiscoveryIssue(
             message:
-                'Conditional Dart imports/exports require target-aware graph '
-                'coverage that is not implemented yet.',
+                'Conditional Dart imports/exports contain syntax that init '
+                'cannot validate.',
             resolution:
                 'Keep coverage incomplete until conditional branches are '
-                'modelled?',
+                'resolved by analyzer?',
+            ownerResolvable: false,
+          ),
+        );
+        return;
+      }
+      for (final directive
+          in parsed.unit.directives.whereType<NamespaceDirective>()) {
+        if (directive.configurations.isEmpty) continue;
+        final knownConditions = directive.configurations.every(
+          (configuration) =>
+              dartSdkEnvironmentKeys.contains(configuration.name.toSource()),
+        );
+        final alternatives = <String?>[
+          directive.uri.stringValue,
+          ...directive.configurations.map(
+            (configuration) => configuration.uri.stringValue,
+          ),
+        ];
+        final admissibleBranches = alternatives.every(
+          (value) => _isAdmissibleConditionalUri(entity.path, value),
+        );
+        if (knownConditions && admissibleBranches) continue;
+        issues.add(
+          const InitDiscoveryIssue(
+            message:
+                'Conditional Dart imports/exports contain unknown condition '
+                'names or inadmissible local branches.',
+            resolution:
+                'Keep coverage incomplete until analyzer resolves every '
+                'conditional branch?',
             ownerResolvable: false,
           ),
         );
         return;
       }
     }
+  }
+
+  bool _isAdmissibleConditionalUri(String sourcePath, String? value) {
+    if (value == null || value.isEmpty) return false;
+    final uri = Uri.tryParse(value);
+    if (uri == null || uri.hasQuery || uri.hasFragment) return false;
+    if (uri.scheme == 'dart') return true;
+    final String path;
+    if (uri.scheme.isEmpty) {
+      path = p.normalize(
+        p.join(File(sourcePath).parent.path, uri.toFilePath()),
+      );
+    } else if (uri.scheme == 'package') {
+      if (uri.pathSegments.length < 2 ||
+          uri.pathSegments.first != _projectPackageName()) {
+        return false;
+      }
+      path = p.normalize(
+        p.joinAll([projectRoot.path, 'lib', ...uri.pathSegments.skip(1)]),
+      );
+    } else {
+      return false;
+    }
+    final relative = p.relative(path, from: projectRoot.path);
+    return relative != '..' &&
+        !relative.startsWith('../') &&
+        path.endsWith('.dart') &&
+        File(path).existsSync();
+  }
+
+  String? _projectPackageName() {
+    final pubspec = File(p.join(projectRoot.path, 'pubspec.yaml'));
+    if (!pubspec.existsSync()) return null;
+    final match = RegExp(
+      r'^name:\s*([A-Za-z_][A-Za-z0-9_]*)\s*$',
+      multiLine: true,
+    ).firstMatch(pubspec.readAsStringSync());
+    return match?.group(1);
   }
 
   String? _flavorFromEntrypoint(String entrypoint) {

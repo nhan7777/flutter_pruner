@@ -1,5 +1,9 @@
 import 'package:collection/collection.dart';
 
+import 'execution_target.dart';
+
+export 'execution_target.dart' show BuildTarget;
+
 /// The build configurations under which an edge or root applies.
 ///
 /// Reachability is **not** a single global question. The same source can have
@@ -26,18 +30,36 @@ class BuildCondition {
     Set<String> flavors = const {},
     Set<String> entrypoints = const {},
     Map<String, String> dartDefines = const {},
+    Set<BuildTarget> exactTargets = const {},
+    Set<AuxiliaryExecutionTarget> exactAuxiliaryTargets = const {},
   }) => BuildCondition._(
     platforms: Set<String>.unmodifiable(platforms),
     flavors: Set<String>.unmodifiable(flavors),
     entrypoints: Set<String>.unmodifiable(entrypoints),
     dartDefines: Map<String, String>.unmodifiable(dartDefines),
+    exactTargets: Set<BuildTarget>.unmodifiable(
+      exactTargets.map(BuildTarget.snapshot),
+    ),
+    exactAuxiliaryTargets: Set<AuxiliaryExecutionTarget>.unmodifiable(
+      exactAuxiliaryTargets,
+    ),
   );
+
+  /// Creates a condition for one complete configured target identity.
+  factory BuildCondition.forTarget(BuildTarget target) =>
+      BuildCondition(exactTargets: {target});
+
+  /// Creates a condition for one complete auxiliary target identity.
+  factory BuildCondition.forAuxiliaryTarget(AuxiliaryExecutionTarget target) =>
+      BuildCondition(exactAuxiliaryTargets: {target});
 
   const BuildCondition._({
     required this.platforms,
     required this.flavors,
     required this.entrypoints,
     required this.dartDefines,
+    required this.exactTargets,
+    required this.exactAuxiliaryTargets,
   });
 
   /// A condition that holds for every target.
@@ -46,6 +68,8 @@ class BuildCondition {
     flavors: <String>{},
     entrypoints: <String>{},
     dartDefines: <String, String>{},
+    exactTargets: <BuildTarget>{},
+    exactAuxiliaryTargets: <AuxiliaryExecutionTarget>{},
   );
 
   /// Platforms this applies to (`android`, `ios`, `web`, ...). Empty means all.
@@ -62,15 +86,27 @@ class BuildCondition {
   /// The condition only holds for targets whose defines match every entry.
   final Map<String, String> dartDefines;
 
+  /// Exact configured execution targets this condition applies to.
+  final Set<BuildTarget> exactTargets;
+
+  /// Exact auxiliary execution targets this condition applies to.
+  final Set<AuxiliaryExecutionTarget> exactAuxiliaryTargets;
+
   /// Whether this condition places no restriction at all.
   bool get isUnconditional =>
       platforms.isEmpty &&
       flavors.isEmpty &&
       entrypoints.isEmpty &&
-      dartDefines.isEmpty;
+      dartDefines.isEmpty &&
+      exactTargets.isEmpty &&
+      exactAuxiliaryTargets.isEmpty;
 
   /// Whether this condition holds for [target].
   bool appliesTo(BuildTarget target) {
+    if (exactTargets.isNotEmpty) {
+      return exactTargets.contains(BuildTarget.snapshot(target));
+    }
+    if (exactAuxiliaryTargets.isNotEmpty) return false;
     if (platforms.isNotEmpty && !platforms.contains(target.platform)) {
       return false;
     }
@@ -86,6 +122,24 @@ class BuildCondition {
     return true;
   }
 
+  /// Whether this condition can be proven to apply to [target].
+  ///
+  /// Legacy broad conditions are defined only for configured application
+  /// targets. They cannot prove an auxiliary context absent an exact auxiliary
+  /// identity, so they remain [ConditionApplicability.unknown].
+  ConditionApplicability applicabilityToAuxiliaryTarget(
+    AuxiliaryExecutionTarget target,
+  ) {
+    if (exactAuxiliaryTargets.contains(target)) {
+      return ConditionApplicability.applies;
+    }
+    if (exactTargets.isNotEmpty || exactAuxiliaryTargets.isNotEmpty) {
+      return ConditionApplicability.doesNotApply;
+    }
+    if (isUnconditional) return ConditionApplicability.applies;
+    return ConditionApplicability.unknown;
+  }
+
   @override
   bool operator ==(Object other) =>
       other is BuildCondition &&
@@ -95,6 +149,14 @@ class BuildCondition {
       const MapEquality<String, String>().equals(
         dartDefines,
         other.dartDefines,
+      ) &&
+      const SetEquality<BuildTarget>().equals(
+        exactTargets,
+        other.exactTargets,
+      ) &&
+      const SetEquality<AuxiliaryExecutionTarget>().equals(
+        exactAuxiliaryTargets,
+        other.exactAuxiliaryTargets,
       );
 
   @override
@@ -103,68 +165,34 @@ class BuildCondition {
     const SetEquality<String>().hash(flavors),
     const SetEquality<String>().hash(entrypoints),
     const MapEquality<String, String>().hash(dartDefines),
+    const SetEquality<BuildTarget>().hash(exactTargets),
+    const SetEquality<AuxiliaryExecutionTarget>().hash(exactAuxiliaryTargets),
   );
 
   @override
   String toString() {
     if (isUnconditional) return 'BuildCondition(any)';
     final parts = <String>[
-      if (platforms.isNotEmpty) 'platforms=$platforms',
-      if (flavors.isNotEmpty) 'flavors=$flavors',
-      if (entrypoints.isNotEmpty) 'entrypoints=$entrypoints',
-      if (dartDefines.isNotEmpty) 'defines=$dartDefines',
+      if (platforms.isNotEmpty) 'platforms=${_sortedValues(platforms)}',
+      if (flavors.isNotEmpty) 'flavors=${_sortedValues(flavors)}',
+      if (entrypoints.isNotEmpty) 'entrypoints=${_sortedValues(entrypoints)}',
+      if (dartDefines.isNotEmpty) 'defines=${_sortedMapString(dartDefines)}',
+      if (exactTargets.isNotEmpty)
+        'exactTargets=${_sortedValues(exactTargets)}',
+      if (exactAuxiliaryTargets.isNotEmpty)
+        'exactAuxiliaryTargets=${_sortedValues(exactAuxiliaryTargets)}',
     ];
     return 'BuildCondition(${parts.join(', ')})';
   }
 }
 
-/// One concrete build configuration the project supports.
-///
-/// Targets are declared explicitly in configuration rather than inferred: a
-/// resource unreachable in `prod` but reachable in `staging` is not dead.
-class BuildTarget {
-  /// Creates a build target.
-  ///
-  /// The supplied defines are snapshotted because target conditions may be
-  /// evaluated repeatedly across graph passes. Later caller mutation must not
-  /// change which nodes are reachable.
-  factory BuildTarget({
-    required String name,
-    required String platform,
-    required String entrypoint,
-    String? flavor,
-    Map<String, String> dartDefines = const {},
-  }) => BuildTarget._(
-    name: name,
-    platform: platform,
-    entrypoint: entrypoint,
-    flavor: flavor,
-    dartDefines: Map<String, String>.unmodifiable(dartDefines),
-  );
+String _sortedMapString(Map<String, String> values) {
+  final entries = values.entries.toList()
+    ..sort((left, right) => left.key.compareTo(right.key));
+  return '{${entries.map((entry) => '${entry.key}: ${entry.value}').join(', ')}}';
+}
 
-  const BuildTarget._({
-    required this.name,
-    required this.platform,
-    required this.entrypoint,
-    required this.flavor,
-    required this.dartDefines,
-  });
-
-  /// Unique name, for example `android-prod`.
-  final String name;
-
-  /// Target platform: `android`, `ios`, `web`, `macos`, `linux`, `windows`.
-  final String platform;
-
-  /// Entrypoint path, for example `lib/main_prod.dart`.
-  final String entrypoint;
-
-  /// Optional flavor name.
-  final String? flavor;
-
-  /// `--dart-define` values used for this target.
-  final Map<String, String> dartDefines;
-
-  @override
-  String toString() => 'BuildTarget($name)';
+String _sortedValues(Iterable<Object> values) {
+  final sorted = values.map((value) => value.toString()).toList()..sort();
+  return '{${sorted.join(', ')}}';
 }

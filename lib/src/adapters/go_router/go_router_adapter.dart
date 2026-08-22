@@ -1,3 +1,7 @@
+import 'dart:io';
+
+import 'package:path/path.dart' as p;
+
 import '../../core/graph/edge.dart';
 import '../../core/graph/evidence.dart';
 import '../../core/graph/node.dart';
@@ -6,6 +10,8 @@ import '../adapter_report_definition.dart';
 import '../analyzer_adapter.dart';
 import '../dart/dart_analysis_workspace.dart';
 import '../dart/dart_application_reachability.dart';
+import '../dart/dart_execution_context_service.dart';
+import '../dart/dart_execution_reachability_service.dart';
 import 'deep_link_probe.dart';
 import 'route_inventory.dart';
 import 'route_reference_resolver.dart';
@@ -81,7 +87,19 @@ class GoRouterAdapter extends AnalyzerAdapter {
 
   @override
   Future<void> analyze(ProjectContext project, GraphBuilder graph) async {
-    await _analyze(project, graph, DartAnalysisWorkspace(project));
+    final workspace = DartAnalysisWorkspace(project);
+    final contexts = await DefaultDartExecutionContextService(
+      workspace: workspace,
+    ).resolve(project);
+    await _analyze(
+      project,
+      graph,
+      workspace,
+      DefaultDartExecutionReachabilityService(
+        workspace: workspace,
+        contexts: contexts,
+      ),
+    );
   }
 
   @override
@@ -90,32 +108,36 @@ class GoRouterAdapter extends AnalyzerAdapter {
     GraphBuilder graph,
     AdapterServices services,
   ) async {
-    await _analyze(
-      project,
-      graph,
-      services.dartWorkspace ?? DartAnalysisWorkspace(project),
-    );
+    final workspace = services.dartWorkspace ?? DartAnalysisWorkspace(project);
+    final reachabilityService =
+        services.dartExecutionReachabilityService ??
+        DefaultDartExecutionReachabilityService(
+          workspace: workspace,
+          contexts:
+              await (services.dartExecutionContextService ??
+                      DefaultDartExecutionContextService(workspace: workspace))
+                  .resolve(project),
+        );
+    await _analyze(project, graph, workspace, reachabilityService);
   }
 
   Future<void> _analyze(
     ProjectContext project,
     GraphBuilder graph,
     DartAnalysisWorkspace workspace,
+    DartExecutionReachabilityService reachabilityService,
   ) async {
     final inventory = await RouteInventory.discover(
       project,
       workspace: workspace,
     );
-    final applicationReachability = await DartApplicationReachability.discover(
-      project,
-      workspace: workspace,
+    final applicationReachability = DartApplicationReachability.fromSnapshot(
+      await reachabilityService.resolve(project),
     );
     final resolver = RouteReferenceResolver(project, inventory);
     await resolver.analyzeProject(
       workspace: workspace,
-      includedUnitPaths: applicationReachability.isComplete
-          ? applicationReachability.unitPaths
-          : null,
+      includedUnitPaths: applicationReachability.globalUsageUnitPaths,
     );
     final deepLinks = DeepLinkProbe.detect(project);
 
@@ -148,6 +170,28 @@ class GoRouterAdapter extends AnalyzerAdapter {
           location: reference.location,
         ),
       );
+      final sourcePath = _sourcePathFromLocation(project, reference.location);
+      if (sourcePath == null) continue;
+      for (final entry
+          in applicationReachability.auxiliaryContextIssues.entries) {
+        final retained =
+            applicationReachability.auxiliaryRetainedUnitPaths[entry.key];
+        final proven =
+            applicationReachability.auxiliaryProvenUnitPaths[entry.key];
+        if (retained == null ||
+            !retained.contains(sourcePath) ||
+            (proven?.contains(sourcePath) ?? false)) {
+          continue;
+        }
+        for (final issue in entry.value) {
+          graph.addBlocker(
+            reason: '${issue.code} [${entry.key}]: ${issue.reason}',
+            location: reference.location,
+            sourceNodeId: reference.callerId,
+            affectedNodeIds: {reference.routeNodeId},
+          );
+        }
+      }
     }
 
     for (final entry in inventory.byNodeId.values) {
@@ -191,5 +235,20 @@ class GoRouterAdapter extends AnalyzerAdapter {
         affectedNamespace: RouteInventory.namespaceFor(project),
       );
     }
+  }
+}
+
+String? _sourcePathFromLocation(ProjectContext project, String location) {
+  final columnSeparator = location.lastIndexOf(':');
+  final lineSeparator = columnSeparator <= 0
+      ? -1
+      : location.lastIndexOf(':', columnSeparator - 1);
+  if (lineSeparator <= 0) return null;
+  final source = project.resolve(location.substring(0, lineSeparator));
+  final absolute = p.normalize(p.absolute(source));
+  try {
+    return p.normalize(File(absolute).resolveSymbolicLinksSync());
+  } on FileSystemException {
+    return absolute;
   }
 }

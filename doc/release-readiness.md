@@ -9,6 +9,7 @@ and a reproducible reporting-overhead measurement.
 Run from the Flutter Pruner repository:
 
 ```bash
+dart run tool/verify_release_blockers.dart
 dart format --output=none --set-exit-if-changed .
 dart analyze --fatal-infos
 dart test
@@ -23,6 +24,11 @@ jq -e '
   .statistics.findings.byTier.HIGH == 0
 ' .flutter_pruner/reports/self-scan.json
 ```
+
+The release-blocker verifier must exit zero before the other green gates can
+support a release claim. Skipped regression tests are not evidence that an
+active blocker is resolved; the machine-readable registry remains authoritative
+until the defect and its adversarial tests are independently accepted.
 
 Hosted CI remains the authority for the supported Dart floor and stable Linux,
 macOS, and Windows matrix.

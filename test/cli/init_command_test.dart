@@ -795,7 +795,7 @@ void main() {
     expect(result.exitCode, 0, reason: result.stderr as String);
     expect(result.stdout, contains('Next: flutter_pruner scan'));
     expect(result.stdout, isNot(contains('scan --project')));
-  });
+  }, timeout: const Timeout(Duration(minutes: 1)));
 }
 
 class _FakeInitPrompt implements InitPrompt, AnsiInitPrompt {

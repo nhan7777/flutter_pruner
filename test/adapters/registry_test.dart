@@ -1,6 +1,11 @@
 import 'dart:io';
 
 import 'package:flutter_pruner/flutter_pruner.dart';
+import 'package:flutter_pruner/src/adapters/asset/asset_adapter.dart';
+import 'package:flutter_pruner/src/adapters/dart/dart_execution_context_service.dart';
+import 'package:flutter_pruner/src/adapters/get_it/get_it_adapter.dart';
+import 'package:flutter_pruner/src/adapters/go_router/go_router_adapter.dart';
+import 'package:flutter_pruner/src/adapters/l10n/l10n_adapter.dart';
 import 'package:flutter_pruner/src/analysis/project_analyzer.dart';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
@@ -74,6 +79,45 @@ List<String> _ids(List<AnalyzerAdapter> adapters) =>
     adapters.map((a) => a.id).toList();
 
 void main() {
+  test('Dart-dependent adapters resolve one shared context service', () async {
+    final root = Directory.systemTemp.createTempSync('adapter_services_test_');
+    addTearDown(() => root.deleteSync(recursive: true));
+    File(p.join(root.path, 'pubspec.yaml')).writeAsStringSync('''
+name: adapter_services_test
+environment:
+  sdk: ^3.9.0
+''');
+    final mainFile = File(p.join(root.path, 'lib', 'main.dart'))
+      ..createSync(recursive: true);
+    mainFile.writeAsStringSync('void main() {}\n');
+    final project = await ProjectContext.load(root);
+    final workspace = DartAnalysisWorkspace(project);
+    final service = _CountingExecutionContextService(
+      DefaultDartExecutionContextService(workspace: workspace),
+    );
+    final services = AdapterServices(
+      dartWorkspace: workspace,
+      dartExecutionContextService: service,
+    );
+    final graph = ReachabilityGraph();
+
+    for (final adapter in const <AnalyzerAdapter>[
+      AssetAdapter(),
+      GetItAdapter(),
+      GoRouterAdapter(),
+      L10nAdapter(),
+    ]) {
+      await adapter.analyzeWithServices(
+        project,
+        GraphBuilder(graph, adapter.id),
+        services,
+      );
+    }
+
+    expect(service.resolveCalls, 4);
+    expect(service.snapshots.toSet(), hasLength(1));
+  });
+
   group('selection', () {
     test('resolves all adapters when unfiltered', () {
       final resolved = AdapterRegistry.resolve(
@@ -698,6 +742,16 @@ void main() {
         only: {'l10n'},
       ).analyze();
 
+      expect(
+        identical(
+          snapshot.graphIntegrity,
+          snapshot.graph.integrityFor(project.targets),
+        ),
+        isTrue,
+        reason:
+            'ProjectAnalyzer must retain the one integrity instance consumed '
+            'by finding generation and reporting',
+      );
       expect(snapshot.adapterIds, ['dart', 'l10n']);
       expect(snapshot.graph.danglingEdgesFor(project.targets), isEmpty);
       expect(snapshot.graph.danglingRootIdsFor(project.targets), isEmpty);
@@ -716,6 +770,23 @@ void main() {
       ]);
     });
   });
+}
+
+final class _CountingExecutionContextService
+    implements DartExecutionContextService {
+  _CountingExecutionContextService(this.delegate);
+
+  final DartExecutionContextService delegate;
+  int resolveCalls = 0;
+  final List<DartExecutionContextSnapshot> snapshots = [];
+
+  @override
+  Future<DartExecutionContextSnapshot> resolve(ProjectContext project) async {
+    resolveCalls++;
+    final snapshot = await delegate.resolve(project);
+    snapshots.add(snapshot);
+    return snapshot;
+  }
 }
 
 Future<Directory> _copyL10nFixture() async {

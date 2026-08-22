@@ -1,0 +1,742 @@
+{
+  "version": 3,
+  "run": {
+    "id": "scan-001",
+    "command": "scan",
+    "toolVersion": "1.4.0",
+    "status": "completed",
+    "exitCode": 0,
+    "partialApplied": false,
+    "startedAtUtc": "2026-08-20T00:00:00Z",
+    "finishedAtUtc": "2026-08-20T00:00:01Z",
+    "elapsedMicros": 1,
+    "projectRoot": "/project",
+    "packageName": "sample"
+  },
+  "analysisCoverage": {
+    "analysisMode": "application",
+    "targetMatrix": {
+      "status": "declaredComplete",
+      "complete": true,
+      "source": "/project/flutter_pruner.yaml",
+      "issues": [],
+      "targets": [
+        {
+          "name": "app:ios",
+          "platform": "ios",
+          "entrypoint": "lib/main.dart",
+          "dartDefines": {}
+        }
+      ]
+    },
+    "roots": {
+      "mode": "applicationEntrypoints",
+      "complete": true,
+      "internalBoundaryComplete": true,
+      "externalConsumersCovered": true,
+      "source": "/project/flutter_pruner.yaml",
+      "publicEntrypoints": [],
+      "issues": []
+    },
+    "auxiliaryExecutionTargets": [],
+    "auxiliaryExecutionTargetIssues": []
+  },
+  "presentation": {
+    "adapters": []
+  },
+  "execution": {
+    "requestedAdapters": [
+      "assets",
+      "dart",
+      "duplicates",
+      "get_it",
+      "go_router",
+      "l10n"
+    ],
+    "analysisPasses": [
+      {
+        "id": "analysis-001",
+        "purpose": "initial",
+        "elapsedMicros": 1,
+        "graph": {
+          "nodes": 8,
+          "edges": 0,
+          "roots": 1,
+          "blockersRecorded": 0,
+          "danglingEdges": 0,
+          "danglingRoots": 0,
+          "integrityByExecutionTarget": {
+            "app:ios": {
+              "id": "app:ios",
+              "domain": "configuredTarget",
+              "complete": true,
+              "danglingEdges": 0,
+              "danglingRoots": 0,
+              "incompleteReasons": []
+            },
+            "unattributed": {
+              "id": "unattributed",
+              "domain": "unattributed",
+              "complete": true,
+              "danglingEdges": 0,
+              "danglingRoots": 0,
+              "incompleteReasons": []
+            }
+          }
+        },
+        "adapters": [
+          {
+            "id": "assets",
+            "name": "Assets",
+            "role": "reporting",
+            "status": "executed",
+            "elapsedMicros": 1,
+            "contributions": {
+              "nodes": 1,
+              "edges": 0,
+              "blockers": 0
+            }
+          },
+          {
+            "id": "dart",
+            "name": "Dart",
+            "role": "reporting",
+            "status": "executed",
+            "elapsedMicros": 1,
+            "contributions": {
+              "nodes": 2,
+              "edges": 0,
+              "blockers": 0
+            }
+          },
+          {
+            "id": "duplicates",
+            "name": "Duplicates",
+            "role": "reporting",
+            "status": "executed",
+            "elapsedMicros": 1,
+            "contributions": {
+              "nodes": 1,
+              "edges": 0,
+              "blockers": 0
+            }
+          },
+          {
+            "id": "get_it",
+            "name": "GetIt",
+            "role": "reporting",
+            "status": "executed",
+            "elapsedMicros": 1,
+            "contributions": {
+              "nodes": 1,
+              "edges": 0,
+              "blockers": 0
+            }
+          },
+          {
+            "id": "go_router",
+            "name": "Routes",
+            "role": "reporting",
+            "status": "executed",
+            "elapsedMicros": 1,
+            "contributions": {
+              "nodes": 1,
+              "edges": 0,
+              "blockers": 0
+            }
+          },
+          {
+            "id": "l10n",
+            "name": "L10n",
+            "role": "reporting",
+            "status": "executed",
+            "elapsedMicros": 1,
+            "contributions": {
+              "nodes": 1,
+              "edges": 0,
+              "blockers": 0
+            }
+          }
+        ],
+        "findings": {
+          "total": 8,
+          "byTier": {
+            "SAFE": 1,
+            "HIGH": 0,
+            "REVIEW": 7,
+            "PROTECTED": 0
+          },
+          "byReportingAdapter": {
+            "assets": 1,
+            "dart": 3,
+            "duplicates": 1,
+            "get_it": 1,
+            "go_router": 1,
+            "l10n": 1
+          },
+          "byReportingAdapterAndTier": {
+            "assets": {
+              "SAFE": 0,
+              "HIGH": 0,
+              "REVIEW": 1,
+              "PROTECTED": 0
+            },
+            "dart": {
+              "SAFE": 1,
+              "HIGH": 0,
+              "REVIEW": 2,
+              "PROTECTED": 0
+            },
+            "duplicates": {
+              "SAFE": 0,
+              "HIGH": 0,
+              "REVIEW": 1,
+              "PROTECTED": 0
+            },
+            "get_it": {
+              "SAFE": 0,
+              "HIGH": 0,
+              "REVIEW": 1,
+              "PROTECTED": 0
+            },
+            "go_router": {
+              "SAFE": 0,
+              "HIGH": 0,
+              "REVIEW": 1,
+              "PROTECTED": 0
+            },
+            "l10n": {
+              "SAFE": 0,
+              "HIGH": 0,
+              "REVIEW": 1,
+              "PROTECTED": 0
+            }
+          },
+          "byRule": {
+            "PRN-DART-001": 1,
+            "PRN-DART-002": 1,
+            "PRN-DART-003": 1,
+            "PRN-ASSET-001": 1,
+            "PRN-DUP-001": 1,
+            "PRN-DI-001": 1,
+            "PRN-ROUTE-001": 1,
+            "PRN-L10N-001": 1
+          },
+          "byNodeKind": {
+            "declaration": 1,
+            "dartLibrary": 1,
+            "analyzerDiagnostic": 1,
+            "asset": 1,
+            "duplicateGroup": 1,
+            "diRegistration": 1,
+            "route": 1,
+            "localizationKey": 1
+          },
+          "byClassificationReason": {
+            "unsupported": 1
+          }
+        }
+      }
+    ]
+  },
+  "statistics": {
+    "findings": {
+      "total": 8,
+      "byTier": {
+        "SAFE": 1,
+        "HIGH": 0,
+        "REVIEW": 7,
+        "PROTECTED": 0
+      },
+      "byReportingAdapter": {
+        "assets": 1,
+        "dart": 3,
+        "duplicates": 1,
+        "get_it": 1,
+        "go_router": 1,
+        "l10n": 1
+      },
+      "byReportingAdapterAndTier": {
+        "assets": {
+          "SAFE": 0,
+          "HIGH": 0,
+          "REVIEW": 1,
+          "PROTECTED": 0
+        },
+        "dart": {
+          "SAFE": 1,
+          "HIGH": 0,
+          "REVIEW": 2,
+          "PROTECTED": 0
+        },
+        "duplicates": {
+          "SAFE": 0,
+          "HIGH": 0,
+          "REVIEW": 1,
+          "PROTECTED": 0
+        },
+        "get_it": {
+          "SAFE": 0,
+          "HIGH": 0,
+          "REVIEW": 1,
+          "PROTECTED": 0
+        },
+        "go_router": {
+          "SAFE": 0,
+          "HIGH": 0,
+          "REVIEW": 1,
+          "PROTECTED": 0
+        },
+        "l10n": {
+          "SAFE": 0,
+          "HIGH": 0,
+          "REVIEW": 1,
+          "PROTECTED": 0
+        }
+      },
+      "byRule": {
+        "PRN-DART-001": 1,
+        "PRN-DART-002": 1,
+        "PRN-DART-003": 1,
+        "PRN-ASSET-001": 1,
+        "PRN-DUP-001": 1,
+        "PRN-DI-001": 1,
+        "PRN-ROUTE-001": 1,
+        "PRN-L10N-001": 1
+      },
+      "byNodeKind": {
+        "declaration": 1,
+        "dartLibrary": 1,
+        "analyzerDiagnostic": 1,
+        "asset": 1,
+        "duplicateGroup": 1,
+        "diRegistration": 1,
+        "route": 1,
+        "localizationKey": 1
+      },
+      "byClassificationReason": {
+        "unsupported": 1
+      }
+    },
+    "measurements": [
+      {
+        "kind": "asset-family-source-bytes",
+        "adapterId": "assets",
+        "status": "measured",
+        "unit": "bytes",
+        "value": 3,
+        "scope": "assets-inventory",
+        "aggregation": "unique-asset-family-paths",
+        "knownCount": 1,
+        "unknownCount": 0
+      },
+      {
+        "kind": "duplicate-potential-reclaimable-bytes",
+        "adapterId": "duplicates",
+        "status": "measured",
+        "unit": "bytes",
+        "value": 2,
+        "scope": "duplicate-inventory",
+        "aggregation": "within-duplicate-groups-only",
+        "knownCount": 1,
+        "unknownCount": 0
+      },
+      {
+        "kind": "dart-finding-source-bytes",
+        "adapterId": "dart",
+        "status": "unknown",
+        "unit": "bytes",
+        "value": null,
+        "scope": "dart-findings",
+        "aggregation": "not-additive-with-file-inventory",
+        "knownCount": 0,
+        "unknownCount": 3
+      }
+    ],
+    "blockers": {
+      "recorded": 0,
+      "activeUnique": 0,
+      "unboundUnique": 0,
+      "affectedFindings": 0,
+      "byProducer": {}
+    },
+    "exclusions": {
+      "policyVersion": 1,
+      "totalObserved": 0,
+      "byReason": {}
+    }
+  },
+  "blockers": {},
+  "diagnostics": [],
+  "verificationAttempts": [],
+  "findings": [
+    {
+      "ruleId": "PRN-DART-001",
+      "reportingAdapterId": "dart",
+      "confidence": "SAFE",
+      "title": "declaration",
+      "node": {
+        "id": "dart:sample/lib/a.dart#unused",
+        "kind": "declaration",
+        "displayName": "unused",
+        "origin": "file:///project/lib/a.dart",
+        "projectRelativeOrigin": "lib/a.dart"
+      },
+      "predicates": {
+        "ruleAllowsAutoFix": true,
+        "unreachableAcrossAllTargets": true,
+        "notRetained": true,
+        "noDynamicBlockers": true,
+        "notProtected": true,
+        "noPublicApiRisk": true,
+        "hasDeterministicInverse": true,
+        "analysisCoverageComplete": true,
+        "actionSupported": true
+      },
+      "classificationReasons": [],
+      "manualRiskCodes": [],
+      "applyEligible": true,
+      "unreachableIn": [
+        "ios"
+      ],
+      "reachableIn": [],
+      "evidence": [],
+      "proposedAction": "remove",
+      "measurements": [
+        {
+          "kind": "source-bytes",
+          "status": "unknown",
+          "unit": "bytes",
+          "value": null
+        }
+      ],
+      "details": {},
+      "retainedIn": [],
+      "auxiliaryRetainedIn": []
+    },
+    {
+      "ruleId": "PRN-DART-002",
+      "reportingAdapterId": "dart",
+      "confidence": "REVIEW",
+      "title": "library",
+      "node": {
+        "id": "dart:sample/lib/b.dart",
+        "kind": "dartLibrary",
+        "displayName": "b",
+        "origin": "file:///project/lib/b.dart",
+        "projectRelativeOrigin": "lib/b.dart"
+      },
+      "predicates": {
+        "ruleAllowsAutoFix": false,
+        "unreachableAcrossAllTargets": true,
+        "notRetained": true,
+        "noDynamicBlockers": true,
+        "notProtected": true,
+        "noPublicApiRisk": true,
+        "hasDeterministicInverse": false,
+        "analysisCoverageComplete": true,
+        "actionSupported": false
+      },
+      "classificationReasons": [
+        "unsupported"
+      ],
+      "manualRiskCodes": [],
+      "applyEligible": false,
+      "unreachableIn": [
+        "ios"
+      ],
+      "reachableIn": [],
+      "measurements": [
+        {
+          "kind": "source-bytes",
+          "status": "unknown",
+          "unit": "bytes",
+          "value": null
+        }
+      ],
+      "details": {},
+      "retainedIn": [],
+      "auxiliaryRetainedIn": []
+    },
+    {
+      "ruleId": "PRN-DART-003",
+      "reportingAdapterId": "dart",
+      "confidence": "REVIEW",
+      "title": "diagnostic",
+      "node": {
+        "id": "dart-diagnostic:sample/lib/c.dart#unused_element@0",
+        "kind": "analyzerDiagnostic",
+        "displayName": "dead",
+        "origin": "file:///project/lib/c.dart",
+        "projectRelativeOrigin": "lib/c.dart"
+      },
+      "predicates": {
+        "ruleAllowsAutoFix": false,
+        "unreachableAcrossAllTargets": true,
+        "notRetained": true,
+        "noDynamicBlockers": true,
+        "notProtected": true,
+        "noPublicApiRisk": true,
+        "hasDeterministicInverse": false,
+        "analysisCoverageComplete": true,
+        "actionSupported": false
+      },
+      "classificationReasons": [],
+      "manualRiskCodes": [],
+      "applyEligible": false,
+      "unreachableIn": [],
+      "reachableIn": [],
+      "measurements": [
+        {
+          "kind": "source-bytes",
+          "status": "unknown",
+          "unit": "bytes",
+          "value": null
+        }
+      ],
+      "details": {
+        "diagnosticCode": "unused_element",
+        "message": "The declaration is unused.",
+        "line": 3,
+        "column": 1
+      },
+      "retainedIn": [],
+      "auxiliaryRetainedIn": []
+    },
+    {
+      "ruleId": "PRN-ASSET-001",
+      "reportingAdapterId": "assets",
+      "confidence": "REVIEW",
+      "title": "asset",
+      "node": {
+        "id": "asset:sample/assets/a.png",
+        "kind": "asset",
+        "displayName": "a.png",
+        "origin": "file:///project/assets/a.png",
+        "projectRelativeOrigin": "assets/a.png"
+      },
+      "predicates": {
+        "ruleAllowsAutoFix": false,
+        "unreachableAcrossAllTargets": true,
+        "notRetained": true,
+        "noDynamicBlockers": true,
+        "notProtected": true,
+        "noPublicApiRisk": true,
+        "hasDeterministicInverse": false,
+        "analysisCoverageComplete": true,
+        "actionSupported": false
+      },
+      "classificationReasons": [],
+      "manualRiskCodes": [],
+      "applyEligible": false,
+      "unreachableIn": [
+        "ios"
+      ],
+      "reachableIn": [],
+      "measurements": [
+        {
+          "kind": "asset-family-source-bytes",
+          "status": "measured",
+          "unit": "bytes",
+          "value": 3
+        }
+      ],
+      "details": {
+        "variantCount": 1,
+        "hasTransformers": false,
+        "baseSizeBytes": 2,
+        "variantSizeBytes": 1
+      },
+      "retainedIn": [],
+      "auxiliaryRetainedIn": []
+    },
+    {
+      "ruleId": "PRN-DUP-001",
+      "reportingAdapterId": "duplicates",
+      "confidence": "REVIEW",
+      "title": "duplicate",
+      "node": {
+        "id": "duplicate:sample:aaaaaaaaaaaa",
+        "kind": "duplicateGroup",
+        "displayName": "abc",
+        "origin": "file:///project/assets/a.png",
+        "projectRelativeOrigin": "assets/a.png"
+      },
+      "predicates": {
+        "ruleAllowsAutoFix": false,
+        "unreachableAcrossAllTargets": true,
+        "notRetained": true,
+        "noDynamicBlockers": true,
+        "notProtected": true,
+        "noPublicApiRisk": true,
+        "hasDeterministicInverse": false,
+        "analysisCoverageComplete": true,
+        "actionSupported": false
+      },
+      "classificationReasons": [],
+      "manualRiskCodes": [],
+      "applyEligible": false,
+      "unreachableIn": [],
+      "reachableIn": [],
+      "measurements": [
+        {
+          "kind": "duplicate-potential-reclaimable-bytes",
+          "status": "measured",
+          "unit": "bytes",
+          "value": 2
+        }
+      ],
+      "details": {
+        "paths": [
+          "assets/a.png",
+          "assets/b.png"
+        ],
+        "fileCount": 2,
+        "sizePerFile": 2,
+        "groupSourceBytes": 4,
+        "potentialReclaimableBytes": 2
+      },
+      "retainedIn": [],
+      "auxiliaryRetainedIn": []
+    },
+    {
+      "ruleId": "PRN-DI-001",
+      "reportingAdapterId": "get_it",
+      "confidence": "REVIEW",
+      "title": "registration",
+      "node": {
+        "id": "di:registration|c2FtcGxl|aW50ZXJmYWNlfGNHRmphMkZuWlRwellXMXdiR1V2YzJWeWRtbGpaUzVrWVhKMHxVMlZ5ZG1salpRfG5vbk51bGxhYmxlfDA|YWJzZW50|YmFzZQ|0|bGliL3NlcnZpY2VzLmRhcnRANDI",
+        "kind": "diRegistration",
+        "displayName": "Service",
+        "origin": "file:///project/lib/di.dart",
+        "projectRelativeOrigin": "lib/di.dart"
+      },
+      "predicates": {
+        "ruleAllowsAutoFix": false,
+        "unreachableAcrossAllTargets": true,
+        "notRetained": true,
+        "noDynamicBlockers": true,
+        "notProtected": true,
+        "noPublicApiRisk": true,
+        "hasDeterministicInverse": false,
+        "analysisCoverageComplete": true,
+        "actionSupported": false
+      },
+      "classificationReasons": [],
+      "manualRiskCodes": [],
+      "applyEligible": false,
+      "unreachableIn": [],
+      "reachableIn": [],
+      "measurements": [
+        {
+          "kind": "source-bytes",
+          "status": "unknown",
+          "unit": "bytes",
+          "value": null
+        }
+      ],
+      "details": {
+        "canonicalType": "interface|cGFja2FnZTpzYW1wbGUvc2VydmljZS5kYXJ0|U2VydmljZQ|nonNullable|0",
+        "instanceNameState": "absent",
+        "registrationApi": "registerLazySingleton",
+        "scope": "base",
+        "environments": "",
+        "sourceLocation": "lib/services.dart:1:1",
+        "generatedWiring": false
+      },
+      "retainedIn": [],
+      "auxiliaryRetainedIn": []
+    },
+    {
+      "ruleId": "PRN-ROUTE-001",
+      "reportingAdapterId": "go_router",
+      "confidence": "REVIEW",
+      "title": "route",
+      "node": {
+        "id": "route:sample:/legacy",
+        "kind": "route",
+        "displayName": "/legacy",
+        "origin": "file:///project/lib/routes.dart",
+        "projectRelativeOrigin": "lib/routes.dart"
+      },
+      "predicates": {
+        "ruleAllowsAutoFix": false,
+        "unreachableAcrossAllTargets": true,
+        "notRetained": true,
+        "noDynamicBlockers": true,
+        "notProtected": true,
+        "noPublicApiRisk": true,
+        "hasDeterministicInverse": false,
+        "analysisCoverageComplete": true,
+        "actionSupported": false
+      },
+      "classificationReasons": [],
+      "manualRiskCodes": [],
+      "applyEligible": false,
+      "unreachableIn": [],
+      "reachableIn": [],
+      "measurements": [
+        {
+          "kind": "source-bytes",
+          "status": "unknown",
+          "unit": "bytes",
+          "value": null
+        }
+      ],
+      "details": {
+        "path": "/legacy",
+        "routeName": "legacy",
+        "declaredAt": "lib/routes.dart:7",
+        "externallyAddressable": false
+      },
+      "retainedIn": [],
+      "auxiliaryRetainedIn": []
+    },
+    {
+      "ruleId": "PRN-L10N-001",
+      "reportingAdapterId": "l10n",
+      "confidence": "REVIEW",
+      "title": "l10n",
+      "node": {
+        "id": "l10n:sample:app.title",
+        "kind": "localizationKey",
+        "displayName": "app.title",
+        "origin": "file:///project/lib/l10n/app_en.arb",
+        "projectRelativeOrigin": "lib/l10n/app_en.arb"
+      },
+      "predicates": {
+        "ruleAllowsAutoFix": false,
+        "unreachableAcrossAllTargets": true,
+        "notRetained": true,
+        "noDynamicBlockers": true,
+        "notProtected": true,
+        "noPublicApiRisk": true,
+        "hasDeterministicInverse": false,
+        "analysisCoverageComplete": true,
+        "actionSupported": false
+      },
+      "classificationReasons": [],
+      "manualRiskCodes": [],
+      "applyEligible": false,
+      "unreachableIn": [],
+      "reachableIn": [],
+      "measurements": [
+        {
+          "kind": "source-bytes",
+          "status": "unknown",
+          "unit": "bytes",
+          "value": null
+        }
+      ],
+      "details": {
+        "key": "app.title",
+        "memberKind": "getter",
+        "hasPlaceholders": false,
+        "missingLocales": "",
+        "declaredAt": "lib/l10n/app_en.arb:1"
+      },
+      "retainedIn": [],
+      "auxiliaryRetainedIn": []
+    }
+  ]
+}

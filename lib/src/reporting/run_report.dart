@@ -5,6 +5,7 @@ import '../apply/finding_selection.dart';
 import '../core/confidence/confidence.dart';
 import '../core/confidence/finding.dart';
 import '../core/graph/evidence.dart';
+import '../core/graph/execution_target.dart';
 import '../core/project/analysis_mode.dart';
 import '../core/project/target_matrix.dart';
 
@@ -257,6 +258,37 @@ class BlockerStatistics {
   final Map<String, int> byProducer;
 }
 
+/// Immutable graph integrity for one configured or auxiliary context.
+class ExecutionTargetIntegrityReport {
+  /// Creates one per-context integrity record.
+  ExecutionTargetIntegrityReport({
+    required this.id,
+    required this.domain,
+    required this.complete,
+    required this.danglingEdgeCount,
+    required this.danglingRootCount,
+    List<String> incompleteReasons = const [],
+  }) : incompleteReasons = List.unmodifiable(incompleteReasons);
+
+  /// Stable execution-context ID.
+  final String id;
+
+  /// `configuredTarget`, `auxiliary`, or `unattributed`.
+  final String domain;
+
+  /// Whether this context has no dangling or incomplete facts.
+  final bool complete;
+
+  /// Number of dangling edges attributed to this context.
+  final int danglingEdgeCount;
+
+  /// Number of dangling roots attributed to this context.
+  final int danglingRootCount;
+
+  /// Stable reasons the context is incomplete.
+  final List<String> incompleteReasons;
+}
+
 /// Facts and output from one graph construction/classification pass.
 class AnalysisPassReport {
   /// Creates an immutable analysis pass.
@@ -270,6 +302,12 @@ class AnalysisPassReport {
     required this.recordedBlockerCount,
     required this.danglingEdgeCount,
     this.danglingRootCount = 0,
+    Map<String, ExecutionTargetIntegrityReport> integrityByExecutionTarget =
+        const {},
+    ExecutionTargetIntegrityReport? unattributedIntegrity,
+    List<AuxiliaryExecutionTarget> auxiliaryExecutionTargets = const [],
+    List<AuxiliaryExecutionTargetRegistryIssue> auxiliaryExecutionTargetIssues =
+        const [],
     required List<AdapterRunReport> adapterRuns,
     required this.findingStatistics,
     List<Blocker> unboundBlockers = const [],
@@ -278,7 +316,23 @@ class AnalysisPassReport {
     required this.exclusionPolicyVersion,
     required Map<String, int> exclusionsByReason,
     this.round,
-  }) : adapterRuns = List.unmodifiable(adapterRuns),
+  }) : integrityByExecutionTarget = Map.unmodifiable(
+         integrityByExecutionTarget,
+       ),
+       unattributedIntegrity =
+           unattributedIntegrity ??
+           ExecutionTargetIntegrityReport(
+             id: 'unattributed',
+             domain: 'unattributed',
+             complete: true,
+             danglingEdgeCount: 0,
+             danglingRootCount: 0,
+           ),
+       auxiliaryExecutionTargets = List.unmodifiable(auxiliaryExecutionTargets),
+       auxiliaryExecutionTargetIssues = List.unmodifiable(
+         auxiliaryExecutionTargetIssues,
+       ),
+       adapterRuns = List.unmodifiable(adapterRuns),
        unboundBlockers = List.unmodifiable(unboundBlockers),
        measurements = List.unmodifiable(measurements),
        exclusionsByReason = Map.unmodifiable(exclusionsByReason);
@@ -293,6 +347,11 @@ class AnalysisPassReport {
   final int recordedBlockerCount;
   final int danglingEdgeCount;
   final int danglingRootCount;
+  final Map<String, ExecutionTargetIntegrityReport> integrityByExecutionTarget;
+  final ExecutionTargetIntegrityReport unattributedIntegrity;
+  final List<AuxiliaryExecutionTarget> auxiliaryExecutionTargets;
+  final List<AuxiliaryExecutionTargetRegistryIssue>
+  auxiliaryExecutionTargetIssues;
   final List<AdapterRunReport> adapterRuns;
   final FindingStatistics findingStatistics;
   final List<Blocker> unboundBlockers;
@@ -606,4 +665,16 @@ class RunReport {
   FindingStatistics get finalFindingStatistics => analysisPasses.isEmpty
       ? FindingStatistics.fromFindings(const [])
       : analysisPasses.last.findingStatistics;
+
+  /// Auxiliary execution contexts from the final completed analysis pass.
+  List<AuxiliaryExecutionTarget> get auxiliaryExecutionTargets =>
+      analysisPasses.isEmpty
+      ? const []
+      : analysisPasses.last.auxiliaryExecutionTargets;
+
+  /// Rejected auxiliary target definitions from the final analysis pass.
+  List<AuxiliaryExecutionTargetRegistryIssue>
+  get auxiliaryExecutionTargetIssues => analysisPasses.isEmpty
+      ? const []
+      : analysisPasses.last.auxiliaryExecutionTargetIssues;
 }

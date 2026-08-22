@@ -35,6 +35,17 @@ class ToolWorkspace {
   /// Default report directory relative to the project root.
   static const String reportsRelativePath = '$directoryName/reports';
 
+  /// Append-only managed report store relative to the project root.
+  static const String reportStoreRelativePath = '$reportsRelativePath/store';
+
+  /// Immutable managed report objects relative to the project root.
+  static const String reportObjectsRelativePath =
+      '$reportStoreRelativePath/objects';
+
+  /// Immutable managed report commits relative to the project root.
+  static const String reportCommitsRelativePath =
+      '$reportStoreRelativePath/commits';
+
   /// Project-local advisory lock used by source-mutating commands.
   static const String operationLockRelativePath =
       '$directoryName/operation.lock';
@@ -71,6 +82,27 @@ class ToolWorkspace {
     _resolveManagedRelativePath(reportsRelativePath, kind: 'reports'),
   );
 
+  /// Append-only managed report store.
+  Directory get reportStoreDirectory => Directory(
+    _resolveManagedRelativePath(reportStoreRelativePath, kind: 'report store'),
+  );
+
+  /// Immutable managed report object directory.
+  Directory get reportObjectsDirectory => Directory(
+    _resolveManagedRelativePath(
+      reportObjectsRelativePath,
+      kind: 'report object store',
+    ),
+  );
+
+  /// Immutable managed report commit directory.
+  Directory get reportCommitsDirectory => Directory(
+    _resolveManagedRelativePath(
+      reportCommitsRelativePath,
+      kind: 'report commit store',
+    ),
+  );
+
   /// Lock file shared by apply, rollback, and destructive quarantine commands.
   File get operationLockFile => File(
     _resolveManagedRelativePath(
@@ -84,6 +116,8 @@ class ToolWorkspace {
     directory.path;
     quarantineDirectory.path;
     reportsDirectory.path;
+    reportObjectsDirectory.path;
+    reportCommitsDirectory.path;
     operationLockFile.path;
     legacyQuarantineDirectory.path;
   }

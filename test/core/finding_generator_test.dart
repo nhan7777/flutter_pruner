@@ -7,8 +7,10 @@ import 'package:flutter_pruner/src/core/confidence/finding_generator.dart';
 import 'package:flutter_pruner/src/core/graph/build_condition.dart';
 import 'package:flutter_pruner/src/core/graph/edge.dart';
 import 'package:flutter_pruner/src/core/graph/evidence.dart';
+import 'package:flutter_pruner/src/core/graph/execution_target.dart';
 import 'package:flutter_pruner/src/core/graph/node.dart';
 import 'package:flutter_pruner/src/core/graph/reachability_graph.dart';
+import 'package:flutter_pruner/src/core/graph/root.dart';
 import 'package:flutter_pruner/src/core/project/analysis_mode.dart';
 import 'package:flutter_pruner/src/core/project/project_context.dart';
 import 'package:flutter_pruner/src/core/project/target_matrix.dart';
@@ -16,6 +18,472 @@ import 'package:test/test.dart';
 
 void main() {
   group('FindingGenerator', () {
+    test('G3 finding generation is graph-read-only after integrity', () {
+      final target = _target('android');
+      final auxiliary = AuxiliaryExecutionTarget(
+        id: 'aux:test:test/support_test.dart:vm',
+        domain: AuxiliaryExecutionDomain.test,
+        environmentValues: const {
+          'dart.library.io': 'true',
+          'dart.library.html': 'false',
+        },
+        environmentComplete: true,
+        reason: 'VM test',
+      );
+      final graph = ReachabilityGraph()
+        ..addNode(
+          GraphNode(
+            id: 'dart:app/test/support_test.dart#main',
+            kind: NodeKind.declaration,
+            origin: Uri.file('/project/test/support_test.dart'),
+          ),
+        )
+        ..addNode(
+          GraphNode(
+            id: 'dart:app/lib/conditional.dart#usedInTest',
+            kind: NodeKind.declaration,
+            origin: Uri.file('/project/lib/conditional.dart'),
+          ),
+        )
+        ..addNode(
+          GraphNode(
+            id: 'dart:app/lib/unused.dart#unused',
+            kind: NodeKind.declaration,
+            origin: Uri.file('/project/lib/unused.dart'),
+          ),
+        )
+        ..addAuxiliaryRoot(
+          'dart:app/test/support_test.dart#main',
+          reason: 'test entry point',
+          executionTarget: auxiliary,
+        )
+        ..addEdge(
+          GraphEdge(
+            from: 'dart:app/test/support_test.dart#main',
+            to: 'dart:app/lib/conditional.dart#usedInTest',
+            kind: EdgeKind.references,
+            evidence: const Evidence(
+              kind: EvidenceKind.semanticReference,
+              producer: 'dart',
+              description: 'conditional test reference',
+              exact: true,
+            ),
+            condition: BuildCondition(platforms: {'android'}),
+          ),
+        );
+
+      final integrity = graph.integrityFor([target]);
+      final roots = graph.rootRecords.toList();
+      final edges = graph.edges.toSet();
+      final blockers = graph.blockers.toList();
+
+      expect(blockers, hasLength(1));
+      const FindingGenerator().generate(
+        graph: graph,
+        project: _mockProject(targets: [target]),
+        graphIntegrity: integrity,
+      );
+
+      expect(graph.rootRecords, roots);
+      expect(graph.edges, edges);
+      expect(graph.blockers, blockers);
+      expect(identical(graph.integrityFor([target]), integrity), isTrue);
+    });
+
+    test('G3 consumes the supplied aggregate integrity snapshot', () {
+      final target = BuildTarget(
+        name: 'default',
+        platform: 'android',
+        entrypoint: 'lib/main.dart',
+      );
+      final auxiliary = AuxiliaryExecutionTarget(
+        id: 'aux:runtime:vm-callback',
+        domain: AuxiliaryExecutionDomain.runtime,
+        environmentValues: const {'dart.library.io': 'true'},
+        environmentComplete: true,
+        reason: 'VM callback',
+        sourceConfiguredTarget: target,
+      );
+      final graph = ReachabilityGraph()
+        ..addNode(
+          GraphNode(
+            id: 'dart:app/lib/unused.dart#unused',
+            kind: NodeKind.declaration,
+            origin: Uri.file('/project/lib/unused.dart'),
+          ),
+        )
+        ..addAuxiliaryRoot(
+          'missing_callback',
+          reason: 'runtime callback',
+          executionTarget: auxiliary,
+        );
+      final integrity = graph.integrityFor([target]);
+
+      final finding = const FindingGenerator()
+          .generate(
+            graph: graph,
+            project: _mockProject(targets: [target]),
+            graphIntegrity: integrity,
+          )
+          .single;
+
+      expect(integrity.complete, isFalse);
+      expect(finding.confidence, Confidence.review);
+      expect(finding.predicates.noDynamicBlockers, isFalse);
+      expect(
+        finding.classificationReasons,
+        contains(ClassificationReason.incompleteGraphIntegrity),
+      );
+    });
+
+    test('G3 rejects integrity computed for a different full target tuple', () {
+      final graph = ReachabilityGraph()
+        ..addNode(
+          GraphNode(
+            id: 'dart:app/lib/unused.dart#unused',
+            kind: NodeKind.declaration,
+            origin: Uri.file('/project/lib/unused.dart'),
+          ),
+        );
+      final intended = BuildTarget(
+        name: 'default',
+        platform: 'android',
+        flavor: 'prod',
+        entrypoint: 'lib/main.dart',
+        dartDefines: const {'MODE': 'prod'},
+      );
+      final drifted = BuildTarget(
+        name: 'default',
+        platform: 'android',
+        flavor: 'staging',
+        entrypoint: 'lib/main.dart',
+        dartDefines: const {'MODE': 'staging'},
+      );
+
+      expect(
+        () => const FindingGenerator().generate(
+          graph: graph,
+          project: _mockProject(targets: [intended]),
+          graphIntegrity: graph.integrityFor([drifted]),
+        ),
+        throwsStateError,
+      );
+    });
+
+    test('G4 reports configured retained-only nodes as REVIEW', () {
+      final target = _target('android');
+      const rootId = 'dart:app/lib/main.dart#main';
+      const candidateId = 'dart:app/lib/retained.dart#retained';
+      final graph = ReachabilityGraph()
+        ..addNode(
+          GraphNode(
+            id: rootId,
+            kind: NodeKind.declaration,
+            origin: Uri.file('/project/lib/main.dart'),
+          ),
+        )
+        ..addNode(
+          GraphNode(
+            id: candidateId,
+            kind: NodeKind.declaration,
+            origin: Uri.file('/project/lib/retained.dart'),
+          ),
+        )
+        ..addRoot(rootId, reason: 'configured entry point')
+        ..addEdge(
+          const GraphEdge(
+            from: rootId,
+            to: candidateId,
+            kind: EdgeKind.references,
+            evidence: Evidence(
+              kind: EvidenceKind.symbolicPattern,
+              producer: 'dart',
+              description: 'unresolved configured reference',
+            ),
+          ),
+        );
+      final integrity = graph.integrityFor([target]);
+
+      final finding = const FindingGenerator()
+          .generate(
+            graph: graph,
+            project: _mockProject(targets: [target]),
+            graphIntegrity: integrity,
+          )
+          .single;
+
+      expect(finding.node.id, candidateId);
+      expect(finding.confidence, Confidence.review);
+      expect(finding.predicates.unreachableAcrossAllTargets, isTrue);
+      expect(finding.predicates.notRetained, isFalse);
+      expect(finding.reachableIn, isEmpty);
+      expect(finding.unreachableIn, ['default']);
+      expect(finding.retainedIn, ['default']);
+      expect(finding.auxiliaryRetainedIn, isEmpty);
+      expect(
+        finding.classificationReasons,
+        contains(ClassificationReason.retainedOnly),
+      );
+      expect(finding.proposedAction, isNull);
+      expect(identical(graph.integrityFor([target]), integrity), isTrue);
+    });
+
+    test('G4 reports auxiliary retained-only nodes as REVIEW', () {
+      final target = _target('android');
+      final runtime = AuxiliaryExecutionTarget(
+        id: 'aux:runtime:background-callback',
+        domain: AuxiliaryExecutionDomain.runtime,
+        environmentValues: const {'dart.library.io': 'true'},
+        environmentComplete: true,
+        reason: 'background callback',
+      );
+      const rootId = 'dart:app/lib/background.dart#entry';
+      const candidateId = 'dart:app/lib/background.dart#retained';
+      final graph = ReachabilityGraph()
+        ..addNode(
+          GraphNode(
+            id: rootId,
+            kind: NodeKind.declaration,
+            origin: Uri.file('/project/lib/background.dart'),
+          ),
+        )
+        ..addNode(
+          GraphNode(
+            id: candidateId,
+            kind: NodeKind.declaration,
+            origin: Uri.file('/project/lib/background.dart'),
+          ),
+        )
+        ..addAuxiliaryRoot(
+          rootId,
+          reason: 'runtime callback',
+          executionTarget: runtime,
+        )
+        ..addEdge(
+          GraphEdge(
+            from: rootId,
+            to: candidateId,
+            kind: EdgeKind.references,
+            condition: BuildCondition.forAuxiliaryTarget(runtime),
+            evidence: const Evidence(
+              kind: EvidenceKind.symbolicPattern,
+              producer: 'dart',
+              description: 'unresolved callback reference',
+            ),
+          ),
+        );
+
+      final finding = const FindingGenerator()
+          .generate(
+            graph: graph,
+            project: _mockProject(targets: [target]),
+            graphIntegrity: graph.integrityFor([target]),
+          )
+          .single;
+
+      expect(finding.node.id, candidateId);
+      expect(finding.confidence, Confidence.review);
+      expect(finding.predicates.unreachableAcrossAllTargets, isTrue);
+      expect(finding.predicates.notRetained, isFalse);
+      expect(finding.retainedIn, isEmpty);
+      expect(finding.auxiliaryRetainedIn, [runtime.id]);
+      expect(
+        finding.classificationReasons,
+        contains(ClassificationReason.retainedOnly),
+      );
+    });
+
+    test('G4 exact configured, test, and external uses suppress findings', () {
+      final target = _target('android');
+      final testTarget = AuxiliaryExecutionTarget(
+        id: 'aux:test:support-test-vm',
+        domain: AuxiliaryExecutionDomain.test,
+        environmentValues: const {'dart.library.io': 'true'},
+        environmentComplete: true,
+        reason: 'VM test',
+      );
+      final externalTarget = AuxiliaryExecutionTarget(
+        id: 'aux:external:public-api',
+        domain: AuxiliaryExecutionDomain.external,
+        environmentValues: const {},
+        environmentComplete: true,
+        reason: 'public package API',
+      );
+      const configuredId = 'dart:app/lib/configured.dart#used';
+      const testId = 'dart:app/test/support_test.dart#used';
+      const publicId = 'dart:app/lib/public_api.dart#PublicApi';
+      const unusedId = 'dart:app/lib/unused.dart#unused';
+      final graph = ReachabilityGraph()
+        ..addNode(
+          GraphNode(
+            id: configuredId,
+            kind: NodeKind.declaration,
+            origin: Uri.file('/project/lib/configured.dart'),
+          ),
+        )
+        ..addNode(
+          GraphNode(
+            id: testId,
+            kind: NodeKind.declaration,
+            origin: Uri.file('/project/test/support_test.dart'),
+          ),
+        )
+        ..addNode(
+          GraphNode(
+            id: publicId,
+            kind: NodeKind.declaration,
+            origin: Uri.file('/project/lib/public_api.dart'),
+          ),
+        )
+        ..addNode(
+          GraphNode(
+            id: unusedId,
+            kind: NodeKind.declaration,
+            origin: Uri.file('/project/lib/unused.dart'),
+          ),
+        )
+        ..addRoot(configuredId, reason: 'configured entry point')
+        ..addAuxiliaryRoot(
+          testId,
+          reason: 'test entry point',
+          executionTarget: testTarget,
+        )
+        ..addAuxiliaryRoot(
+          publicId,
+          reason: 'public package entry point',
+          executionTarget: externalTarget,
+        );
+
+      final finding = const FindingGenerator()
+          .generate(
+            graph: graph,
+            project: _mockProject(targets: [target]),
+            graphIntegrity: graph.integrityFor([target]),
+          )
+          .single;
+
+      expect(finding.node.id, unusedId);
+      expect(finding.confidence, Confidence.safe);
+      expect(finding.predicates.notRetained, isTrue);
+      expect(finding.reachableIn, isEmpty);
+      expect(finding.unreachableIn, ['default']);
+      expect(finding.retainedIn, isEmpty);
+      expect(finding.auxiliaryRetainedIn, isEmpty);
+    });
+
+    test('G4 sorts configured and auxiliary retention identities', () {
+      final zeta = BuildTarget(
+        name: 'zeta',
+        platform: 'android',
+        entrypoint: 'lib/main.dart',
+      );
+      final alpha = BuildTarget(
+        name: 'alpha',
+        platform: 'ios',
+        entrypoint: 'lib/main.dart',
+      );
+      final zetaAuxiliary = AuxiliaryExecutionTarget(
+        id: 'aux:test:zeta',
+        domain: AuxiliaryExecutionDomain.test,
+        environmentValues: const {},
+        environmentComplete: true,
+        reason: 'zeta test',
+      );
+      final alphaAuxiliary = AuxiliaryExecutionTarget(
+        id: 'aux:runtime:alpha',
+        domain: AuxiliaryExecutionDomain.runtime,
+        environmentValues: const {},
+        environmentComplete: true,
+        reason: 'alpha runtime',
+      );
+      const candidateId = 'dart:app/lib/retained.dart#retained';
+      final graph = ReachabilityGraph()
+        ..addNode(
+          GraphNode(
+            id: candidateId,
+            kind: NodeKind.declaration,
+            origin: Uri.file('/project/lib/retained.dart'),
+          ),
+        )
+        ..addAuxiliaryExecutionTarget(zetaAuxiliary)
+        ..addAuxiliaryExecutionTarget(alphaAuxiliary)
+        ..protect(candidateId, reason: 'retention canary');
+
+      final finding = const FindingGenerator()
+          .generate(
+            graph: graph,
+            project: _mockProject(targets: [zeta, alpha]),
+            graphIntegrity: graph.integrityFor([zeta, alpha]),
+          )
+          .single;
+
+      expect(finding.confidence, Confidence.protected);
+      expect(finding.unreachableIn, ['alpha', 'zeta']);
+      expect(finding.reachableIn, isEmpty);
+      expect(finding.retainedIn, ['alpha', 'zeta']);
+      expect(finding.auxiliaryRetainedIn, [
+        'aux:runtime:alpha',
+        'aux:test:zeta',
+      ]);
+      expect(finding.predicates.notRetained, isFalse);
+    });
+
+    test('G4 retention blocks the package-internal HIGH path', () {
+      const rootId = 'dart:app/lib/main.dart#main';
+      const candidateId = 'dart:app/lib/public_api.dart#PublicApi';
+      final graph = ReachabilityGraph()
+        ..addNode(
+          GraphNode(
+            id: rootId,
+            kind: NodeKind.declaration,
+            origin: Uri.file('/project/lib/main.dart'),
+          ),
+        )
+        ..addNode(
+          GraphNode(
+            id: candidateId,
+            kind: NodeKind.declaration,
+            origin: Uri.file('/project/lib/public_api.dart'),
+            metadata: const {'externallyAddressable': true},
+          ),
+        )
+        ..addRoot(rootId, reason: 'configured entry point')
+        ..addEdge(
+          const GraphEdge(
+            from: rootId,
+            to: candidateId,
+            kind: EdgeKind.references,
+            evidence: Evidence(
+              kind: EvidenceKind.symbolicPattern,
+              producer: 'dart',
+              description: 'unresolved generated consumer',
+            ),
+          ),
+        );
+      final project = _mockProject(
+        analysisMode: AnalysisMode.packageInternal,
+        rootCoverage: RootCoverage(
+          mode: RootCoverageMode.packageInternal,
+          internalBoundaryComplete: true,
+          externalConsumersCovered: false,
+          source: 'test',
+        ),
+      );
+
+      final finding = const FindingGenerator()
+          .generate(
+            graph: graph,
+            project: project,
+            graphIntegrity: graph.integrityFor(project.targets),
+          )
+          .single;
+
+      expect(finding.confidence, Confidence.review);
+      expect(finding.predicates.noPublicApiRisk, isFalse);
+      expect(finding.predicates.notRetained, isFalse);
+      expect(finding.proposedAction, isNull);
+    });
+
     test('generates SAFE finding for unreachable node with no blockers', () {
       final graph = ReachabilityGraph();
       graph.addNode(
@@ -38,7 +506,11 @@ void main() {
 
       final project = _mockProject();
       final generator = const FindingGenerator();
-      final findings = generator.generate(graph: graph, project: project);
+      final findings = generator.generate(
+        graph: graph,
+        project: project,
+        graphIntegrity: _integrity(graph, project.targets),
+      );
 
       expect(findings, hasLength(1));
       expect(findings.first.confidence, Confidence.safe);
@@ -59,12 +531,17 @@ void main() {
         final generator = const FindingGenerator();
 
         final baseline = generator
-            .generate(graph: graph, project: _mockProject())
+            .generate(
+              graph: graph,
+              project: _mockProject(),
+              graphIntegrity: _integrity(graph),
+            )
             .single;
         final custom = generator
             .generate(
               graph: graph,
               project: _mockProject(),
+              graphIntegrity: _integrity(graph),
               adapterReportDefinitions: {
                 'routes': AdapterReportDefinition(
                   adapterId: 'routes',
@@ -113,12 +590,17 @@ void main() {
       final generator = const FindingGenerator();
 
       final baseline = generator
-          .generate(graph: graph, project: _mockProject())
+          .generate(
+            graph: graph,
+            project: _mockProject(),
+            graphIntegrity: _integrity(graph),
+          )
           .single;
       final relabeled = generator
           .generate(
             graph: graph,
             project: _mockProject(),
+            graphIntegrity: _integrity(graph),
             adapterReportDefinitions: {
               'dart': AdapterReportDefinition(
                 adapterId: 'dart',
@@ -160,6 +642,7 @@ void main() {
           .generate(
             graph: graph,
             project: _mockProject(),
+            graphIntegrity: _integrity(graph),
             adapterReportDefinitions: {
               'routes': AdapterReportDefinition(
                 adapterId: 'routes',
@@ -213,7 +696,11 @@ void main() {
         );
 
       final finding = const FindingGenerator()
-          .generate(graph: graph, project: _mockProject())
+          .generate(
+            graph: graph,
+            project: _mockProject(),
+            graphIntegrity: _integrity(graph),
+          )
           .single;
 
       expect(finding.confidence, Confidence.review);
@@ -260,7 +747,11 @@ void main() {
         );
 
       final finding = const FindingGenerator()
-          .generate(graph: graph, project: _mockProject())
+          .generate(
+            graph: graph,
+            project: _mockProject(),
+            graphIntegrity: _integrity(graph),
+          )
           .single;
 
       expect(finding.node.id, candidateId);
@@ -272,7 +763,7 @@ void main() {
       );
     });
 
-    test('ignores a dangling edge outside every configured target', () {
+    test('G3 fails closed for a dangling edge with no registered context', () {
       const sourceId = 'dart:app/lib/main.dart#main';
       const candidateId = 'dart:app/lib/src/unused.dart#unusedFunction';
       final graph = ReachabilityGraph()
@@ -307,7 +798,11 @@ void main() {
         );
 
       final androidFinding = const FindingGenerator()
-          .generate(graph: graph, project: _mockProject())
+          .generate(
+            graph: graph,
+            project: _mockProject(),
+            graphIntegrity: _integrity(graph),
+          )
           .single;
       final webFinding = const FindingGenerator()
           .generate(
@@ -320,11 +815,12 @@ void main() {
                 entrypoint: 'lib/main.dart',
               ),
             ],
+            graphIntegrity: _integrity(graph, [_target('web')]),
           )
           .single;
 
-      expect(androidFinding.confidence, Confidence.safe);
-      expect(androidFinding.predicates.noDynamicBlockers, isTrue);
+      expect(androidFinding.confidence, Confidence.review);
+      expect(androidFinding.predicates.noDynamicBlockers, isFalse);
       expect(webFinding.confidence, Confidence.review);
       expect(webFinding.predicates.noDynamicBlockers, isFalse);
     });
@@ -394,12 +890,21 @@ void main() {
         final project = _mockProject(targets: [androidTarget, webTarget]);
 
         expect(
-          const FindingGenerator().generate(graph: graph, project: project),
+          const FindingGenerator().generate(
+            graph: graph,
+            project: project,
+            graphIntegrity: _integrity(graph, project.targets),
+          ),
           isEmpty,
         );
 
         final finding = const FindingGenerator()
-            .generate(graph: graph, project: project, targets: [androidTarget])
+            .generate(
+              graph: graph,
+              project: project,
+              targets: [androidTarget],
+              graphIntegrity: _integrity(graph, [androidTarget]),
+            )
             .singleWhere((finding) => finding.node.id == candidateId);
 
         expect(finding.node.id, candidateId);
@@ -413,7 +918,7 @@ void main() {
       },
     );
 
-    test('downgrades only when a misspelled root applies to a target', () {
+    test('G3 fails closed for an unattributed misspelled root', () {
       const candidateId = 'dart:app/lib/src/unused.dart#unusedFunction';
       final graph = ReachabilityGraph()
         ..addNode(
@@ -430,7 +935,11 @@ void main() {
         );
 
       final androidFinding = const FindingGenerator()
-          .generate(graph: graph, project: _mockProject())
+          .generate(
+            graph: graph,
+            project: _mockProject(),
+            graphIntegrity: _integrity(graph),
+          )
           .single;
       final webFinding = const FindingGenerator()
           .generate(
@@ -443,11 +952,12 @@ void main() {
                 entrypoint: 'lib/main.dart',
               ),
             ],
+            graphIntegrity: _integrity(graph, [_target('web')]),
           )
           .single;
 
-      expect(androidFinding.confidence, Confidence.safe);
-      expect(androidFinding.predicates.noDynamicBlockers, isTrue);
+      expect(androidFinding.confidence, Confidence.review);
+      expect(androidFinding.predicates.noDynamicBlockers, isFalse);
       expect(webFinding.confidence, Confidence.review);
       expect(webFinding.predicates.noDynamicBlockers, isFalse);
       expect(
@@ -474,7 +984,11 @@ void main() {
 
       final project = _mockProject();
       final generator = const FindingGenerator();
-      final findings = generator.generate(graph: graph, project: project);
+      final findings = generator.generate(
+        graph: graph,
+        project: project,
+        graphIntegrity: _integrity(graph, project.targets),
+      );
 
       expect(findings, hasLength(1));
       expect(findings.first.confidence, Confidence.protected);
@@ -504,7 +1018,11 @@ void main() {
 
       final project = _mockProject();
       final generator = const FindingGenerator();
-      final findings = generator.generate(graph: graph, project: project);
+      final findings = generator.generate(
+        graph: graph,
+        project: project,
+        graphIntegrity: _integrity(graph, project.targets),
+      );
 
       expect(findings, hasLength(1));
       expect(findings.first.confidence, Confidence.review);
@@ -563,7 +1081,11 @@ void main() {
           build(downstreamFirst: false),
         ]) {
           final assetFinding = const FindingGenerator()
-              .generate(graph: graph, project: _mockProject())
+              .generate(
+                graph: graph,
+                project: _mockProject(),
+                graphIntegrity: _integrity(graph),
+              )
               .singleWhere((finding) => finding.node.id == assetId);
 
           expect(assetFinding.confidence, Confidence.review);
@@ -600,7 +1122,11 @@ void main() {
           );
 
         final finding = const FindingGenerator()
-            .generate(graph: graph, project: _mockProject())
+            .generate(
+              graph: graph,
+              project: _mockProject(),
+              graphIntegrity: _integrity(graph),
+            )
             .single;
 
         expect(finding.confidence, Confidence.review);
@@ -622,7 +1148,11 @@ void main() {
 
       final project = _mockProject();
       final generator = const FindingGenerator();
-      final findings = generator.generate(graph: graph, project: project);
+      final findings = generator.generate(
+        graph: graph,
+        project: project,
+        graphIntegrity: _integrity(graph, project.targets),
+      );
 
       expect(findings, isEmpty);
     });
@@ -640,6 +1170,7 @@ void main() {
       final findings = const FindingGenerator().generate(
         graph: graph,
         project: _mockProject(),
+        graphIntegrity: _integrity(graph),
       );
 
       expect(findings, isEmpty);
@@ -688,7 +1219,11 @@ void main() {
 
       final project = _mockProject();
       final generator = const FindingGenerator();
-      final findings = generator.generate(graph: graph, project: project);
+      final findings = generator.generate(
+        graph: graph,
+        project: project,
+        graphIntegrity: _integrity(graph, project.targets),
+      );
 
       expect(findings, hasLength(3));
       expect(findings[0].confidence, Confidence.protected);
@@ -733,7 +1268,11 @@ void main() {
 
       final project = _mockProject();
       final generator = const FindingGenerator();
-      final findings = generator.generate(graph: graph, project: project);
+      final findings = generator.generate(
+        graph: graph,
+        project: project,
+        graphIntegrity: _integrity(graph, project.targets),
+      );
 
       // usedFunc is reachable, so no finding
       expect(findings, isEmpty);
@@ -775,6 +1314,7 @@ void main() {
         final findings = const FindingGenerator().generate(
           graph: graph,
           project: project,
+          graphIntegrity: _integrity(graph, project.targets),
         );
 
         expect(findings, isEmpty);
@@ -794,6 +1334,7 @@ void main() {
       final findings = const FindingGenerator().generate(
         graph: graph,
         project: _mockProject(),
+        graphIntegrity: _integrity(graph),
       );
 
       expect(findings.single.confidence, Confidence.review);
@@ -842,7 +1383,11 @@ void main() {
       );
 
       final finding = const FindingGenerator()
-          .generate(graph: graph, project: project)
+          .generate(
+            graph: graph,
+            project: project,
+            graphIntegrity: _integrity(graph, project.targets),
+          )
           .single;
 
       expect(finding.confidence, Confidence.review);
@@ -868,14 +1413,18 @@ void main() {
         );
 
       final finding = const FindingGenerator()
-          .generate(graph: graph, project: _mockProject())
+          .generate(
+            graph: graph,
+            project: _mockProject(),
+            graphIntegrity: _integrity(graph),
+          )
           .single;
 
       expect(finding.confidence, Confidence.safe);
       expect(finding.proposedAction, 'Remove empty library and stale imports');
     });
 
-    test('treats an import of a structurally empty library as stale', () {
+    test('does not report a reachable empty library', () {
       const importerId = 'dart:app/lib/main.dart';
       const emptyId = 'dart:app/lib/src/empty.dart';
       final graph = ReachabilityGraph()
@@ -910,14 +1459,72 @@ void main() {
           ),
         );
 
-      final finding = const FindingGenerator()
-          .generate(graph: graph, project: _mockProject())
-          .single;
+      expect(
+        const FindingGenerator().generate(
+          graph: graph,
+          project: _mockProject(),
+          graphIntegrity: _integrity(graph),
+        ),
+        isEmpty,
+      );
+    });
 
-      expect(finding.node.id, emptyId);
-      expect(finding.confidence, Confidence.safe);
-      expect(finding.reachableIn, isEmpty);
-      expect(finding.unreachableIn, ['default']);
+    test('does not report an empty library live in one exact target', () {
+      final android = BuildTarget(
+        name: 'android',
+        platform: 'android',
+        entrypoint: 'lib/main.dart',
+      );
+      final web = BuildTarget(
+        name: 'web',
+        platform: 'web',
+        entrypoint: 'lib/main.dart',
+      );
+      const importerId = 'dart:app/lib/main.dart';
+      const emptyId = 'dart:app/lib/src/web_empty.dart';
+      final graph = ReachabilityGraph()
+        ..addNode(
+          GraphNode(
+            id: importerId,
+            kind: NodeKind.dartLibrary,
+            origin: Uri.file('/project/lib/main.dart'),
+          ),
+        )
+        ..addNode(
+          GraphNode(
+            id: emptyId,
+            kind: NodeKind.dartLibrary,
+            origin: Uri.file('/project/lib/src/web_empty.dart'),
+            metadata: const {'declarationCount': 0, 'directiveCount': 0},
+          ),
+        )
+        ..addRoot(importerId, reason: 'entry point')
+        ..addEdge(
+          GraphEdge(
+            from: importerId,
+            to: emptyId,
+            kind: EdgeKind.imports,
+            condition: BuildCondition(exactTargets: {web}),
+            evidence: Evidence(
+              kind: EvidenceKind.semanticReference,
+              producer: 'dart',
+              description: 'target-selected import directive',
+              exact: true,
+            ),
+          ),
+        );
+      final project = _mockProject(targets: [android, web]);
+
+      expect(graph.configuredProvenFor(android), isNot(contains(emptyId)));
+      expect(graph.configuredProvenFor(web), contains(emptyId));
+      expect(
+        const FindingGenerator().generate(
+          graph: graph,
+          project: project,
+          graphIntegrity: _integrity(graph, project.targets),
+        ),
+        isEmpty,
+      );
     });
 
     test('does not ignore reachability for an import-only library', () {
@@ -958,6 +1565,7 @@ void main() {
         const FindingGenerator().generate(
           graph: graph,
           project: _mockProject(),
+          graphIntegrity: _integrity(graph),
         ),
         isEmpty,
       );
@@ -989,6 +1597,7 @@ void main() {
                 source: 'test',
               ),
             ),
+            graphIntegrity: _integrity(graph),
           )
           .single;
 
@@ -1036,6 +1645,7 @@ void main() {
             source: 'test',
           ),
         ),
+        graphIntegrity: _integrity(graph),
       );
       final byId = {for (final finding in findings) finding.node.id: finding};
 
@@ -1069,14 +1679,17 @@ ProjectContext _mockProject({
     pubspec: const {},
     analysisMode: analysisMode,
     rootCoverage: rootCoverage ?? RootCoverage.applicationApi(),
-    targets:
-        targets ??
-        [
-          BuildTarget(
-            name: 'default',
-            platform: 'android',
-            entrypoint: 'lib/main.dart',
-          ),
-        ],
+    targets: targets ?? [_target('android')],
   );
 }
+
+BuildTarget _target(String platform) => BuildTarget(
+  name: platform == 'android' ? 'default' : platform,
+  platform: platform,
+  entrypoint: 'lib/main.dart',
+);
+
+GraphIntegrity _integrity(
+  ReachabilityGraph graph, [
+  Iterable<BuildTarget>? targets,
+]) => graph.integrityFor(targets ?? [_target('android')]);

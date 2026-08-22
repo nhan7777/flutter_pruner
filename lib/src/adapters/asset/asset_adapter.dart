@@ -5,6 +5,8 @@ import '../../core/project/project_context.dart';
 import '../adapter_report_definition.dart';
 import '../analyzer_adapter.dart';
 import '../dart/dart_analysis_workspace.dart';
+import '../dart/dart_execution_reachability_service.dart';
+import '../dart/dart_package_ownership.dart';
 import 'asset_inventory.dart';
 import 'asset_reference_resolver.dart';
 
@@ -109,24 +111,36 @@ class AssetAdapter extends AnalyzerAdapter {
     GraphBuilder graph,
     AdapterServices services,
   ) async {
+    await services.dartExecutionContextService?.resolve(project);
+    final reachability = await services.dartExecutionReachabilityService
+        ?.resolve(project);
     await _analyze(
       project,
       graph,
       services.dartWorkspace ?? DartAnalysisWorkspace(project),
+      reachability: reachability,
     );
   }
 
   Future<void> _analyze(
     ProjectContext project,
     GraphBuilder graph,
-    DartAnalysisWorkspace workspace,
-  ) async {
+    DartAnalysisWorkspace workspace, {
+    DartExecutionReachabilitySnapshot? reachability,
+  }) async {
     // Phase 1: Discover all assets from pubspecs and disk
     final inventory = await AssetInventory.discover(project);
 
     // Phase 2: Resolve asset references through analyzer
-    final resolver = AssetReferenceResolver(project, inventory);
-    await resolver.analyzeProject(workspace: workspace);
+    final resolver = AssetReferenceResolver(
+      project,
+      inventory,
+      ownership: DartPackageOwnership.discover(project),
+    );
+    await resolver.analyzeProject(
+      workspace: workspace,
+      reachability: reachability,
+    );
 
     // Phase 3: Build graph nodes, edges, and blockers
     _buildGraph(project, graph, inventory, resolver);

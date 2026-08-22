@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter_pruner/src/adapters/dart/dart_analysis_workspace.dart';
+import 'package:flutter_pruner/src/adapters/dart/dart_package_ownership.dart';
 import 'package:flutter_pruner/src/adapters/l10n/arb_inventory.dart';
 import 'package:flutter_pruner/src/adapters/l10n/l10n_config.dart';
 import 'package:flutter_pruner/src/adapters/l10n/l10n_usage_resolver.dart';
@@ -37,6 +38,15 @@ void main() {
       final root = await _resolverFixture();
       addTearDown(() => root.delete(recursive: true));
       final project = await ProjectContext.load(root);
+      final owner = DartPackageOwnership.discover(
+        project,
+      ).ownerOf(p.join(root.path, 'lib', 'consumer.dart'));
+      expect(owner.ownership, DartSourceOwnership.selectedPackage);
+      expect(owner.packageName, 'l10n_test');
+      expect(
+        owner.packageRoot,
+        p.normalize(Directory(root.path).resolveSymbolicLinksSync()),
+      );
       final config = (L10nConfig.load(project) as L10nConfigValid).config;
       final inventory = ArbInventory.read(project, config);
       final workspace = DartAnalysisWorkspace(project);
@@ -575,5 +585,14 @@ Future<Directory> _copyFixture() async {
       await entity.copy(destination);
     }
   }
+  final packageConfig = File(
+    p.join(root.path, '.dart_tool', 'package_config.json'),
+  );
+  await packageConfig.parent.create(recursive: true);
+  await packageConfig.writeAsString('''
+{"configVersion":2,"packages":[
+  {"name":"l10n_test","rootUri":"../","packageUri":"lib/","languageVersion":"3.9"}
+]}
+''');
   return root;
 }

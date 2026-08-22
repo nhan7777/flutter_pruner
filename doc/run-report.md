@@ -12,10 +12,11 @@ flutter_pruner scan --project path/to/app --format json
 flutter_pruner apply --project path/to/app --report-format json
 ```
 
-A mutating `apply` that reaches a handled terminal outcome also atomically writes
-`.flutter_pruner/quarantine/<run-id>/run-report.json`. The quarantine manifest
-remains the canonical rollback ledger; the report is an observability projection
-and is never used to restore files.
+A mutating `apply` writes monotonic canonical snapshots below
+`.flutter_pruner/quarantine/<run-id>/reports/objects/`. Each authoritative
+snapshot is named `run-report-<sequence>.json` and is covered by an immutable
+commit record. The quarantine manifest remains the canonical rollback ledger;
+reports are observability projections and are never used to restore files.
 
 Schema v3 records `analysisMode`, `internalBoundaryComplete`,
 `externalConsumersCovered`, per-finding `manualRiskCodes`/`applyEligible`, and
@@ -38,15 +39,51 @@ and all other run obligations succeed. Historical or interrupted journal state
 without that marker blocks a later apply unless a verified full rollback proves
 the older run is terminal.
 
-Every completed scan and handled apply outcome writes a unique
-`<command>-<run-id>.<extension>` file below the selected project's
-`<project>/.flutter_pruner/reports/`. Self-contained HTML is the default, with a
-JSON v3 payload embedded in the report. The terminal still renders the human
-summary and highlights the resolved path after the complete result.
+Every completed scan and handled apply outcome writes a unique immutable report
+object. Managed scan output uses `.flutter_pruner/reports/objects/` with its
+authority record in `.flutter_pruner/reports/commits/`. Apply keeps monotonic
+canonical JSON objects with the quarantine and exports the selected terminal
+format separately. Self-contained HTML is the default, with a JSON v3 payload
+embedded in the report. The terminal renders the human summary and highlights
+the actual committed object path.
 `--format`/`apply --report-format` select another representation;
 `--output`/`apply --report-output` override the automatic destination. Relative
 overrides remain contained below the report directory, while absolute
-destinations remain supported.
+destinations remain supported. An exact override is single-assignment: both the
+requested path and its adjacent hidden `<name>.commit.json` authority must be
+absent. Flutter Pruner never overwrites either path.
+
+A report becomes READY only after its object bytes have been flushed, reread,
+hashed, recorded in a commit, and revalidated through retained directory and
+file capabilities. Apply canonical JSON and its external export for one state
+share one all-or-none batch commit. If export creation fails after mutation, a
+later canonical-only sequence records that failure; earlier report objects are
+never rewritten. A formatter, object, commit, close, or reachability failure may
+leave immutable orphan artifacts, but cannot produce a valid READY result for
+that incomplete batch.
+
+## Legacy JSON v2 compatibility exports
+
+Schema v2 is a compatibility format, not the default integration format. A v2
+projection is checked before an immutable report object is created. It is
+rejected when it would contain more than 250,000 blocker occurrences, more
+than 2,000,000 affected-node-ID occurrences, or more than 100,000 affected
+node IDs for any one blocker occurrence. The command returns a handled error
+and leaves an existing requested output unchanged; it never truncates the
+report or substitutes schema v3 for an explicit v2 request.
+
+For accepted projections below those fixed limits, schema v2 keeps its legacy
+compact bytes exactly, including key order, omission behavior, escaping, and
+sorted affected-node-ID arrays. New consumers should select schema v3 instead:
+it retains the deduplicated blocker registry and is not subject to the v2
+compatibility projection limits.
+
+Report persistence is append-only: it exclusively creates objects and commits
+through native retained-directory capabilities and exposes no rename, replace,
+delete, or restore operation. Existing regular files, empty files, links, and
+other occupied destinations are collisions and remain unchanged. This is not a
+sudden-power-loss durability claim: containing-directory metadata flushing is
+not yet proven on every supported filesystem.
 
 ## Interactive HTML report
 

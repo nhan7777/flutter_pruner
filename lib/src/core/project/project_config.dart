@@ -10,8 +10,37 @@ import '../../verification/verification_policy.dart';
 import '../graph/build_condition.dart';
 import 'analysis_mode.dart';
 import 'project_language_version.dart';
+import 'project_path_policy.dart';
 import 'project_source_path.dart';
 import 'target_matrix.dart';
+
+/// SDK-owned compile-time strings known for each supported build platform.
+const Map<String, Map<String, String>> dartSdkEnvironmentByPlatform = {
+  'android': dartVmSdkEnvironment,
+  'ios': dartVmSdkEnvironment,
+  'macos': dartVmSdkEnvironment,
+  'linux': dartVmSdkEnvironment,
+  'windows': dartVmSdkEnvironment,
+  'web': {
+    'dart.library.io': 'false',
+    'dart.library.html': 'true',
+    'dart.library.js_interop': 'true',
+  },
+};
+
+/// SDK-owned compile-time strings for VM/mobile/desktop targets.
+const Map<String, String> dartVmSdkEnvironment = {
+  'dart.library.io': 'true',
+  'dart.library.html': 'false',
+  'dart.library.js_interop': 'false',
+};
+
+/// Environment names whose values are owned by the Dart SDK target platform.
+const Set<String> dartSdkEnvironmentKeys = {
+  'dart.library.io',
+  'dart.library.html',
+  'dart.library.js_interop',
+};
 
 /// Validated project-local configuration used by scan and apply.
 class ProjectConfig {
@@ -43,7 +72,10 @@ class ProjectConfig {
   static Future<ProjectConfig> load(
     File file, {
     required Directory projectRoot,
+    ProjectPathPolicy? pathPolicy,
   }) async {
+    final effectivePathPolicy =
+        pathPolicy ?? ProjectPathPolicy(root: projectRoot);
     final Object? parsed;
     try {
       parsed = loadYaml(await file.readAsString());
@@ -92,6 +124,7 @@ class ProjectConfig {
       mode: mode,
       publicEntrypoints: publicEntrypoints,
       projectRoot: projectRoot,
+      pathPolicy: effectivePathPolicy,
       source: file.path,
     );
 
@@ -119,6 +152,7 @@ class ProjectConfig {
         targetsValue[index],
         index: index,
         projectRoot: projectRoot,
+        pathPolicy: effectivePathPolicy,
         sourceKind: mode == AnalysisMode.application
             ? ProjectSourceKind.applicationEntrypoint
             : ProjectSourceKind.dartFile,
@@ -145,17 +179,20 @@ class ProjectConfig {
       targets.add(target);
     }
 
-    final hasConditionalSources = _hasConditionalSources(
-      projectRoot,
-      additionalEntrypointPaths: mode == AnalysisMode.application
-          ? targets.map((target) => target.entrypoint)
-          : const [],
-    );
-    final effectiveComplete = completeValue && !hasConditionalSources;
+    final hasInadmissibleConditionalSources =
+        _hasInadmissibleConditionalSources(
+          projectRoot,
+          targets: targets,
+          additionalEntrypointPaths: mode == AnalysisMode.application
+              ? targets.map((target) => target.entrypoint)
+              : const [],
+        );
+    final effectiveComplete =
+        completeValue && !hasInadmissibleConditionalSources;
     final issues = <String>[
       if (!completeValue) 'the configuration declares a partial target matrix',
-      if (hasConditionalSources)
-        'conditional Dart imports/exports are not modelled per target',
+      if (hasInadmissibleConditionalSources)
+        'conditional Dart imports/exports contain unknown conditions or inadmissible branches',
     ];
     return ProjectConfig(
       analysisMode: mode,
@@ -214,8 +251,9 @@ class ProjectConfig {
     return VerificationPolicy(commands: List.unmodifiable(commands));
   }
 
-  static bool _hasConditionalSources(
+  static bool _hasInadmissibleConditionalSources(
     Directory projectRoot, {
+    required List<BuildTarget> targets,
     Iterable<String> additionalEntrypointPaths = const [],
   }) {
     final lib = Directory('${projectRoot.path}${Platform.pathSeparator}lib');
@@ -261,14 +299,27 @@ class ProjectConfig {
           return true;
         }
         final unit = result.unit;
-        if (unit.directives.any(
-          (directive) =>
-              (directive is ImportDirective &&
-                  directive.configurations.isNotEmpty) ||
-              (directive is ExportDirective &&
-                  directive.configurations.isNotEmpty),
-        )) {
-          return true;
+        for (final directive
+            in unit.directives.whereType<NamespaceDirective>()) {
+          if (directive.configurations.isEmpty) continue;
+          for (final configuration in directive.configurations) {
+            final name = configuration.name.toSource();
+            final knownForEveryTarget =
+                dartSdkEnvironmentKeys.contains(name) ||
+                targets.every((target) => target.dartDefines.containsKey(name));
+            if (!knownForEveryTarget) return true;
+          }
+          final alternatives = <String?>[
+            directive.uri.stringValue,
+            ...directive.configurations.map(
+              (configuration) => configuration.uri.stringValue,
+            ),
+          ];
+          if (alternatives.any(
+            (uri) => !_isAdmissibleDirectiveUri(projectRoot, sourcePath, uri),
+          )) {
+            return true;
+          }
         }
 
         // A configured entrypoint can legally import project-local Dart files
@@ -277,38 +328,47 @@ class ProjectConfig {
         // conditional import in a sibling such as shared/ would be invisible
         // and a declared-complete target matrix could authorize false SAFE.
         for (final directive in unit.directives) {
-          final uri = switch (directive) {
-            ImportDirective(:final uri) => uri.stringValue,
-            ExportDirective(:final uri) => uri.stringValue,
-            PartDirective(:final uri) => uri.stringValue,
-            _ => null,
+          final uris = switch (directive) {
+            NamespaceDirective(:final uri, :final configurations) => [
+              uri.stringValue,
+              ...configurations.map(
+                (configuration) => configuration.uri.stringValue,
+              ),
+            ],
+            PartDirective(:final uri) => [uri.stringValue],
+            _ => const <String?>[],
           };
-          if (uri == null || Uri.tryParse(uri)?.hasScheme == true) continue;
-          final referencedPath = p.normalize(
-            p.join(File(sourcePath).parent.path, uri),
-          );
-          final relativePath = p.relative(
-            referencedPath,
-            from: projectRoot.path,
-          );
-          final isProjectLocal =
-              relativePath != '..' && !relativePath.startsWith('../');
-          final isIgnored = p
-              .split(relativePath)
-              .any(
-                const {
-                  '.dart_tool',
-                  '.flutter_pruner',
-                  '.git',
-                  'build',
-                  'tool',
-                }.contains,
-              );
-          if (isProjectLocal &&
-              !isIgnored &&
-              referencedPath.endsWith('.dart') &&
-              File(referencedPath).existsSync()) {
-            pendingPaths.add(referencedPath);
+          for (final uri in uris) {
+            if (uri == null) continue;
+            final referencedPath = _localDirectivePath(
+              projectRoot,
+              sourcePath,
+              uri,
+            );
+            if (referencedPath == null) continue;
+            final relativePath = p.relative(
+              referencedPath,
+              from: projectRoot.path,
+            );
+            final isProjectLocal =
+                relativePath != '..' && !relativePath.startsWith('../');
+            final isIgnored = p
+                .split(relativePath)
+                .any(
+                  const {
+                    '.dart_tool',
+                    '.flutter_pruner',
+                    '.git',
+                    'build',
+                    'tool',
+                  }.contains,
+                );
+            if (isProjectLocal &&
+                !isIgnored &&
+                referencedPath.endsWith('.dart') &&
+                File(referencedPath).existsSync()) {
+              pendingPaths.add(referencedPath);
+            }
           }
         }
       } on ArgumentError {
@@ -321,10 +381,65 @@ class ProjectConfig {
     return false;
   }
 
+  static bool _isAdmissibleDirectiveUri(
+    Directory projectRoot,
+    String sourcePath,
+    String? value,
+  ) {
+    if (value == null || value.isEmpty) return false;
+    final uri = Uri.tryParse(value);
+    if (uri == null || uri.hasQuery || uri.hasFragment) return false;
+    if (uri.scheme == 'dart') return true;
+    final path = _localDirectivePath(projectRoot, sourcePath, value);
+    return path != null && path.endsWith('.dart') && File(path).existsSync();
+  }
+
+  static String? _localDirectivePath(
+    Directory projectRoot,
+    String sourcePath,
+    String value,
+  ) {
+    final uri = Uri.tryParse(value);
+    if (uri == null || uri.hasQuery || uri.hasFragment) return null;
+    final String path;
+    if (uri.scheme.isEmpty) {
+      path = p.normalize(
+        p.join(File(sourcePath).parent.path, uri.toFilePath()),
+      );
+    } else if (uri.scheme == 'package') {
+      if (uri.pathSegments.length < 2) return null;
+      final packageName = _projectPackageName(projectRoot);
+      if (packageName == null || uri.pathSegments.first != packageName) {
+        return null;
+      }
+      path = p.normalize(
+        p.joinAll([projectRoot.path, 'lib', ...uri.pathSegments.skip(1)]),
+      );
+    } else {
+      return null;
+    }
+    final relative = p.relative(path, from: projectRoot.path);
+    if (relative == '..' || relative.startsWith('../')) return null;
+    return path;
+  }
+
+  static String? _projectPackageName(Directory projectRoot) {
+    try {
+      final decoded = loadYaml(
+        File(p.join(projectRoot.path, 'pubspec.yaml')).readAsStringSync(),
+      );
+      final name = decoded is Map ? decoded['name'] : null;
+      return name is String && name.isNotEmpty ? name : null;
+    } on Object {
+      return null;
+    }
+  }
+
   static RootCoverage _parseRootCoverage({
     required AnalysisMode mode,
     required List<String> publicEntrypoints,
     required Directory projectRoot,
+    required ProjectPathPolicy pathPolicy,
     required String source,
   }) {
     switch (mode) {
@@ -354,6 +469,7 @@ class ProjectConfig {
                 entrypoint,
                 'analysis.public_entrypoints',
                 kind: ProjectSourceKind.publicLibrary,
+                pathPolicy: pathPolicy,
               ),
             )
             .toList(growable: false);
@@ -384,6 +500,7 @@ class ProjectConfig {
     Object? value, {
     required int index,
     required Directory projectRoot,
+    required ProjectPathPolicy pathPolicy,
     required ProjectSourceKind sourceKind,
   }) {
     final mapping = _mapping(value, 'target_matrix.targets[$index]');
@@ -412,6 +529,8 @@ class ProjectConfig {
       _requiredString(mapping['entrypoint'], 'target entrypoint'),
       'target entrypoint',
       kind: sourceKind,
+      allowGenerated: true,
+      pathPolicy: pathPolicy,
     );
     final flavorValue = mapping['flavor'];
     if (flavorValue != null && flavorValue is! String) {
@@ -432,6 +551,8 @@ class ProjectConfig {
     String relativePath,
     String field, {
     required ProjectSourceKind kind,
+    bool allowGenerated = false,
+    required ProjectPathPolicy pathPolicy,
   }) {
     try {
       return ProjectSourcePath.validate(
@@ -439,6 +560,8 @@ class ProjectConfig {
         relativePath,
         field: field,
         kind: kind,
+        allowGenerated: allowGenerated,
+        pathPolicy: pathPolicy,
       );
     } on ProjectSourcePathException catch (error) {
       throw ProjectConfigException(error.message);

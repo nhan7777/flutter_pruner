@@ -1,12 +1,20 @@
+import 'dart:io';
+
 import 'package:analyzer/dart/analysis/results.dart';
 import 'package:analyzer/dart/ast/ast.dart';
 import 'package:analyzer/dart/ast/visitor.dart';
+import 'package:analyzer/dart/element/element.dart';
+import 'package:analyzer/error/error.dart';
+import 'package:path/path.dart' as p;
 
 import '../../core/graph/evidence.dart';
 import '../../core/project/project_context.dart';
 import '../dart/analyzer_ast_compat.dart';
 import '../dart/dart_analysis_workspace.dart';
+import '../dart/dart_directive_resolver.dart';
+import '../dart/dart_execution_reachability_service.dart';
 import '../dart/dart_ids.dart';
+import '../dart/dart_package_ownership.dart';
 import 'asset_inventory.dart';
 import 'asset_sink_registry.dart';
 import 'asset_string_evaluator.dart';
@@ -15,13 +23,20 @@ import 'flutter_gen_index.dart';
 /// Resolves asset references in Dart code through semantic analysis.
 class AssetReferenceResolver {
   /// Creates a resolver for the given project and asset inventory.
-  AssetReferenceResolver(this.project, this.inventory);
+  AssetReferenceResolver(
+    this.project,
+    this.inventory, {
+    required this.ownership,
+  });
 
   /// Project context.
   final ProjectContext project;
 
   /// Asset inventory to check references against.
   final AssetInventory inventory;
+
+  /// Immutable ownership facts shared by this project analysis pass.
+  final DartPackageOwnership ownership;
 
   /// Exact asset references resolved from const strings.
   final List<ResolvedReference> exactReferences = [];
@@ -33,17 +48,36 @@ class AssetReferenceResolver {
   static const AssetSinkRegistry _sinks = AssetSinkRegistry();
 
   /// Analyzes all Dart files in the project to find asset references.
-  Future<void> analyzeProject({DartAnalysisWorkspace? workspace}) async {
+  Future<void> analyzeProject({
+    DartAnalysisWorkspace? workspace,
+    DartExecutionReachabilitySnapshot? reachability,
+  }) async {
     final analysisWorkspace = workspace ?? DartAnalysisWorkspace(project);
     final units = <String, ResolvedUnitResult>{};
 
-    for (final filePath in analysisWorkspace.dartFiles) {
+    final selectedPaths =
+        reachability?.globalUsageUnitPaths ?? analysisWorkspace.dartFiles;
+    if (reachability != null) {
+      for (final library in reachability.resolvedLibraries) {
+        for (final unit in library.units) {
+          if (selectedPaths.contains(_canonicalDartPath(unit.path))) {
+            units[_canonicalDartPath(unit.path)] = unit;
+          }
+        }
+      }
+    }
+    for (final filePath in selectedPaths) {
+      if (units.containsKey(_canonicalDartPath(filePath))) continue;
+      if (ownership.ownerOf(filePath).ownership !=
+          DartSourceOwnership.selectedPackage) {
+        continue;
+      }
       if (project.pathPolicy.shouldExclude(filePath)) continue;
       try {
         final result = await analysisWorkspace.resolveLibrary(filePath);
         if (result is ResolvedLibraryResult) {
           for (final unit in result.units) {
-            units[unit.path] = unit;
+            units[_canonicalDartPath(unit.path)] = unit;
           }
         } else if (result is! NotLibraryButPartResult) {
           blockers.add(
@@ -67,29 +101,293 @@ class AssetReferenceResolver {
       }
     }
 
-    _flutterGen.indexUnits(units.values, inventory);
+    if (reachability != null) {
+      final librariesByPath = {
+        for (final library in reachability.resolvedLibraries)
+          _canonicalDartPath(library.element.firstFragment.source.fullName):
+              library.element,
+      };
+      final externalEdges =
+          reachability.directives.edges
+              .where((edge) => _edgeSourceIsRetained(reachability, edge))
+              .where(
+                (edge) =>
+                    ownership.ownerOf(edge.targetPath).ownership ==
+                    DartSourceOwnership.externalPackage,
+              )
+              .toList()
+            ..sort((left, right) {
+              final target = left.targetPath.compareTo(right.targetPath);
+              return target != 0
+                  ? target
+                  : left.sourcePath.compareTo(right.sourcePath);
+            });
+      final inspectedTargets = <String>{};
+      final pendingExternalLibraries = <String, LibraryElement>{};
+      for (final edge in externalEdges) {
+        final targetPath = edge.targetPath;
+        if (!inspectedTargets.add(targetPath)) continue;
+        final sourceLibrary =
+            librariesByPath[_canonicalDartPath(edge.sourcePath)];
+        if (sourceLibrary == null) {
+          _blockUninspectableExternalTarget(targetPath);
+          continue;
+        }
+        try {
+          final result = await analysisWorkspace.resolveSelectedDirectiveTarget(
+            targetPath,
+            fromLibrary: sourceLibrary,
+          );
+          if (result is ResolvedLibraryResult) {
+            pendingExternalLibraries[analysisWorkspace.libraryIdentity(
+                  result.element,
+                )] =
+                result.element;
+          } else {
+            _blockUninspectableExternalTarget(targetPath);
+          }
+        } on Object {
+          _blockUninspectableExternalTarget(targetPath);
+        }
+      }
+      await _inspectExternalReachabilityClosure(
+        analysisWorkspace,
+        pendingExternalLibraries,
+      );
+      final hiddenConsumerIssue = reachability.issues
+          .where(_canHideAssetConsumer)
+          .firstOrNull;
+      if (hiddenConsumerIssue != null) {
+        blockers.add(
+          BlockerInfo(
+            reason: 'non-selected Dart source may address selected assets',
+            location: hiddenConsumerIssue,
+            affectedNamespace: 'asset:${project.packageName}/',
+            affectedNodeIds: const {},
+          ),
+        );
+      }
+    }
+
+    final boundedClosure = await analysisWorkspace.boundedClosureSnapshot();
+    for (final result in boundedClosure.libraries) {
+      for (final unit in result.units) {
+        units[_canonicalDartPath(unit.path)] = unit;
+      }
+    }
+    for (final issue in boundedClosure.issues) {
+      blockers.add(
+        BlockerInfo(
+          reason: switch (issue.kind) {
+            DartBoundedClosureIssueKind.uninspectable =>
+              'external Dart closure could not be inspected for asset references',
+            DartBoundedClosureIssueKind.conditionalDirective =>
+              'conditional external Dart closure may address selected assets',
+            DartBoundedClosureIssueKind.selectedConditionalDirective =>
+              'conditional selected Dart import/export may address selected assets',
+            DartBoundedClosureIssueKind.unknownOwnershipBoundary =>
+              'unknown Dart ownership boundary may address selected assets',
+          },
+          location: issue.location,
+          affectedNamespace: 'asset:${project.packageName}/',
+          affectedNodeIds: const {},
+        ),
+      );
+    }
+
+    _flutterGen.indexUnits(
+      units.values.where(
+        (unit) =>
+            ownership.ownerOf(unit.path).ownership ==
+            DartSourceOwnership.selectedPackage,
+      ),
+      inventory,
+    );
     final orderedUnits = units.values.toList()
       ..sort((a, b) => a.path.compareTo(b.path));
     for (final unit in orderedUnits) {
-      if (_flutterGen.isGeneratedPath(unit.path)) continue;
-      _visitUnit(unit);
+      final unitOwnership = ownership.ownerOf(unit.path).ownership;
+      if (unitOwnership == DartSourceOwnership.selectedPackage &&
+          _flutterGen.isGeneratedPath(unit.path)) {
+        continue;
+      }
+      _visitUnit(
+        unit,
+        canCreateCallerIds:
+            unitOwnership == DartSourceOwnership.selectedPackage,
+      );
     }
   }
 
-  void _visitUnit(ResolvedUnitResult unit) {
+  void _blockUninspectableExternalTarget(String targetPath) {
+    blockers.add(
+      BlockerInfo(
+        reason:
+            'execution-selected external Dart library could not be inspected for asset references',
+        location: targetPath,
+        affectedNamespace: 'asset:${project.packageName}/',
+        affectedNodeIds: const {},
+      ),
+    );
+  }
+
+  Future<void> _inspectExternalReachabilityClosure(
+    DartAnalysisWorkspace workspace,
+    Map<String, LibraryElement> pending,
+  ) async {
+    final visited = <String>{};
+    while (pending.isNotEmpty) {
+      final identity = pending.keys.reduce(
+        (left, right) => left.compareTo(right) <= 0 ? left : right,
+      );
+      final element = pending.remove(identity)!;
+      if (!visited.add(identity)) continue;
+
+      final SomeResolvedLibraryResult result;
+      try {
+        result = await workspace.resolveBoundedClosureLibrary(element);
+      } on Object {
+        workspace.recordBoundedClosureIssue(
+          library: element,
+          kind: DartBoundedClosureIssueKind.uninspectable,
+          location: element.firstFragment.source.fullName,
+        );
+        continue;
+      }
+      if (result is! ResolvedLibraryResult) {
+        workspace.recordBoundedClosureIssue(
+          library: element,
+          kind: DartBoundedClosureIssueKind.uninspectable,
+          location: element.firstFragment.source.fullName,
+        );
+        continue;
+      }
+      if (result.units.any(
+        (unit) => unit.diagnostics.any(
+          (diagnostic) =>
+              diagnostic.diagnosticCode.severity == DiagnosticSeverity.ERROR,
+        ),
+      )) {
+        workspace.recordBoundedClosureIssue(
+          library: element,
+          kind: DartBoundedClosureIssueKind.uninspectable,
+          location: element.firstFragment.source.fullName,
+        );
+      }
+      final conditionalPaths =
+          result.units
+              .where(
+                (unit) => unit.unit.directives
+                    .whereType<NamespaceDirective>()
+                    .any((directive) => directive.configurations.isNotEmpty),
+              )
+              .map((unit) => unit.path)
+              .toList()
+            ..sort();
+      if (conditionalPaths.isNotEmpty) {
+        workspace.recordBoundedClosureIssue(
+          library: element,
+          kind: DartBoundedClosureIssueKind.conditionalDirective,
+          location: conditionalPaths.first,
+        );
+      }
+
+      for (final dependency in <LibraryElement>{
+        ...result.element.firstFragment.importedLibraries,
+        ...result.element.exportedLibraries,
+      }) {
+        final source = dependency.firstFragment.source;
+        if (source.uri.isScheme('dart')) continue;
+        switch (ownership.ownerOf(source.fullName).ownership) {
+          case DartSourceOwnership.selectedPackage:
+            blockers.add(
+              BlockerInfo(
+                reason:
+                    'execution-selected external Dart closure may address selected asset consumers',
+                location: source.fullName,
+                affectedNamespace: 'asset:${project.packageName}/',
+                affectedNodeIds: const {},
+              ),
+            );
+          case DartSourceOwnership.externalPackage:
+            final dependencyIdentity = workspace.libraryIdentity(dependency);
+            if (!visited.contains(dependencyIdentity)) {
+              pending.putIfAbsent(dependencyIdentity, () => dependency);
+            }
+          case DartSourceOwnership.unknown:
+            workspace.recordUnknownOwnershipBoundary(source.fullName);
+        }
+      }
+    }
+  }
+
+  void _visitUnit(ResolvedUnitResult unit, {required bool canCreateCallerIds}) {
     final evaluator = AssetStringEvaluator(_flutterGen)..indexUnit(unit.unit);
-    final visitor = _AssetVisitor(this, unit, evaluator: evaluator);
+    final visitor = _AssetVisitor(
+      this,
+      unit,
+      evaluator: evaluator,
+      canCreateCallerIds: canCreateCallerIds,
+    );
     unit.unit.accept(visitor);
   }
 }
 
+bool _edgeSourceIsRetained(
+  DartExecutionReachabilitySnapshot reachability,
+  DartDirectiveEdge edge,
+) {
+  for (final target in edge.condition.exactTargets) {
+    if (reachability.configuredRetainedUnitPaths[target]?.contains(
+          edge.sourcePath,
+        ) ??
+        false) {
+      return true;
+    }
+  }
+  for (final target in edge.condition.exactAuxiliaryTargets) {
+    if (reachability.auxiliaryRetainedUnitPaths[target.id]?.contains(
+          edge.sourcePath,
+        ) ??
+        false) {
+      return true;
+    }
+  }
+  return false;
+}
+
+String _canonicalDartPath(String path) {
+  final absolute = p.normalize(p.absolute(path));
+  try {
+    return p.normalize(File(absolute).resolveSymbolicLinksSync());
+  } on FileSystemException {
+    return absolute;
+  }
+}
+
+bool _canHideAssetConsumer(String issue) =>
+    !issue.startsWith('test-environment-incomplete:') &&
+    !issue.startsWith('callback-environment-incomplete:') &&
+    !issue.startsWith('external-environment-incomplete:') &&
+    !issue.startsWith(
+      'conditional Dart directive environment is incomplete for this execution context:',
+    ) &&
+    issue !=
+        'conditional Dart imports/exports are incomplete for at least one execution context';
+
 /// AST visitor that finds asset-loading invocations.
 class _AssetVisitor extends RecursiveAstVisitor<void> {
-  _AssetVisitor(this.resolver, this.unit, {required this.evaluator});
+  _AssetVisitor(
+    this.resolver,
+    this.unit, {
+    required this.evaluator,
+    required this.canCreateCallerIds,
+  });
 
   final AssetReferenceResolver resolver;
   final ResolvedUnitResult unit;
   final AssetStringEvaluator evaluator;
+  final bool canCreateCallerIds;
 
   @override
   void visitSimpleIdentifier(SimpleIdentifier node) {
@@ -109,13 +407,16 @@ class _AssetVisitor extends RecursiveAstVisitor<void> {
     } else if (resolver._flutterGen.isUnresolvedGeneratedAccessor(
       node.element,
     )) {
+      final callerId = _getCallerId(node);
       resolver.blockers.add(
         BlockerInfo(
-          reason: 'FlutterGen accessor could not be mapped to a declared asset',
+          reason: callerId == null
+              ? 'non-selected Dart source may address selected assets'
+              : 'FlutterGen accessor could not be mapped to a declared asset',
           location: _formatLocation(node),
           affectedNamespace: 'asset:${resolver.project.packageName}/',
           affectedNodeIds: const {},
-          sourceNodeId: _getCallerId(node),
+          sourceNodeId: callerId,
         ),
       );
     }
@@ -210,25 +511,31 @@ class _AssetVisitor extends RecursiveAstVisitor<void> {
     AstNode context,
     Set<String> affectedNodeIds,
   ) {
+    final callerId = _getCallerId(context);
     resolver.blockers.add(
       BlockerInfo(
-        reason: 'asset reference passed to an unrecognized asset-loading API',
+        reason: callerId == null
+            ? 'non-selected Dart source can address a selected asset'
+            : 'asset reference passed to an unrecognized asset-loading API',
         location: _formatLocation(context),
         affectedNamespace: null,
         affectedNodeIds: affectedNodeIds,
-        sourceNodeId: _getCallerId(context),
+        sourceNodeId: callerId,
       ),
     );
   }
 
   void _blockUnknownAssetArgument(Expression argument, AstNode context) {
+    final callerId = _getCallerId(context);
     resolver.blockers.add(
       BlockerInfo(
-        reason: 'unrecognized asset-loading API has a non-constant path',
+        reason: callerId == null
+            ? 'non-selected Dart source may address selected assets'
+            : 'unrecognized asset-loading API has a non-constant path',
         location: _formatLocation(argument),
         affectedNamespace: 'asset:${resolver.project.packageName}/',
         affectedNodeIds: const {},
-        sourceNodeId: _getCallerId(context),
+        sourceNodeId: callerId,
       ),
     );
   }
@@ -279,39 +586,59 @@ class _AssetVisitor extends RecursiveAstVisitor<void> {
         }
       }
       if (affectedNodeIds.isEmpty) return;
+      final callerId = _getCallerId(context);
       resolver.blockers.add(
         BlockerInfo(
-          reason: 'asset path resolves to a dynamic pattern',
+          reason: callerId == null
+              ? 'non-selected Dart source may address selected assets'
+              : 'asset path resolves to a dynamic pattern',
           location: location,
-          affectedNamespace: null,
-          affectedNodeIds: affectedNodeIds,
-          sourceNodeId: _getCallerId(context),
+          affectedNamespace: callerId == null
+              ? 'asset:${resolver.project.packageName}/'
+              : null,
+          affectedNodeIds: callerId == null ? const {} : affectedNodeIds,
+          sourceNodeId: callerId,
         ),
       );
       return;
     }
 
     // Dynamic expression - scope to all assets in this package
+    final callerId = _getCallerId(context);
     resolver.blockers.add(
       BlockerInfo(
-        reason: 'asset path is a non-constant expression',
+        reason: callerId == null
+            ? 'non-selected Dart source may address selected assets'
+            : 'asset path is a non-constant expression',
         location: location,
         affectedNamespace: 'asset:${resolver.project.packageName}/',
         affectedNodeIds: {},
-        sourceNodeId: _getCallerId(context),
+        sourceNodeId: callerId,
       ),
     );
   }
 
   void _addExactReference(
     String rawLogicalKey, {
-    required String callerId,
+    required String? callerId,
     required String location,
     required EvidenceKind evidenceKind,
     required String description,
   }) {
     final logicalKey = _canonicalLogicalKey(rawLogicalKey);
-    if (!resolver.inventory.assets.containsKey(logicalKey)) return;
+    final asset = resolver.inventory.assets[logicalKey];
+    if (asset == null) return;
+    if (callerId == null) {
+      resolver.blockers.add(
+        BlockerInfo(
+          reason: 'non-selected Dart source can address a selected asset',
+          location: location,
+          affectedNamespace: null,
+          affectedNodeIds: {asset.nodeId},
+        ),
+      );
+      return;
+    }
     resolver.exactReferences.add(
       ResolvedReference(
         logicalKey: logicalKey,
@@ -339,7 +666,23 @@ class _AssetVisitor extends RecursiveAstVisitor<void> {
     return '$filePath:${location.lineNumber}:${location.columnNumber}';
   }
 
-  String _getCallerId(AstNode node) {
+  String? _getCallerId(AstNode node) {
+    if (!canCreateCallerIds) return null;
+    if (DartIds.isGeneratedProjectPath(
+      resolver.project,
+      unit.path,
+      ownership: resolver.ownership,
+    )) {
+      final libraryPath = unit.libraryElement.firstFragment.source.fullName;
+      if (p.equals(p.normalize(unit.path), p.normalize(libraryPath))) {
+        return DartIds.generatedArtifact(resolver.project, libraryPath);
+      }
+      return DartIds.library(
+        resolver.project,
+        unit.libraryElement,
+        ownership: resolver.ownership,
+      );
+    }
     AstNode? current = node.parent;
     while (current != null) {
       final fragment = switch (current) {
@@ -357,11 +700,19 @@ class _AssetVisitor extends RecursiveAstVisitor<void> {
         _ => null,
       };
       if (fragment != null) {
-        return DartIds.declaration(resolver.project, fragment);
+        return DartIds.declaration(
+          resolver.project,
+          fragment,
+          ownership: resolver.ownership,
+        );
       }
       current = current.parent;
     }
-    return DartIds.library(resolver.project, unit.libraryElement);
+    return DartIds.library(
+      resolver.project,
+      unit.libraryElement,
+      ownership: resolver.ownership,
+    );
   }
 }
 

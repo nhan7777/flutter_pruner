@@ -140,6 +140,102 @@ void main() {
   });
 
   group('reachability', () {
+    test('G1 freezes legacy reachability and retention projections', () {
+      void expectProjection(
+        ReachabilityGraph graph, {
+        required Set<String> reachable,
+        required Set<String> retained,
+        required Set<String> unreachable,
+      }) {
+        expect(graph.reachableFor(_android), reachable);
+        expect(graph.retainedFor(_android), retained);
+        expect(graph.unreachableAcrossAll([_android]), unreachable);
+      }
+
+      final transitiveCycle = ReachabilityGraph()
+        ..addNode(_node('root'))
+        ..addNode(_node('transitive'))
+        ..addNode(_node('cycle'))
+        ..addEdge(_edge('root', 'transitive'))
+        ..addEdge(_edge('transitive', 'cycle'))
+        ..addEdge(_edge('cycle', 'root'))
+        ..addRoot('root', reason: 'configured entrypoint');
+      expectProjection(
+        transitiveCycle,
+        reachable: {'root', 'transitive', 'cycle'},
+        retained: {'root', 'transitive', 'cycle'},
+        unreachable: {},
+      );
+
+      final independentRoots = ReachabilityGraph()
+        ..addNode(_node('primary_root'))
+        ..addNode(_node('independent_root'))
+        ..addRoot('primary_root', reason: 'configured entrypoint')
+        ..addRoot('independent_root', reason: 'framework entrypoint');
+      expectProjection(
+        independentRoots,
+        reachable: {'primary_root', 'independent_root'},
+        retained: {'primary_root', 'independent_root'},
+        unreachable: {},
+      );
+
+      final protectedSeed = ReachabilityGraph()
+        ..addNode(_node('protected_seed'))
+        ..addNode(_node('protected_dependency'))
+        ..addEdge(_edge('protected_seed', 'protected_dependency'))
+        ..protect('protected_seed', reason: 'framework callback');
+      // The dependency is reachable only because the protected seed retains it.
+      expectProjection(
+        protectedSeed,
+        reachable: {'protected_dependency'},
+        retained: {'protected_seed', 'protected_dependency'},
+        unreachable: {'protected_seed'},
+      );
+
+      final sourceLessBlocked = ReachabilityGraph()
+        ..addNode(_node('source_less_blocked'))
+        ..addNode(_node('source_less_dependency'))
+        ..addEdge(_edge('source_less_blocked', 'source_less_dependency'))
+        ..addBlocker(
+          Blocker(
+            producer: 'G1',
+            reason: 'source-less dynamic use',
+            affectedNodeIds: {'source_less_blocked'},
+          ),
+        );
+      expectProjection(
+        sourceLessBlocked,
+        reachable: {'source_less_dependency'},
+        retained: {'source_less_blocked', 'source_less_dependency'},
+        unreachable: {'source_less_blocked'},
+      );
+
+      final sourceScopedBlocked = ReachabilityGraph()
+        ..addNode(_node('source'))
+        ..addNode(_node('source_scoped_blocked'))
+        ..addNode(_node('source_scoped_dependency'))
+        ..addEdge(_edge('source_scoped_blocked', 'source_scoped_dependency'))
+        ..addRoot('source', reason: 'configured entrypoint')
+        ..addBlocker(
+          Blocker(
+            producer: 'G1',
+            reason: 'source-scoped dynamic use',
+            sourceNodeId: 'source',
+            affectedNodeIds: {'source_scoped_blocked'},
+          ),
+        );
+      expectProjection(
+        sourceScopedBlocked,
+        reachable: {'source', 'source_scoped_dependency'},
+        retained: {
+          'source',
+          'source_scoped_blocked',
+          'source_scoped_dependency',
+        },
+        unreachable: {'source_scoped_blocked'},
+      );
+    });
+
     test('follows a transitive chain from a root', () {
       final graph = ReachabilityGraph()
         ..addNode(_node('a'))
@@ -185,6 +281,33 @@ void main() {
   });
 
   group('conditional reachability', () {
+    test('an exact root applies only to its full configured target tuple', () {
+      final debug = BuildTarget(
+        name: 'android-debug',
+        platform: 'android',
+        flavor: 'debug',
+        entrypoint: 'lib/main.dart',
+        dartDefines: const {'MODE': 'debug'},
+      );
+      final release = BuildTarget(
+        name: 'android-release',
+        platform: 'android',
+        flavor: 'release',
+        entrypoint: 'lib/main.dart',
+        dartDefines: const {'MODE': 'release'},
+      );
+      final graph = ReachabilityGraph()
+        ..addNode(_node('debug_root'))
+        ..addRoot(
+          'debug_root',
+          reason: 'debug entrypoint',
+          condition: BuildCondition.forTarget(debug),
+        );
+
+      expect(graph.reachableFor(debug), {'debug_root'});
+      expect(graph.reachableFor(release), isEmpty);
+    });
+
     test('an edge only applies to matching platforms', () {
       final graph = ReachabilityGraph()
         ..addNode(_node('a'))
@@ -737,6 +860,366 @@ void main() {
 
       expect(graph.reachableFor(_android), equals({'root', 'first', 'second'}));
       expect(graph.retainedFor(_android), equals({'root', 'first', 'second'}));
+    });
+  });
+
+  group('G3 proven reachability and fail-closed retention', () {
+    final vmTest = AuxiliaryExecutionTarget(
+      id: 'aux:test:test/support_test.dart:vm',
+      domain: AuxiliaryExecutionDomain.test,
+      environmentValues: const {
+        'dart.library.io': 'true',
+        'dart.library.html': 'false',
+      },
+      environmentComplete: true,
+      reason: 'test is explicitly constrained to the Dart VM',
+    );
+
+    test('keeps configured and auxiliary exact closures separate', () {
+      final graph = ReachabilityGraph()
+        ..addNode(_node('app_root'))
+        ..addNode(_node('app_dependency'))
+        ..addNode(_node('test_root'))
+        ..addNode(_node('test_dependency'))
+        ..addRoot(
+          'app_root',
+          reason: 'configured entrypoint',
+          condition: BuildCondition.forTarget(_web),
+        )
+        ..addAuxiliaryRoot(
+          'test_root',
+          reason: 'VM test root',
+          executionTarget: vmTest,
+        )
+        ..addEdge(
+          GraphEdge(
+            from: 'app_root',
+            to: 'app_dependency',
+            kind: EdgeKind.references,
+            evidence: _evidence(),
+            condition: BuildCondition.forTarget(_web),
+          ),
+        )
+        ..addEdge(
+          GraphEdge(
+            from: 'test_root',
+            to: 'test_dependency',
+            kind: EdgeKind.references,
+            evidence: _evidence(),
+            condition: BuildCondition.forAuxiliaryTarget(vmTest),
+          ),
+        );
+
+      final web = graph.analyzeFor(_web);
+      expect(web.configuredProven, {'app_root', 'app_dependency'});
+      expect(web.auxiliaryProven, {'test_root', 'test_dependency'});
+      expect(web.provenReachable, {
+        'app_root',
+        'app_dependency',
+        'test_root',
+        'test_dependency',
+      });
+      expect(
+        graph.configuredProvenFor(_web),
+        isNot(contains('test_dependency')),
+      );
+      expect(graph.auxiliaryProven(), isNot(contains('app_dependency')));
+    });
+
+    test('an incomplete auxiliary context is retained-only', () {
+      final external = AuxiliaryExecutionTarget(
+        id: 'aux:external:lib/public.dart',
+        domain: AuxiliaryExecutionDomain.external,
+        environmentValues: const {},
+        environmentComplete: false,
+        reason: 'external consumer environment is open',
+      );
+      final graph = ReachabilityGraph()
+        ..addNode(_node('public_root'))
+        ..addNode(_node('public_dependency'))
+        ..addAuxiliaryRoot(
+          'public_root',
+          reason: 'external package entrypoint',
+          executionTarget: external,
+        )
+        ..addEdge(
+          GraphEdge(
+            from: 'public_root',
+            to: 'public_dependency',
+            kind: EdgeKind.references,
+            evidence: _evidence(),
+            condition: BuildCondition.forAuxiliaryTarget(external),
+          ),
+        );
+
+      final auxiliary = graph.analyzeAuxiliary();
+      expect(auxiliary.provenByExecutionTarget[external.id], isEmpty);
+      expect(auxiliary.proven, isEmpty);
+      expect(auxiliary.retainedByExecutionTarget[external.id], {
+        'public_root',
+        'public_dependency',
+      });
+      expect(auxiliary.incompleteExecutionTargetIds, contains(external.id));
+    });
+
+    test('inexact evidence and retention seeds never become proven', () {
+      final graph = ReachabilityGraph()
+        ..addNode(_node('root'))
+        ..addNode(_node('inexact'))
+        ..addNode(_node('protected'))
+        ..addNode(_node('protected_dependency'))
+        ..addNode(_node('blocked'))
+        ..addNode(_node('blocked_dependency'))
+        ..addNode(_node('source'))
+        ..addNode(_node('source_blocked'))
+        ..addNode(_node('source_blocked_dependency'))
+        ..addRoot('root', reason: 'configured entrypoint')
+        ..addRoot('source', reason: 'configured source')
+        ..protect('protected', reason: 'framework use')
+        ..addBlocker(
+          Blocker(
+            producer: 'G3',
+            reason: 'source-less dynamic use',
+            affectedNodeIds: {'blocked'},
+          ),
+        )
+        ..addBlocker(
+          Blocker(
+            producer: 'G3',
+            reason: 'source-scoped dynamic use',
+            sourceNodeId: 'source',
+            affectedNodeIds: {'source_blocked'},
+          ),
+        )
+        ..addEdge(
+          GraphEdge(
+            from: 'root',
+            to: 'inexact',
+            kind: EdgeKind.references,
+            evidence: _evidence(exact: false),
+          ),
+        )
+        ..addEdge(_edge('protected', 'protected_dependency'))
+        ..addEdge(_edge('blocked', 'blocked_dependency'))
+        ..addEdge(_edge('source_blocked', 'source_blocked_dependency'));
+
+      final analysis = graph.analyzeFor(_android);
+      expect(analysis.configuredProven, {'root', 'source'});
+      expect(analysis.configuredRetained, {
+        'root',
+        'source',
+        'inexact',
+        'protected',
+        'protected_dependency',
+        'blocked',
+        'blocked_dependency',
+        'source_blocked',
+        'source_blocked_dependency',
+      });
+      expect(analysis.provenReachable, isNot(contains('inexact')));
+      expect(analysis.retained, contains('inexact'));
+      expect(graph.reachableFor(_android), contains('inexact'));
+    });
+
+    test('duplicate edge merge keeps exact evidence in both orders', () {
+      ReachabilityGraph build({required bool exactFirst}) {
+        final exact = GraphEdge(
+          from: 'root',
+          to: 'dependency',
+          kind: EdgeKind.references,
+          evidence: _evidence(),
+        );
+        final inexact = GraphEdge(
+          from: 'root',
+          to: 'dependency',
+          kind: EdgeKind.references,
+          evidence: _evidence(exact: false),
+        );
+        final graph = ReachabilityGraph()
+          ..addNode(_node('root'))
+          ..addNode(_node('dependency'))
+          ..addRoot('root', reason: 'entrypoint');
+        graph.addEdge(exactFirst ? exact : inexact);
+        graph.addEdge(exactFirst ? inexact : exact);
+        return graph;
+      }
+
+      for (final graph in [build(exactFirst: true), build(exactFirst: false)]) {
+        expect(graph.edges, hasLength(1));
+        expect(graph.edges.single.isExact, isTrue);
+        expect(graph.configuredProvenFor(_android), contains('dependency'));
+      }
+    });
+
+    test(
+      'registry conflict preserves first definition and fails integrity',
+      () {
+        final conflicting = AuxiliaryExecutionTarget(
+          id: vmTest.id,
+          domain: AuxiliaryExecutionDomain.test,
+          environmentValues: const {'dart.library.io': 'false'},
+          environmentComplete: false,
+          reason: 'conflicting definition',
+        );
+        final graph = ReachabilityGraph()
+          ..addNode(_node('test_root'))
+          ..addAuxiliaryExecutionTarget(vmTest)
+          ..addAuxiliaryExecutionTarget(vmTest)
+          ..addAuxiliaryExecutionTarget(conflicting)
+          ..addAuxiliaryRoot(
+            'test_root',
+            reason: 'accepted root',
+            executionTarget: vmTest,
+          )
+          ..addAuxiliaryRoot(
+            'rejected_root',
+            reason: 'conflicting root',
+            executionTarget: conflicting,
+          );
+
+        expect(graph.auxiliaryExecutionTargets, [vmTest]);
+        expect(graph.auxiliaryExecutionTargetIssues, hasLength(1));
+        final issue = graph.auxiliaryExecutionTargetIssues.single;
+        expect(
+          issue.acceptedDefinitionSha256,
+          matches(RegExp(r'^[0-9a-f]{64}$')),
+        );
+        expect(
+          issue.rejectedDefinitionSha256,
+          matches(RegExp(r'^[0-9a-f]{64}$')),
+        );
+        expect(graph.auxiliaryProven(), {'test_root'});
+        expect(graph.auxiliaryProven(), isNot(contains('rejected_root')));
+        expect(graph.integrityFor([_android]).complete, isFalse);
+        expect(
+          graph.blockers.any((blocker) => blocker.producer == 'graph'),
+          isTrue,
+        );
+      },
+    );
+
+    test('integrity attributes auxiliary and unmatched dangling endpoints', () {
+      final absentAux = AuxiliaryExecutionTarget(
+        id: 'aux:test:test/absent_test.dart:vm',
+        domain: AuxiliaryExecutionDomain.test,
+        environmentValues: const {'dart.library.io': 'true'},
+        environmentComplete: true,
+        reason: 'unregistered exact context',
+      );
+      final graph = ReachabilityGraph()
+        ..addNode(_node('test_root'))
+        ..addAuxiliaryRoot(
+          'test_root',
+          reason: 'VM test root',
+          executionTarget: vmTest,
+        )
+        ..addEdge(
+          GraphEdge(
+            from: 'test_root',
+            to: 'missing_auxiliary_endpoint',
+            kind: EdgeKind.references,
+            evidence: _evidence(),
+            condition: BuildCondition.forAuxiliaryTarget(vmTest),
+          ),
+        )
+        ..addEdge(
+          GraphEdge(
+            from: 'test_root',
+            to: 'missing_unattributed_endpoint',
+            kind: EdgeKind.references,
+            evidence: _evidence(),
+            condition: BuildCondition.forAuxiliaryTarget(absentAux),
+          ),
+        );
+
+      final integrity = graph.integrityFor([_web]);
+      expect(
+        integrity.byExecutionTarget[vmTest.id]!.danglingEdges.single.to,
+        'missing_auxiliary_endpoint',
+      );
+      expect(
+        integrity.unattributedDanglingEdges.single.to,
+        'missing_unattributed_endpoint',
+      );
+      expect(integrity.danglingEdges, hasLength(2));
+      expect(integrity.complete, isFalse);
+      expect(() => integrity.byExecutionTarget.clear(), throwsUnsupportedError);
+      expect(
+        () => integrity.byExecutionTarget[vmTest.id]!.danglingEdges.clear(),
+        throwsUnsupportedError,
+      );
+
+      final canonicalTarget = BuildTarget(
+        name: 'app:web',
+        platform: 'web',
+        entrypoint: 'lib/main.dart',
+      );
+      expect(
+        ReachabilityGraph()
+            .integrityFor([canonicalTarget])
+            .byExecutionTarget
+            .keys,
+        contains('app:web'),
+      );
+      expect(
+        ReachabilityGraph()
+            .integrityFor([canonicalTarget])
+            .byExecutionTarget
+            .keys,
+        isNot(contains('app:app:web')),
+      );
+      expect(
+        () => ReachabilityGraph().integrityFor([
+          canonicalTarget,
+          BuildTarget(
+            name: 'web',
+            platform: 'web',
+            entrypoint: 'lib/main.dart',
+          ),
+        ]),
+        throwsArgumentError,
+      );
+    });
+
+    test('integrity is the final graph-owned fact preparation boundary', () {
+      final graph = ReachabilityGraph()
+        ..addNode(_node('test_root'))
+        ..addNode(_node('conditional_dependency'))
+        ..addAuxiliaryRoot(
+          'test_root',
+          reason: 'VM test root',
+          executionTarget: vmTest,
+        )
+        ..addEdge(
+          GraphEdge(
+            from: 'test_root',
+            to: 'conditional_dependency',
+            kind: EdgeKind.references,
+            evidence: _evidence(),
+            condition: BuildCondition(platforms: {'android'}),
+          ),
+        );
+      final rootsBefore = graph.rootRecords.toList();
+      final edgesBefore = graph.edges.toSet();
+
+      final integrity = graph.integrityFor([_android]);
+      final blockersAfterIntegrity = graph.blockers.toList();
+
+      expect(blockersAfterIntegrity, hasLength(1));
+      expect(integrity.complete, isFalse);
+      expect(
+        integrity.byExecutionTarget[vmTest.id]!.incompleteReasons,
+        contains('condition-applicability-unknown'),
+      );
+
+      graph
+        ..analyzeAuxiliary()
+        ..analyzeFor(_android);
+
+      expect(graph.rootRecords, rootsBefore);
+      expect(graph.edges, edgesBefore);
+      expect(graph.blockers, blockersAfterIntegrity);
+      expect(identical(graph.integrityFor([_android]), integrity), isTrue);
     });
   });
 }
