@@ -33,9 +33,10 @@ the fail-closed safety model and are covered by regression tests.
 - Diagnostic source cache: repeated machine diagnostics in one source file
   reuse file content and `LineInfo`.
 - Dart subphase profiling: `benchmark/scan_benchmark.dart --profile` records
-  cumulative file enumeration, library resolution, AST visitor, session
-  diagnostics, CLI diagnostics, and CLI-wait timings without adding overhead to
-  ordinary scans.
+  cumulative execution-context discovery, directive resolution, per-context
+  closure, graph emission, file enumeration, library resolution, AST visitor,
+  session diagnostics, CLI diagnostics, and CLI-wait timings without adding
+  stopwatch bookkeeping to ordinary scans.
 - Benchmark output redacts the analyzed project path by default. Contributors
   must opt in with `--include-project-path` for local-only troubleshooting and
   must not publish that output unchanged.

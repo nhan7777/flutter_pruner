@@ -273,7 +273,13 @@ class DartAdapter extends AnalyzerAdapter {
       externalLibraries,
     );
 
-    _emitExecutionReachability(project, graph, reachability, ownership);
+    void emitExecutionReachability() =>
+        _emitExecutionReachability(project, graph, reachability, ownership);
+    if (profile == null) {
+      emitExecutionReachability();
+    } else {
+      profile.measure('executionGraphEmission', emitExecutionReachability);
+    }
 
     _addUnresolvedReferenceBlockers(
       project,

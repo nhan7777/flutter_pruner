@@ -68,13 +68,19 @@ class ProjectAnalyzer {
         : DefaultDartExecutionContextService(workspace: dartWorkspace);
     final dartExecutionContexts = dartExecutionContextService == null
         ? null
-        : await dartExecutionContextService.resolve(project);
+        : dartProfile == null
+        ? await dartExecutionContextService.resolve(project)
+        : await dartProfile!.measureAsync(
+            'executionContextDiscovery',
+            () => dartExecutionContextService.resolve(project),
+          );
     final dartExecutionReachabilityService =
         dartWorkspace == null || dartExecutionContexts == null
         ? null
         : DefaultDartExecutionReachabilityService(
             workspace: dartWorkspace,
             contexts: dartExecutionContexts,
+            profile: dartProfile,
           );
     final services = AdapterServices(
       dartWorkspace: dartWorkspace,
