@@ -11,6 +11,10 @@ const _testRuns = <({String path, String name})>[
   ),
   (
     path: 'test/reporting/windows_report_object_backend_test.dart',
+    name: 'maps an existing directory leaf to a collision',
+  ),
+  (
+    path: 'test/reporting/windows_report_object_backend_test.dart',
     name: 'creates and rereads bytes through one retained Windows handle',
   ),
   (
@@ -19,7 +23,7 @@ const _testRuns = <({String path, String name})>[
   ),
   (
     path: 'test/reporting/windows_report_object_backend_test.dart',
-    name: 'retained parent handle denies hostile directory rename',
+    name: 'retained parent stays object-bound across hostile directory rename',
   ),
   (
     path: 'test/reporting/windows_report_object_backend_test.dart',

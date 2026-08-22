@@ -131,14 +131,9 @@ void main() {
     'retained directory capabilities prevent authority substitution',
     () async {
       await _writeValid(store);
-      if (Platform.isWindows) {
-        expect(
-          () => objectsDirectory.renameSync(
-            p.join(sandbox.path, 'moved-objects'),
-          ),
-          throwsA(isA<FileSystemException>()),
-        );
-
+      try {
+        objectsDirectory.renameSync(p.join(sandbox.path, 'moved-objects'));
+      } on FileSystemException {
         final result = await inspector.inspect(
           identity: _identity,
           expectedObjects: _expected,
@@ -149,7 +144,6 @@ void main() {
         return;
       }
 
-      objectsDirectory.renameSync(p.join(sandbox.path, 'moved-objects'));
       Directory(objectsDirectory.path).createSync();
 
       final result = await inspector.inspect(

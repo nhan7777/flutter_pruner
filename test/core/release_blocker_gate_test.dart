@@ -71,13 +71,13 @@ void main() {
         requiredTestRuns: [
           {
             'platform': 'linux',
-            'path': p.relative(testFile.path, from: root.path),
+            'path': _relativePosix(testFile.path, root.path),
             'name': 'hostile path race preserves foreign object',
           },
         ],
         requiredArtifacts: [
           {
-            'path': p.relative(artifact.path, from: root.path),
+            'path': _relativePosix(artifact.path, root.path),
             'sha256': artifactSha,
           },
         ],
@@ -98,7 +98,7 @@ void main() {
     _writeManifest(root, [
       _blocker(
         status: 'resolved',
-        evidence: [p.relative(evidence.path, from: root.path)],
+        evidence: [_relativePosix(evidence.path, root.path)],
       ),
     ]);
 
@@ -118,17 +118,17 @@ void main() {
     _writeManifest(root, [
       _blocker(
         status: 'resolved',
-        evidence: [p.relative(testFile.path, from: root.path)],
+        evidence: [_relativePosix(testFile.path, root.path)],
         requiredTestRuns: [
           {
             'platform': 'linux',
-            'path': p.relative(testFile.path, from: root.path),
+            'path': _relativePosix(testFile.path, root.path),
             'name': 'exact resolution test',
           },
         ],
         requiredArtifacts: [
           {
-            'path': p.relative(artifact.path, from: root.path),
+            'path': _relativePosix(artifact.path, root.path),
             'sha256': List.filled(64, '0').join(),
           },
         ],
@@ -168,7 +168,7 @@ void main() {
       final artifactSha = sha256.convert(artifact.readAsBytesSync()).toString();
       final requiredRun = {
         'platform': 'windows',
-        'path': p.relative(testFile.path, from: root.path),
+        'path': _relativePosix(testFile.path, root.path),
         'name': 'walks every directory suffix relative to its retained parent',
       };
       _writeManifest(root, [
@@ -177,7 +177,7 @@ void main() {
           requiredTestRuns: [requiredRun],
           requiredArtifacts: [
             {
-              'path': p.relative(artifact.path, from: root.path),
+              'path': _relativePosix(artifact.path, root.path),
               'sha256': artifactSha,
             },
           ],
@@ -285,7 +285,7 @@ void main() {
       final artifactSha = sha256.convert(artifact.readAsBytesSync()).toString();
       final requiredRun = {
         'platform': 'windows',
-        'path': p.relative(testFile.path, from: root.path),
+        'path': _relativePosix(testFile.path, root.path),
         'name': 'hostile path race preserves foreign object',
       };
       _writeManifest(root, [
@@ -294,7 +294,7 @@ void main() {
           requiredTestRuns: [requiredRun],
           requiredArtifacts: [
             {
-              'path': p.relative(artifact.path, from: root.path),
+              'path': _relativePosix(artifact.path, root.path),
               'sha256': artifactSha,
             },
           ],
@@ -362,6 +362,9 @@ void _writeManifest(Directory root, List<Map<String, Object?>> blockers) {
     p.join(root.path, 'tool', 'release_blockers.json'),
   ).writeAsStringSync(jsonEncode({'schemaVersion': 3, 'blockers': blockers}));
 }
+
+String _relativePosix(String path, String root) =>
+    p.relative(path, from: root).replaceAll(r'\', '/');
 
 Future<ProcessResult> _runVerifier(
   String verifier,

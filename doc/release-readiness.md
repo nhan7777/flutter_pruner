@@ -32,6 +32,12 @@ download the Windows evidence artifact and invoke the verifier with both
 fails closed when that exact-SHA evidence is absent. Skipped regression tests
 cannot satisfy the gate.
 
+The Windows evidence must prove object identity, not that NTFS always rejects a
+directory rename. A retained handle may remain usable after its pathname moves;
+the safe contract is that relative operations still target that retained object
+and path revalidation rejects any replacement directory. Existing regular,
+directory, and reparse leaves must all remain non-clobbering collisions.
+
 Hosted CI remains the authority for the supported Dart floor and stable Linux,
 macOS, and Windows matrix.
 

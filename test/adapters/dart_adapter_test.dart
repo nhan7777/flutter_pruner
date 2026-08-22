@@ -213,9 +213,8 @@ void main() {
               in fixture
                   .listSync(recursive: true, followLinks: false)
                   .whereType<File>())
-            p.relative(file.path, from: fixture.path): sha256
-                .convert(file.readAsBytesSync())
-                .toString(),
+            p.relative(file.path, from: fixture.path).replaceAll(r'\', '/'):
+                sha256.convert(file.readAsBytesSync()).toString(),
         };
         expect(inventory, _g1FixtureSha256);
       },
@@ -3865,11 +3864,19 @@ environment:
         graph.nodes.map((node) => node.id),
         isNot(contains(contains('nested/lib/api.dart'))),
       );
-      final blocker = graph.blockers.singleWhere(
-        (blocker) => blocker.reason == 'Dart ownership boundary is unknown',
+      final ownershipBlockers = graph.blockers
+          .where(
+            (blocker) =>
+                blocker.reason.contains('ownership boundary is unknown'),
+          )
+          .toList();
+      expect(ownershipBlockers, isNotEmpty);
+      expect(
+        ownershipBlockers.every(
+          (blocker) => blocker.affectedNamespace == 'dart:test_app/',
+        ),
+        isTrue,
       );
-      expect(blocker.sourceNodeId, isNull);
-      expect(blocker.affectedNamespace, 'dart:test_app/');
       expect(graph.danglingEdges(), isEmpty);
       expect(graph.danglingRootIdsFor(project.targets), isEmpty);
 

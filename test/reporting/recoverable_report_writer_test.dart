@@ -1395,7 +1395,7 @@ final class _Fixture {
     _FailurePoint tertiaryFailurePoint = _FailurePoint.none,
     _OwnerWriteMode ownerWriteMode = _OwnerWriteMode.success,
   }) : operations = _FakeOperations(
-         '/canonical/report.json',
+         p.join(Directory.systemTemp.path, 'fake-canonical', 'report.json'),
          ownerWriteMode: ownerWriteMode,
          failurePoints: {
            failurePoint,
@@ -1423,7 +1423,11 @@ final class _Fixture {
 
   Future<void> write(ReportSinkCallback callback) => writer.write(
     ResolvedReportDestination(
-      requestedPath: '/requested/report.json',
+      requestedPath: p.join(
+        Directory.systemTemp.path,
+        'fake-requested',
+        'report.json',
+      ),
       canonicalPath: destination,
     ),
     runId: 'run-1',

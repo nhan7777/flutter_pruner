@@ -66,6 +66,33 @@ void main() {
     },
   );
 
+  test('maps an existing directory leaf to a collision', () async {
+    final bindings = _RecordingWindowsReportBindings(
+      openRelativeFailure: const WindowsNativeFailure(
+        'create-exclusive',
+        0xc00000ba,
+        ntStatus: true,
+      ),
+    );
+    final backend = WindowsReportObjectBackend(
+      bindings: bindings,
+      canonicalPathResolver: (_) => r'C:\workspace\reports',
+    );
+    final directory = await backend.anchor(Directory('ignored'));
+
+    await expectLater(
+      directory.createExclusive('existing-directory'),
+      throwsA(
+        isA<ReportObjectBackendException>().having(
+          (error) => error.category,
+          'category',
+          ReportObjectBackendFailure.collision,
+        ),
+      ),
+    );
+    await directory.close();
+  });
+
   if (!Platform.isWindows) {
     test('Windows backend fails closed outside Windows', () {
       expect(
@@ -159,18 +186,40 @@ void main() {
     await directory.close();
   });
 
-  test('retained parent handle denies hostile directory rename', () async {
-    final directory = await backend.anchor(reportDirectory);
-    final moved = p.join(sandbox.path, 'moved');
+  test(
+    'retained parent stays object-bound across hostile directory rename',
+    () async {
+      final directory = await backend.anchor(reportDirectory);
+      final moved = p.join(sandbox.path, 'moved');
 
-    expect(
-      () => reportDirectory.renameSync(moved),
-      throwsA(isA<FileSystemException>()),
-    );
-    expect(reportDirectory.existsSync(), isTrue);
-    await directory.verifyReachable();
-    await directory.close();
-  });
+      reportDirectory.renameSync(moved);
+      Directory(reportDirectory.path).createSync();
+      await expectLater(
+        directory.verifyReachable(),
+        throwsA(
+          isA<ReportObjectBackendException>().having(
+            (error) => error.category,
+            'category',
+            ReportObjectBackendFailure.unreachableDirectory,
+          ),
+        ),
+      );
+      final object = await directory.createExclusive('anchored.json');
+      await object.write(const [8, 6, 7]);
+      await object.flush();
+      expect(File(p.join(moved, 'anchored.json')).readAsBytesSync(), const [
+        8,
+        6,
+        7,
+      ]);
+      expect(
+        File(p.join(reportDirectory.path, 'anchored.json')).existsSync(),
+        isFalse,
+      );
+      await object.close();
+      await directory.close();
+    },
+  );
 
   test('retained object handle denies pathname replacement', () async {
     final directory = await backend.anchor(reportDirectory);
@@ -227,6 +276,9 @@ void main() {
 }
 
 final class _RecordingWindowsReportBindings implements WindowsReportBindings {
+  _RecordingWindowsReportBindings({this.openRelativeFailure});
+
+  final WindowsNativeFailure? openRelativeFailure;
   final List<String> absoluteDirectoryOpens = [];
   final List<(int, String)> relativeDirectoryOpens = [];
   var _nextAddress = 1;
@@ -240,6 +292,17 @@ final class _RecordingWindowsReportBindings implements WindowsReportBindings {
   @override
   Pointer<Void> openRelativeDirectory(Pointer<Void> parent, String component) {
     relativeDirectoryOpens.add((parent.address, component));
+    return Pointer<Void>.fromAddress(_nextAddress++);
+  }
+
+  @override
+  Pointer<Void> openRelative(
+    Pointer<Void> parent,
+    String leaf, {
+    required bool create,
+  }) {
+    final failure = openRelativeFailure;
+    if (failure != null) throw failure;
     return Pointer<Void>.fromAddress(_nextAddress++);
   }
 

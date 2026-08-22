@@ -29,6 +29,10 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   native object/commit persistence. Scan and apply now reject occupied exact
   outputs without clobbering them, validate committed bytes before READY, and
   retain monotonic canonical apply evidence when a terminal export fails.
+- Corrected the Windows NTFS conformance contract exposed by hosted CI: an
+  existing directory or reparse leaf is a collision, a renamed retained
+  directory remains object-bound instead of following a replacement path, and
+  release evidence hashes use checkout-stable LF bytes on every runner.
 - Documented target-exact configured and auxiliary graph contexts, retained
   usage hard gates, nested-package ownership, generated-artifact provenance,
   and the blocked-oracle boundary for read-only natural replay evidence.

@@ -10,6 +10,8 @@ const _maximumReadLength = 16 * 1024 * 1024;
 const _statusObjectNameCollision = 0xc0000035;
 const _statusObjectNameNotFound = 0xc0000034;
 const _statusObjectPathNotFound = 0xc000003a;
+const _statusFileIsADirectory = 0xc00000ba;
+const _statusObjectTypeMismatch = 0xc0000024;
 
 /// Direct system-DLL immutable report backend for Windows NTFS.
 final class WindowsReportObjectBackend implements ReportObjectBackend {
@@ -367,7 +369,9 @@ ReportObjectBackendException _mapWindowsFailure(
   final isCollision =
       collision &&
       error.ntStatus &&
-      error.code.toUnsigned(32) == _statusObjectNameCollision;
+      (error.code.toUnsigned(32) == _statusObjectNameCollision ||
+          error.code.toUnsigned(32) == _statusFileIsADirectory ||
+          error.code.toUnsigned(32) == _statusObjectTypeMismatch);
   final status = error.code.toUnsigned(32);
   final isNotFound =
       error.ntStatus &&

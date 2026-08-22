@@ -2714,7 +2714,8 @@ void editedDuringDisplacement() {}
     final reportIndex = output.indexOf('HTML REPORT READY');
     expect(resultIndex, greaterThanOrEqualTo(0));
     expect(reportIndex, greaterThan(resultIndex));
-    expect(_withoutTerminalFormatting(output), contains(reportFile.path));
+    final reportPath = reportFile.resolveSymbolicLinksSync();
+    expect(_withoutTerminalFormatting(output), contains(reportPath));
   });
 
   test('--report-format overrides the automatic report format', () async {

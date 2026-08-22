@@ -46,7 +46,7 @@ final class ReportOutputCollisionFixture {
         );
       case ReportOutputAliasVariant.finalSymlink:
         final alias = Link(p.join(project.path, 'report-alias.json'))
-          ..createSync(source.path);
+          ..createSync(foreignSentinel.path);
         links.add(alias);
         requestedOutputPath = alias.path;
       case ReportOutputAliasVariant.intermediateSymlink:

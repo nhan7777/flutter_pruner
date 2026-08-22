@@ -1484,7 +1484,7 @@ target_matrix:
       expect(reportIndex, greaterThan(summaryIndex));
       expect(warningIndex, greaterThanOrEqualTo(0));
       expect(reportIndex, greaterThan(warningIndex));
-      expect(terminal, contains(output.path));
+      expect(terminal, contains(output.resolveSymbolicLinksSync()));
       expect(terminal, isNot(contains('Report written to')));
       expect(output.existsSync(), isTrue);
       expect(_transactionArtifacts(output), isEmpty);

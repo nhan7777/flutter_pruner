@@ -178,8 +178,12 @@ void main() {}
         ).resolve(project);
 
         final canonicalRoot = root.resolveSymbolicLinksSync();
-        Set<String> relative(Set<String> paths) =>
-            paths.map((path) => p.relative(path, from: canonicalRoot)).toSet();
+        Set<String> relative(Set<String> paths) => paths
+            .map(
+              (path) =>
+                  p.relative(path, from: canonicalRoot).replaceAll(r'\', '/'),
+            )
+            .toSet();
         final webProven = relative(snapshot.configuredProvenUnitPaths[web]!);
         final androidProven = relative(
           snapshot.configuredProvenUnitPaths[android]!,
