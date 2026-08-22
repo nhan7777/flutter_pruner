@@ -8,6 +8,7 @@ import 'package:path/path.dart' as p;
 import 'package:pub_semver/pub_semver.dart';
 
 import '../../../core/process/managed_process_runner.dart';
+import 'arb_document.dart';
 import 'l10n_evidence_failure.dart';
 
 const _environmentOverrides = <String, String>{
@@ -215,6 +216,15 @@ final class DefaultL10nToolchainResolver implements L10nToolchainResolver {
     required L10nSdkRegistry sdkRegistry,
     required L10nToolchainSelection selection,
   }) async {
+    if (Platform.isWindows) {
+      return const L10nToolchainRejected(
+        L10nEvidenceFailure(
+          code: L10nEvidenceRejectionCode.unsupportedConfiguration,
+          stage: _resolutionStage,
+          detailCode: 'windows-command-model-unsupported',
+        ),
+      );
+    }
     try {
       final workingDirectory = _validatedProjectRoot(originalProjectRoot);
       final selected = switch (selection) {
@@ -235,6 +245,7 @@ final class DefaultL10nToolchainResolver implements L10nToolchainResolver {
           executable: 'fvm',
           arguments: _delegatedProbeArgs,
           workingDirectory: workingDirectory,
+          environmentOverrides: _environmentOverrides,
           role: 'selection-probe',
         );
         if (!_sameVersion(
@@ -252,6 +263,7 @@ final class DefaultL10nToolchainResolver implements L10nToolchainResolver {
         executable: sdk.executable,
         arguments: _directProbeArgs,
         workingDirectory: workingDirectory,
+        environmentOverrides: _environmentOverrides,
         role: 'direct-probe',
       );
       if (!_sameVersion(
@@ -279,9 +291,26 @@ final class DefaultL10nToolchainResolver implements L10nToolchainResolver {
         );
       }
 
+      if (selection is ProjectSelectorSelection) {
+        _requireSelectorsStillMatch(
+          originalProjectRoot,
+          version: selected.version,
+          hashes: selected.selectorHashes,
+          detailCode: 'selector-changed-during-probe',
+        );
+      }
+      _requireSdkStillMatches(
+        selected.registeredExecutable,
+        sdk,
+        detailCode: 'canonical-sdk-changed-during-probe',
+      );
+
       final machineIdentity = directProbe.identity;
       final originalSelectionProbeSha256 = switch (selection) {
-        ProjectSelectorSelection() => _probeEvidenceSha256(delegatedProbe!),
+        ProjectSelectorSelection() => _probeEvidenceSha256(
+          delegatedProbe!,
+          _environmentOverrides,
+        ),
         RetainedEvidenceSelection() => selection.probeOutputSha256,
       };
       final identitySha256 = _toolchainIdentitySha256(
@@ -293,6 +322,9 @@ final class DefaultL10nToolchainResolver implements L10nToolchainResolver {
         originalSelectionProbeSha256: originalSelectionProbeSha256,
         delegatedProbe: delegatedProbe,
         directProbe: directProbe,
+        generationArgs: _generationArgs,
+        directProbeArgs: _directProbeArgs,
+        environmentOverrides: _environmentOverrides,
       );
 
       return L10nToolchainResolved(
@@ -325,6 +357,12 @@ final class DefaultL10nToolchainResolver implements L10nToolchainResolver {
     required Directory originalProjectRoot,
     required L10nToolchainResolved expected,
   }) async {
+    if (Platform.isWindows) {
+      return _changed('windows-command-model-unsupported');
+    }
+    if (!_validFrozenCommands(expected)) {
+      return _changed('frozen-command-drift');
+    }
     try {
       final workingDirectory = _validatedProjectRoot(originalProjectRoot);
       final expectedVersion = expected.machineIdentity.frameworkVersion;
@@ -387,6 +425,7 @@ final class DefaultL10nToolchainResolver implements L10nToolchainResolver {
             executable: 'fvm',
             arguments: _delegatedProbeArgs,
             workingDirectory: workingDirectory,
+            environmentOverrides: expected.environmentOverrides,
             role: 'selection-probe',
           );
         } on _ResolutionSignal catch (signal) {
@@ -401,8 +440,9 @@ final class DefaultL10nToolchainResolver implements L10nToolchainResolver {
       try {
         directProbe = await _probe(
           executable: sdk.executable,
-          arguments: _directProbeArgs,
+          arguments: expected.directProbeArgs,
           workingDirectory: workingDirectory,
+          environmentOverrides: expected.environmentOverrides,
           role: 'direct-probe',
         );
       } on _ResolutionSignal catch (signal) {
@@ -412,8 +452,25 @@ final class DefaultL10nToolchainResolver implements L10nToolchainResolver {
         return _changed('direct-probe-drift');
       }
 
+      if (expected.selection is ProjectSelectorSelection) {
+        _requireSelectorsStillMatch(
+          originalProjectRoot,
+          version: expectedVersion,
+          hashes: selectorHashes,
+          detailCode: 'selector-changed-during-probe',
+        );
+      }
+      _requireSdkStillMatches(
+        expected.canonicalFlutterExecutable,
+        sdk,
+        detailCode: 'canonical-sdk-changed-during-probe',
+      );
+
       final originalSelectionProbeSha256 = switch (expected.selection) {
-        ProjectSelectorSelection() => _probeEvidenceSha256(delegatedProbe!),
+        ProjectSelectorSelection() => _probeEvidenceSha256(
+          delegatedProbe!,
+          expected.environmentOverrides,
+        ),
         RetainedEvidenceSelection() => expected.originalSelectionProbeSha256,
       };
       final identitySha256 = _toolchainIdentitySha256(
@@ -425,6 +482,9 @@ final class DefaultL10nToolchainResolver implements L10nToolchainResolver {
         originalSelectionProbeSha256: originalSelectionProbeSha256,
         delegatedProbe: delegatedProbe,
         directProbe: directProbe,
+        generationArgs: expected.generationArgs,
+        directProbeArgs: expected.directProbeArgs,
+        environmentOverrides: expected.environmentOverrides,
       );
       if (identitySha256 != expected.identitySha256 ||
           originalSelectionProbeSha256 !=
@@ -464,7 +524,7 @@ final class DefaultL10nToolchainResolver implements L10nToolchainResolver {
   ) {
     if (!_validSha256(selection.evidenceSha256) ||
         !_validSha256(selection.probeOutputSha256) ||
-        !_isCompleteIdentity(selection.expectedIdentity)) {
+        !_hasStructurallyCompleteIdentity(selection.expectedIdentity)) {
       throw const _ResolutionSignal(
         code: L10nEvidenceRejectionCode.toolchainUnavailable,
         detailCode: 'retained-evidence-invalid',
@@ -495,6 +555,7 @@ final class DefaultL10nToolchainResolver implements L10nToolchainResolver {
     required String executable,
     required List<String> arguments,
     required String workingDirectory,
+    required Map<String, String> environmentOverrides,
     required String role,
   }) async {
     late final ManagedProcessResult result;
@@ -505,7 +566,7 @@ final class DefaultL10nToolchainResolver implements L10nToolchainResolver {
         workingDirectory: workingDirectory,
         timeout: _probeTimeout,
         maxOutputBytesPerStream: _maxProbeOutputBytesPerStream,
-        environmentOverrides: _environmentOverrides,
+        environmentOverrides: environmentOverrides,
         includeParentEnvironment: true,
       );
     } on ProcessTerminationUnconfirmedException {
@@ -560,6 +621,64 @@ final class DefaultL10nToolchainResolver implements L10nToolchainResolver {
   }
 }
 
+Uint8List? _readSelectorFileBytes(Directory projectRoot, String relativePath) {
+  final rootPath = p.normalize(projectRoot.absolute.path);
+  final components = p.split(relativePath);
+  var current = rootPath;
+  try {
+    for (var index = 0; index < components.length - 1; index++) {
+      current = p.join(current, components[index]);
+      final type = FileSystemEntity.typeSync(current, followLinks: false);
+      if (type == FileSystemEntityType.notFound) return null;
+      if (type == FileSystemEntityType.link) {
+        throw _ResolutionSignal(
+          code: L10nEvidenceRejectionCode.toolchainUnavailable,
+          detailCode: 'selector-path-symlink',
+          relativePath: relativePath,
+        );
+      }
+      if (type != FileSystemEntityType.directory) {
+        throw _ResolutionSignal(
+          code: L10nEvidenceRejectionCode.toolchainUnavailable,
+          detailCode: 'selector-not-regular',
+          relativePath: relativePath,
+        );
+      }
+    }
+
+    final file = File(p.join(rootPath, relativePath));
+    final type = FileSystemEntity.typeSync(file.path, followLinks: false);
+    if (type == FileSystemEntityType.notFound) return null;
+    if (type != FileSystemEntityType.file) {
+      throw _ResolutionSignal(
+        code: L10nEvidenceRejectionCode.toolchainUnavailable,
+        detailCode: 'selector-not-regular',
+        relativePath: relativePath,
+      );
+    }
+    final canonicalRoot = p.normalize(
+      Directory(rootPath).resolveSymbolicLinksSync(),
+    );
+    final canonicalFile = p.normalize(file.resolveSymbolicLinksSync());
+    if (!p.isWithin(canonicalRoot, canonicalFile)) {
+      throw _ResolutionSignal(
+        code: L10nEvidenceRejectionCode.toolchainUnavailable,
+        detailCode: 'selector-path-escape',
+        relativePath: relativePath,
+      );
+    }
+    return file.readAsBytesSync();
+  } on _ResolutionSignal {
+    rethrow;
+  } on FileSystemException {
+    throw _ResolutionSignal(
+      code: L10nEvidenceRejectionCode.toolchainUnavailable,
+      detailCode: 'selector-unreadable',
+      relativePath: relativePath,
+    );
+  }
+}
+
 _ProjectSelectors _readProjectSelectors(Directory projectRoot) {
   const supportedSelectors = <(String, String)>[
     ('.fvm/fvm_config.json', 'flutterSdkVersion'),
@@ -567,25 +686,8 @@ _ProjectSelectors _readProjectSelectors(Directory projectRoot) {
   ];
   final bytesByPath = SplayTreeMap<String, Uint8List>();
   for (final selector in supportedSelectors) {
-    final file = File(p.join(projectRoot.path, selector.$1));
-    final entityType = FileSystemEntity.typeSync(file.path, followLinks: false);
-    if (entityType == FileSystemEntityType.notFound) continue;
-    if (entityType != FileSystemEntityType.file) {
-      throw _ResolutionSignal(
-        code: L10nEvidenceRejectionCode.toolchainUnavailable,
-        detailCode: 'selector-not-regular',
-        relativePath: selector.$1,
-      );
-    }
-    try {
-      bytesByPath[selector.$1] = file.readAsBytesSync();
-    } on FileSystemException {
-      throw _ResolutionSignal(
-        code: L10nEvidenceRejectionCode.toolchainUnavailable,
-        detailCode: 'selector-unreadable',
-        relativePath: selector.$1,
-      );
-    }
+    final bytes = _readSelectorFileBytes(projectRoot, selector.$1);
+    if (bytes != null) bytesByPath[selector.$1] = bytes;
   }
   if (bytesByPath.isEmpty) {
     throw const _ResolutionSignal(
@@ -598,23 +700,26 @@ _ProjectSelectors _readProjectSelectors(Directory projectRoot) {
   for (final selector in supportedSelectors) {
     final bytes = bytesByPath[selector.$1];
     if (bytes == null) continue;
-    try {
-      final decoded = jsonDecode(utf8.decode(bytes));
-      if (decoded is! Map<String, dynamic>) throw const FormatException();
-      final rawVersion = decoded[selector.$2];
-      if (rawVersion is! String ||
-          rawVersion.isEmpty ||
-          rawVersion != rawVersion.trim()) {
-        throw const FormatException();
-      }
-      versionByPath[selector.$1] = rawVersion;
-    } on FormatException {
+    final parsed = ArbDocument.parse(bytes);
+    if (parsed is! ArbParseSuccess ||
+        parsed.document.members.length != 1 ||
+        parsed.document.members.single.decodedKey != selector.$2 ||
+        parsed.document.members.single.decodedValue is! String) {
       throw _ResolutionSignal(
         code: L10nEvidenceRejectionCode.toolchainUnavailable,
         detailCode: 'selector-shape-unknown',
         relativePath: selector.$1,
       );
     }
+    final rawVersion = parsed.document.members.single.decodedValue! as String;
+    if (rawVersion.isEmpty || rawVersion != rawVersion.trim()) {
+      throw _ResolutionSignal(
+        code: L10nEvidenceRejectionCode.toolchainUnavailable,
+        detailCode: 'selector-shape-unknown',
+        relativePath: selector.$1,
+      );
+    }
+    versionByPath[selector.$1] = rawVersion;
   }
 
   final rawVersions = versionByPath.values.toSet();
@@ -638,6 +743,53 @@ _ProjectSelectors _readProjectSelectors(Directory projectRoot) {
     hashes[entry.key] = sha256.convert(entry.value).toString();
   }
   return _ProjectSelectors(version: version, hashes: hashes);
+}
+
+void _requireSelectorsStillMatch(
+  Directory projectRoot, {
+  required Version version,
+  required Map<String, String> hashes,
+  required String detailCode,
+}) {
+  late final _ProjectSelectors current;
+  try {
+    current = _readProjectSelectors(projectRoot);
+  } on _ResolutionSignal {
+    throw _ResolutionSignal(
+      code: L10nEvidenceRejectionCode.toolchainUnavailable,
+      detailCode: detailCode,
+    );
+  }
+  if (!_sameVersion(current.version, version) ||
+      !_sameStringMap(current.hashes, hashes)) {
+    throw _ResolutionSignal(
+      code: L10nEvidenceRejectionCode.toolchainUnavailable,
+      detailCode: detailCode,
+    );
+  }
+}
+
+void _requireSdkStillMatches(
+  String registeredExecutable,
+  _CanonicalSdk expected, {
+  required String detailCode,
+}) {
+  late final _CanonicalSdk current;
+  try {
+    current = _canonicalSdkFor(registeredExecutable);
+  } on _ResolutionSignal {
+    throw _ResolutionSignal(
+      code: L10nEvidenceRejectionCode.toolchainUnavailable,
+      detailCode: detailCode,
+    );
+  }
+  if (current.executable != expected.executable ||
+      current.root != expected.root) {
+    throw _ResolutionSignal(
+      code: L10nEvidenceRejectionCode.toolchainUnavailable,
+      detailCode: detailCode,
+    );
+  }
 }
 
 String _validatedProjectRoot(Directory originalProjectRoot) {
@@ -761,6 +913,9 @@ bool _isSupportedVersion(Version version) {
 
 bool _isCompleteIdentity(FlutterMachineIdentity identity) =>
     _isSupportedVersion(identity.frameworkVersion) &&
+    _hasStructurallyCompleteIdentity(identity);
+
+bool _hasStructurallyCompleteIdentity(FlutterMachineIdentity identity) =>
     _validIdentityString(identity.frameworkRevision) &&
     _validIdentityString(identity.engineRevision) &&
     _validIdentityString(identity.dartSdkVersion);
@@ -778,6 +933,29 @@ bool _sameVersion(Version left, Version right) => left == right;
 
 bool _validSha256(String value) => RegExp(_sha256Pattern).hasMatch(value);
 
+bool _validFrozenCommands(L10nToolchainResolved expected) =>
+    _sameStringList(expected.generationArgs, _generationArgs) &&
+    _sameStringList(expected.directProbeArgs, _directProbeArgs) &&
+    _sameStringMap(expected.environmentOverrides, _environmentOverrides) &&
+    !expected.environmentOverrides.containsKey('HOME') &&
+    !expected.environmentOverrides.containsKey('PUB_CACHE');
+
+bool _sameStringList(List<String> left, List<String> right) {
+  if (left.length != right.length) return false;
+  for (var index = 0; index < left.length; index++) {
+    if (left[index] != right[index]) return false;
+  }
+  return true;
+}
+
+bool _sameStringMap(Map<String, String> left, Map<String, String> right) {
+  if (left.length != right.length) return false;
+  for (final entry in left.entries) {
+    if (right[entry.key] != entry.value) return false;
+  }
+  return true;
+}
+
 bool _sameStringSet(Iterable<String> left, Iterable<String> right) {
   final leftSet = left.toSet();
   final rightSet = right.toSet();
@@ -787,11 +965,14 @@ bool _sameStringSet(Iterable<String> left, Iterable<String> right) {
 Map<String, String> _sortedUnmodifiableMap(Map<String, String> source) =>
     Map<String, String>.unmodifiable(SplayTreeMap<String, String>.of(source));
 
-String _probeEvidenceSha256(_ProbeEvidence probe) {
+String _probeEvidenceSha256(
+  _ProbeEvidence probe,
+  Map<String, String> environmentOverrides,
+) {
   final hasher = _FramedIdentityHasher();
   hasher.addText('schema', 'l10n-selection-probe-v1');
   _addProbe(hasher, 'selection', probe);
-  _addOverrides(hasher);
+  _addOverrides(hasher, environmentOverrides);
   return hasher.digest();
 }
 
@@ -804,6 +985,9 @@ String _toolchainIdentitySha256({
   required String originalSelectionProbeSha256,
   required _ProbeEvidence? delegatedProbe,
   required _ProbeEvidence directProbe,
+  required List<String> generationArgs,
+  required List<String> directProbeArgs,
+  required Map<String, String> environmentOverrides,
 }) {
   final hasher = _FramedIdentityHasher();
   hasher.addText('schema', 'l10n-toolchain-v1');
@@ -832,13 +1016,13 @@ String _toolchainIdentitySha256({
     _addProbe(hasher, 'delegatedProbe', delegatedProbe);
   }
   _addProbe(hasher, 'directProbe', directProbe);
-  for (final argument in _generationArgs) {
+  for (final argument in generationArgs) {
     hasher.addText('generationArg', argument);
   }
-  for (final argument in _directProbeArgs) {
+  for (final argument in directProbeArgs) {
     hasher.addText('directProbeArg', argument);
   }
-  _addOverrides(hasher);
+  _addOverrides(hasher, environmentOverrides);
   _addMachineIdentity(hasher, 'machineIdentity', machineIdentity);
   return hasher.digest();
 }
@@ -857,9 +1041,12 @@ void _addProbe(
   hasher.addBytes('$prefix.stderr', probe.stderr);
 }
 
-void _addOverrides(_FramedIdentityHasher hasher) {
+void _addOverrides(
+  _FramedIdentityHasher hasher,
+  Map<String, String> environmentOverrides,
+) {
   for (final entry in SplayTreeMap<String, String>.of(
-    _environmentOverrides,
+    environmentOverrides,
   ).entries) {
     hasher.addText('environmentOverrideKey', entry.key);
     hasher.addText('environmentOverrideValue', entry.value);

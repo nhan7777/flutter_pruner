@@ -31,6 +31,7 @@ void main() {
   });
 
   group('project selector resolution', () {
+    setUp(_requirePosixResolverHost);
     test(
       'matches root .fvmrc delegation to the canonical direct probe',
       () async {
@@ -115,6 +116,29 @@ void main() {
       ]);
     });
 
+    test('resolves the exact supported 3.44.1 toolchain', () async {
+      File(
+        p.join(project.path, '.fvmrc'),
+      ).writeAsStringSync('{"flutter":"3.44.1"}\n');
+      final flutter44 = _createFlutterSdk(scratch, 'sdk-3.44.1');
+      final machineBytes = _fixtureBytes('machine/flutter_3_44_1.json');
+      final runner = _FakeProcessRunner([
+        _ProcessReply.result(_successfulProbe(machineBytes)),
+        _ProcessReply.result(_successfulProbe(machineBytes)),
+      ]);
+
+      final resolution =
+          await DefaultL10nToolchainResolver(processRunner: runner).resolve(
+            originalProjectRoot: project,
+            sdkRegistry: L10nSdkRegistry({Version(3, 44, 1): flutter44}),
+            selection: const ProjectSelectorSelection(),
+          );
+
+      final resolved = resolution as L10nToolchainResolved;
+      expect(resolved.machineIdentity.frameworkVersion, Version(3, 44, 1));
+      expect(resolved.canonicalFlutterExecutable, flutter44);
+    });
+
     test('fingerprints all agreeing supported selector files', () async {
       File(p.join(project.path, '.fvmrc'))
         ..createSync(recursive: true)
@@ -190,6 +214,78 @@ void main() {
         code: L10nEvidenceRejectionCode.toolchainUnavailable,
         detailCode: 'selector-shape-unknown',
         relativePath: '.fvmrc',
+      );
+      expect(runner.calls, isEmpty);
+    });
+
+    for (final selectorCase in [
+      ('selectors/fvmrc_extra.json', '.fvmrc'),
+      ('selectors/fvmrc_duplicate.json', '.fvmrc'),
+      ('selectors/fvm_config_extra.json', '.fvm/fvm_config.json'),
+      ('selectors/fvm_config_duplicate.json', '.fvm/fvm_config.json'),
+    ]) {
+      test('rejects non-exact selector shape ${selectorCase.$1}', () async {
+        _installFixture(project, selectorCase.$1, selectorCase.$2);
+        final runner = _FakeProcessRunner(const []);
+
+        final resolution =
+            await DefaultL10nToolchainResolver(processRunner: runner).resolve(
+              originalProjectRoot: project,
+              sdkRegistry: L10nSdkRegistry({
+                Version(3, 38, 7): flutter38,
+                Version(3, 41, 5): _createFlutterSdk(scratch, 'sdk-3.41.5'),
+              }),
+              selection: const ProjectSelectorSelection(),
+            );
+
+        _expectRejected(
+          resolution,
+          code: L10nEvidenceRejectionCode.toolchainUnavailable,
+          detailCode: 'selector-shape-unknown',
+          relativePath: selectorCase.$2,
+        );
+        expect(runner.calls, isEmpty);
+      });
+    }
+
+    test('rejects a final selector-file symlink', () async {
+      final external = File(p.join(scratch.path, 'external.fvmrc'))
+        ..writeAsBytesSync(_fixtureBytes('fvmrc/.fvmrc'));
+      Link(p.join(project.path, '.fvmrc')).createSync(external.path);
+      final runner = _FakeProcessRunner(const []);
+
+      final resolution = await _resolve38(project, flutter38, runner);
+
+      _expectRejected(
+        resolution,
+        code: L10nEvidenceRejectionCode.toolchainUnavailable,
+        detailCode: 'selector-not-regular',
+        relativePath: '.fvmrc',
+      );
+      expect(runner.calls, isEmpty);
+    });
+
+    test('rejects a symlinked .fvm selector path component', () async {
+      final externalFvm = Directory(p.join(scratch.path, 'external-fvm'))
+        ..createSync();
+      File(
+        p.join(externalFvm.path, 'fvm_config.json'),
+      ).writeAsBytesSync(_fixtureBytes('fvm_config/.fvm/fvm_config.json'));
+      Link(p.join(project.path, '.fvm')).createSync(externalFvm.path);
+      final runner = _FakeProcessRunner(const []);
+
+      final resolution =
+          await DefaultL10nToolchainResolver(processRunner: runner).resolve(
+            originalProjectRoot: project,
+            sdkRegistry: L10nSdkRegistry({Version(3, 41, 5): flutter38}),
+            selection: const ProjectSelectorSelection(),
+          );
+
+      _expectRejected(
+        resolution,
+        code: L10nEvidenceRejectionCode.toolchainUnavailable,
+        detailCode: 'selector-path-symlink',
+        relativePath: '.fvm/fvm_config.json',
       );
       expect(runner.calls, isEmpty);
     });
@@ -296,6 +392,7 @@ void main() {
   });
 
   group('probe failure handling', () {
+    setUp(_requirePosixResolverHost);
     setUp(() {
       _installFixture(project, 'fvmrc/.fvmrc', '.fvmrc');
     });
@@ -405,6 +502,7 @@ void main() {
   });
 
   group('retained evidence selection', () {
+    setUp(_requirePosixResolverHost);
     test(
       'binds valid source/probe hashes and probes only the registry binary',
       () async {
@@ -516,9 +614,45 @@ void main() {
         detailCode: 'retained-identity-mismatch',
       );
     });
+
+    for (final version in [
+      Version(3, 45, 0),
+      Version.parse('3.41.5-dev.1'),
+      Version.parse('3.41.5+forged'),
+    ]) {
+      test('classifies retained version $version as unsupported', () async {
+        final runner = _FakeProcessRunner(const []);
+
+        final resolution =
+            await DefaultL10nToolchainResolver(processRunner: runner).resolve(
+              originalProjectRoot: project,
+              sdkRegistry: L10nSdkRegistry(const {}),
+              selection: RetainedEvidenceSelection(
+                expectedIdentity: FlutterMachineIdentity(
+                  frameworkVersion: version,
+                  frameworkRevision: 'framework-retained',
+                  engineRevision: 'engine-retained',
+                  dartSdkVersion: 'dart-retained',
+                ),
+                evidenceSha256:
+                    'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+                probeOutputSha256:
+                    'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+              ),
+            );
+
+        _expectRejected(
+          resolution,
+          code: L10nEvidenceRejectionCode.unsupportedConfiguration,
+          detailCode: 'unsupported-version',
+        );
+        expect(runner.calls, isEmpty);
+      });
+    }
   });
 
   group('identity and immutability', () {
+    setUp(_requirePosixResolverHost);
     test('is stable across caller registry map order', () async {
       _installFixture(project, 'fvmrc/.fvmrc', '.fvmrc');
       final flutter41 = _createFlutterSdk(scratch, 'sdk-3.41.5');
@@ -638,7 +772,134 @@ void main() {
     });
   });
 
+  group('within-probe temporal drift', () {
+    setUp(_requirePosixResolverHost);
+    setUp(() {
+      _installFixture(project, 'fvmrc/.fvmrc', '.fvmrc');
+    });
+
+    test('resolve rejects selector mutation during delegated probe', () async {
+      final stable = _fixtureBytes('machine/flutter_3_38_7.json');
+      final runner = _FakeProcessRunner([
+        _ProcessReply.result(
+          _successfulProbe(stable),
+          beforeReturn: () {
+            File(
+              p.join(project.path, '.fvmrc'),
+            ).writeAsStringSync('{ "flutter": "3.38.7" }\n');
+          },
+        ),
+        _ProcessReply.result(_successfulProbe(stable)),
+      ]);
+
+      final resolution = await _resolve38(project, flutter38, runner);
+
+      _expectRejected(
+        resolution,
+        code: L10nEvidenceRejectionCode.toolchainUnavailable,
+        detailCode: 'selector-changed-during-probe',
+      );
+    });
+
+    test(
+      'resolve rejects SDK structure deletion during direct probe',
+      () async {
+        final stable = _fixtureBytes('machine/flutter_3_38_7.json');
+        final bundledDart = File(
+          p.join(
+            p.dirname(p.dirname(flutter38)),
+            'bin',
+            'cache',
+            'dart-sdk',
+            'bin',
+            _bundledDartName,
+          ),
+        );
+        final runner = _FakeProcessRunner([
+          _ProcessReply.result(_successfulProbe(stable)),
+          _ProcessReply.result(
+            _successfulProbe(stable),
+            beforeReturn: bundledDart.deleteSync,
+          ),
+        ]);
+
+        final resolution = await _resolve38(project, flutter38, runner);
+
+        _expectRejected(
+          resolution,
+          code: L10nEvidenceRejectionCode.toolchainUnavailable,
+          detailCode: 'canonical-sdk-changed-during-probe',
+        );
+      },
+    );
+
+    test(
+      'revalidate rejects selector mutation during delegated probe',
+      () async {
+        final stable = _fixtureBytes('machine/flutter_3_38_7.json');
+        final runner = _FakeProcessRunner([
+          _ProcessReply.result(_successfulProbe(stable)),
+          _ProcessReply.result(_successfulProbe(stable)),
+          _ProcessReply.result(
+            _successfulProbe(stable),
+            beforeReturn: () {
+              File(
+                p.join(project.path, '.fvmrc'),
+              ).writeAsStringSync('{ "flutter": "3.38.7" }\n');
+            },
+          ),
+          _ProcessReply.result(_successfulProbe(stable)),
+        ]);
+        final resolver = DefaultL10nToolchainResolver(processRunner: runner);
+        final expected = await _resolved38(project, flutter38, resolver);
+
+        final result = await resolver.revalidate(
+          originalProjectRoot: project,
+          expected: expected,
+        );
+
+        _expectChanged(result, detailCode: 'selector-changed-during-probe');
+      },
+    );
+
+    test(
+      'revalidate rejects canonical executable replacement during direct probe',
+      () async {
+        final stable = _fixtureBytes('machine/flutter_3_38_7.json');
+        final replacementFlutter = _createFlutterSdk(
+          scratch,
+          'replacement-sdk-3.38.7',
+        );
+        final runner = _FakeProcessRunner([
+          _ProcessReply.result(_successfulProbe(stable)),
+          _ProcessReply.result(_successfulProbe(stable)),
+          _ProcessReply.result(_successfulProbe(stable)),
+          _ProcessReply.result(
+            _successfulProbe(stable),
+            beforeReturn: () {
+              File(flutter38).deleteSync();
+              Link(flutter38).createSync(replacementFlutter);
+            },
+          ),
+        ]);
+        final resolver = DefaultL10nToolchainResolver(processRunner: runner);
+        final expected = await _resolved38(project, flutter38, resolver);
+
+        final result = await resolver.revalidate(
+          originalProjectRoot: project,
+          expected: expected,
+        );
+
+        _expectChanged(
+          result,
+          detailCode: 'canonical-sdk-changed-during-probe',
+        );
+      },
+    );
+  });
+
   group('revalidation', () {
+    setUp(_requirePosixResolverHost);
     setUp(() {
       _installFixture(project, 'fvmrc/.fvmrc', '.fvmrc');
     });
@@ -667,6 +928,131 @@ void main() {
         expect(runner.calls, hasLength(4));
       },
     );
+
+    for (final forgery in [
+      'generation argv',
+      'direct probe argv',
+      'HOME override',
+      'PUB_CACHE override',
+      'missing locale override',
+    ]) {
+      test('rejects forged frozen $forgery with copied identity', () async {
+        final stable = _fixtureBytes('machine/flutter_3_38_7.json');
+        final runner = _FakeProcessRunner([
+          for (var index = 0; index < 4; index++)
+            _ProcessReply.result(_successfulProbe(stable)),
+        ]);
+        final resolver = DefaultL10nToolchainResolver(processRunner: runner);
+        final expected = await _resolved38(project, flutter38, resolver);
+        final forged = switch (forgery) {
+          'generation argv' => _copyResolved(
+            expected,
+            generationArgs: ['gen-l10n', '--synthetic-package'],
+          ),
+          'direct probe argv' => _copyResolved(
+            expected,
+            directProbeArgs: ['--machine', '--version'],
+          ),
+          'HOME override' => _copyResolved(
+            expected,
+            environmentOverrides: {
+              ...expected.environmentOverrides,
+              'HOME': '/forged/home',
+            },
+          ),
+          'PUB_CACHE override' => _copyResolved(
+            expected,
+            environmentOverrides: {
+              ...expected.environmentOverrides,
+              'PUB_CACHE': '/forged/cache',
+            },
+          ),
+          'missing locale override' => _copyResolved(
+            expected,
+            environmentOverrides: {
+              for (final entry in expected.environmentOverrides.entries)
+                if (entry.key != 'LC_ALL') entry.key: entry.value,
+            },
+          ),
+          _ => throw StateError('Unhandled forgery case.'),
+        };
+
+        final result = await resolver.revalidate(
+          originalProjectRoot: project,
+          expected: forged,
+        );
+
+        _expectChanged(result, detailCode: 'frozen-command-drift');
+        expect(runner.calls, hasLength(2));
+      });
+    }
+
+    test('revalidates unchanged retained evidence without selectors', () async {
+      final stable = _fixtureBytes('machine/flutter_3_41_5.json');
+      final flutter41 = _createFlutterSdk(scratch, 'sdk-3.41.5');
+      final runner = _FakeProcessRunner([
+        _ProcessReply.result(_successfulProbe(stable)),
+        _ProcessReply.result(_successfulProbe(stable)),
+      ]);
+      final resolver = DefaultL10nToolchainResolver(processRunner: runner);
+      final resolution = await resolver.resolve(
+        originalProjectRoot: project,
+        sdkRegistry: L10nSdkRegistry({Version(3, 41, 5): flutter41}),
+        selection: RetainedEvidenceSelection(
+          expectedIdentity: _identity41,
+          evidenceSha256:
+              'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+          probeOutputSha256:
+              'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+        ),
+      );
+
+      final result = await resolver.revalidate(
+        originalProjectRoot: project,
+        expected: resolution as L10nToolchainResolved,
+      );
+
+      expect(result, isA<L10nToolchainStillMatches>());
+      expect(runner.calls, hasLength(2));
+      expect(
+        runner.calls.every((call) => call.executable == flutter41),
+        isTrue,
+      );
+    });
+
+    test('detects retained direct identity drift', () async {
+      final stable = _fixtureBytes('machine/flutter_3_41_5.json');
+      final changed = _machineBytes(
+        version: '3.41.5',
+        frameworkRevision: 'framework-3.41.5',
+        engineRevision: 'changed-retained-engine',
+        dartSdkVersion: '3.11.3',
+      );
+      final flutter41 = _createFlutterSdk(scratch, 'sdk-3.41.5');
+      final runner = _FakeProcessRunner([
+        _ProcessReply.result(_successfulProbe(stable)),
+        _ProcessReply.result(_successfulProbe(changed)),
+      ]);
+      final resolver = DefaultL10nToolchainResolver(processRunner: runner);
+      final resolution = await resolver.resolve(
+        originalProjectRoot: project,
+        sdkRegistry: L10nSdkRegistry({Version(3, 41, 5): flutter41}),
+        selection: RetainedEvidenceSelection(
+          expectedIdentity: _identity41,
+          evidenceSha256:
+              'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+          probeOutputSha256:
+              'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+        ),
+      );
+
+      final result = await resolver.revalidate(
+        originalProjectRoot: project,
+        expected: resolution as L10nToolchainResolved,
+      );
+
+      _expectChanged(result, detailCode: 'direct-probe-drift');
+    });
 
     test('detects selector byte mutation before another probe', () async {
       final machineBytes = _fixtureBytes('machine/flutter_3_38_7.json');
@@ -807,6 +1193,55 @@ void main() {
       },
     );
   });
+
+  test(
+    'Windows host rejects argv-only Flutter evidence and revalidation',
+    () async {
+      final runner = _FakeProcessRunner(const []);
+      final resolver = DefaultL10nToolchainResolver(processRunner: runner);
+      final resolution = await resolver.resolve(
+        originalProjectRoot: project,
+        sdkRegistry: L10nSdkRegistry({Version(3, 38, 7): flutter38}),
+        selection: const ProjectSelectorSelection(),
+      );
+
+      _expectRejected(
+        resolution,
+        code: L10nEvidenceRejectionCode.unsupportedConfiguration,
+        detailCode: 'windows-command-model-unsupported',
+      );
+
+      final revalidation = await resolver.revalidate(
+        originalProjectRoot: project,
+        expected: L10nToolchainResolved(
+          canonicalFlutterExecutable: flutter38,
+          canonicalSdkRoot: p.dirname(p.dirname(flutter38)),
+          selection: const ProjectSelectorSelection(),
+          generationArgs: const ['gen-l10n'],
+          directProbeArgs: const ['--version', '--machine'],
+          environmentOverrides: _environmentOverrides,
+          selectorHashesByRelativePath: const {},
+          machineIdentity: FlutterMachineIdentity(
+            frameworkVersion: Version(3, 38, 7),
+            frameworkRevision: 'framework-3.38.7',
+            engineRevision: 'engine-3.38.7',
+            dartSdkVersion: '3.10.7',
+          ),
+          originalSelectionProbeSha256:
+              'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+          identitySha256:
+              'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+        ),
+      );
+
+      _expectChanged(
+        revalidation,
+        detailCode: 'windows-command-model-unsupported',
+      );
+      expect(runner.calls, isEmpty);
+    },
+    skip: Platform.isWindows ? false : 'Windows-host assertion',
+  );
 }
 
 final _identity41 = FlutterMachineIdentity(
@@ -817,6 +1252,12 @@ final _identity41 = FlutterMachineIdentity(
 );
 
 final _sha256Pattern = RegExp(r'^[0-9a-f]{64}$');
+
+void _requirePosixResolverHost() {
+  if (Platform.isWindows) {
+    markTestSkipped('POSIX resolver contract');
+  }
+}
 
 Future<L10nToolchainResolution> _resolve38(
   Directory project,
@@ -841,6 +1282,24 @@ Future<L10nToolchainResolved> _resolved38(
   );
   return result as L10nToolchainResolved;
 }
+
+L10nToolchainResolved _copyResolved(
+  L10nToolchainResolved source, {
+  List<String>? generationArgs,
+  List<String>? directProbeArgs,
+  Map<String, String>? environmentOverrides,
+}) => L10nToolchainResolved(
+  canonicalFlutterExecutable: source.canonicalFlutterExecutable,
+  canonicalSdkRoot: source.canonicalSdkRoot,
+  selection: source.selection,
+  generationArgs: generationArgs ?? source.generationArgs,
+  directProbeArgs: directProbeArgs ?? source.directProbeArgs,
+  environmentOverrides: environmentOverrides ?? source.environmentOverrides,
+  selectorHashesByRelativePath: source.selectorHashesByRelativePath,
+  machineIdentity: source.machineIdentity,
+  originalSelectionProbeSha256: source.originalSelectionProbeSha256,
+  identitySha256: source.identitySha256,
+);
 
 void _expectRejected(
   L10nToolchainResolution resolution, {
@@ -999,6 +1458,7 @@ final class _FakeProcessRunner implements ProcessExecutionRunner {
     );
     if (_replies.isEmpty) throw StateError('Unexpected process call.');
     final reply = _replies.removeAt(0);
+    reply.beforeReturn?.call();
     if (reply.error case final error?) throw error;
     return reply.result!;
   }
@@ -1025,10 +1485,11 @@ final class _ProcessCall {
 }
 
 final class _ProcessReply {
-  const _ProcessReply.result(this.result) : error = null;
+  const _ProcessReply.result(this.result, {this.beforeReturn}) : error = null;
 
-  const _ProcessReply.error(this.error) : result = null;
+  const _ProcessReply.error(this.error) : result = null, beforeReturn = null;
 
   final ManagedProcessResult? result;
   final Exception? error;
+  final void Function()? beforeReturn;
 }
