@@ -501,6 +501,69 @@ void main() {
     });
   });
 
+  group('launch artifact validation', () {
+    setUp(_requirePosixResolverHost);
+    setUp(() {
+      _installFixture(project, 'fvmrc/.fvmrc', '.fvmrc');
+    });
+
+    test('rejects a symlinked Flutter tools snapshot before probing', () async {
+      final snapshot = _sdkArtifact(
+        flutter38,
+        'bin/cache/flutter_tools.snapshot',
+      );
+      final target = File(p.join(scratch.path, 'outside.snapshot'))
+        ..writeAsStringSync('outside snapshot\n');
+      snapshot.deleteSync();
+      Link(snapshot.path).createSync(target.path);
+      final runner = _FakeProcessRunner(const []);
+
+      final resolution = await _resolve38(project, flutter38, runner);
+
+      _expectRejected(
+        resolution,
+        code: L10nEvidenceRejectionCode.toolchainUnavailable,
+        detailCode: 'registry-sdk-structure-invalid',
+      );
+      expect(runner.calls, isEmpty);
+    });
+
+    test('rejects a non-regular shared launch script before probing', () async {
+      final shared = _sdkArtifact(flutter38, 'bin/internal/shared.sh');
+      shared.deleteSync();
+      Directory(shared.path).createSync();
+      final runner = _FakeProcessRunner(const []);
+
+      final resolution = await _resolve38(project, flutter38, runner);
+
+      _expectRejected(
+        resolution,
+        code: L10nEvidenceRejectionCode.toolchainUnavailable,
+        detailCode: 'registry-sdk-structure-invalid',
+      );
+      expect(runner.calls, isEmpty);
+    });
+
+    test('rejects an unreadable launch artifact before probing', () async {
+      final snapshot = _sdkArtifact(
+        flutter38,
+        'bin/cache/flutter_tools.snapshot',
+      );
+      final chmod = Process.runSync('chmod', ['000', snapshot.path]);
+      expect(chmod.exitCode, 0);
+      final runner = _FakeProcessRunner(const []);
+
+      final resolution = await _resolve38(project, flutter38, runner);
+
+      _expectRejected(
+        resolution,
+        code: L10nEvidenceRejectionCode.toolchainUnavailable,
+        detailCode: 'registry-sdk-artifact-unreadable',
+      );
+      expect(runner.calls, isEmpty);
+    });
+  });
+
   group('retained evidence selection', () {
     setUp(_requirePosixResolverHost);
     test(
@@ -834,6 +897,60 @@ void main() {
     );
 
     test(
+      'resolve rejects same-realpath Flutter overwrite during direct probe',
+      () async {
+        final stable = _fixtureBytes('machine/flutter_3_38_7.json');
+        final runner = _FakeProcessRunner([
+          _ProcessReply.result(_successfulProbe(stable)),
+          _ProcessReply.result(
+            _successfulProbe(stable),
+            beforeReturn: () {
+              final flutter = File(flutter38)
+                ..writeAsStringSync('overwritten flutter\n');
+              _makeExecutable(flutter);
+            },
+          ),
+        ]);
+
+        final resolution = await _resolve38(project, flutter38, runner);
+
+        _expectRejected(
+          resolution,
+          code: L10nEvidenceRejectionCode.toolchainUnavailable,
+          detailCode: 'canonical-sdk-changed-during-probe',
+        );
+      },
+    );
+
+    test(
+      'resolve rejects same-realpath snapshot overwrite during direct probe',
+      () async {
+        final stable = _fixtureBytes('machine/flutter_3_38_7.json');
+        final snapshot = _sdkArtifact(
+          flutter38,
+          'bin/cache/flutter_tools.snapshot',
+        );
+        final runner = _FakeProcessRunner([
+          _ProcessReply.result(_successfulProbe(stable)),
+          _ProcessReply.result(
+            _successfulProbe(stable),
+            beforeReturn: () {
+              snapshot.writeAsStringSync('overwritten snapshot\n');
+            },
+          ),
+        ]);
+
+        final resolution = await _resolve38(project, flutter38, runner);
+
+        _expectRejected(
+          resolution,
+          code: L10nEvidenceRejectionCode.toolchainUnavailable,
+          detailCode: 'canonical-sdk-changed-during-probe',
+        );
+      },
+    );
+
+    test(
       'revalidate rejects selector mutation during delegated probe',
       () async {
         final stable = _fixtureBytes('machine/flutter_3_38_7.json');
@@ -879,6 +996,38 @@ void main() {
             beforeReturn: () {
               File(flutter38).deleteSync();
               Link(flutter38).createSync(replacementFlutter);
+            },
+          ),
+        ]);
+        final resolver = DefaultL10nToolchainResolver(processRunner: runner);
+        final expected = await _resolved38(project, flutter38, resolver);
+
+        final result = await resolver.revalidate(
+          originalProjectRoot: project,
+          expected: expected,
+        );
+
+        _expectChanged(
+          result,
+          detailCode: 'canonical-sdk-changed-during-probe',
+        );
+      },
+    );
+
+    test(
+      'revalidate rejects same-realpath Flutter overwrite during direct probe',
+      () async {
+        final stable = _fixtureBytes('machine/flutter_3_38_7.json');
+        final runner = _FakeProcessRunner([
+          _ProcessReply.result(_successfulProbe(stable)),
+          _ProcessReply.result(_successfulProbe(stable)),
+          _ProcessReply.result(_successfulProbe(stable)),
+          _ProcessReply.result(
+            _successfulProbe(stable),
+            beforeReturn: () {
+              final flutter = File(flutter38)
+                ..writeAsStringSync('overwritten flutter\n');
+              _makeExecutable(flutter);
             },
           ),
         ]);
@@ -1091,6 +1240,28 @@ void main() {
       );
 
       _expectChanged(result, detailCode: 'canonical-executable-drift');
+    });
+
+    test('detects a same-realpath shared script change between runs', () async {
+      final machineBytes = _fixtureBytes('machine/flutter_3_38_7.json');
+      final runner = _FakeProcessRunner([
+        for (var index = 0; index < 4; index++)
+          _ProcessReply.result(_successfulProbe(machineBytes)),
+      ]);
+      final resolver = DefaultL10nToolchainResolver(processRunner: runner);
+      final expected = await _resolved38(project, flutter38, resolver);
+      _sdkArtifact(
+        flutter38,
+        'bin/internal/shared.sh',
+      ).writeAsStringSync('changed shared script\n');
+
+      final result = await resolver.revalidate(
+        originalProjectRoot: project,
+        expected: expected,
+      );
+
+      _expectChanged(result, detailCode: 'identity-drift');
+      expect(runner.calls, hasLength(4));
     });
 
     test('detects delegated machine identity drift', () async {
@@ -1353,14 +1524,25 @@ String _createFlutterSdk(Directory scratch, String name) {
   for (final executable in [flutter, dartLauncher, bundledDart]) {
     executable.createSync(recursive: true);
     executable.writeAsStringSync('toolchain fixture\n');
-    if (!Platform.isWindows) {
-      final chmod = Process.runSync('chmod', ['755', executable.path]);
-      if (chmod.exitCode != 0) {
-        throw StateError('Could not make fixture executable.');
-      }
-    }
+    if (!Platform.isWindows) _makeExecutable(executable);
   }
+  File(p.join(sdk.path, 'bin', 'internal', 'shared.sh'))
+    ..createSync(recursive: true)
+    ..writeAsStringSync('shared launch fixture\n');
+  File(p.join(sdk.path, 'bin', 'cache', 'flutter_tools.snapshot'))
+    ..createSync(recursive: true)
+    ..writeAsStringSync('Flutter tools snapshot fixture\n');
   return flutter.resolveSymbolicLinksSync();
+}
+
+File _sdkArtifact(String canonicalFlutter, String relativePath) =>
+    File(p.join(p.dirname(p.dirname(canonicalFlutter)), relativePath));
+
+void _makeExecutable(File file) {
+  final chmod = Process.runSync('chmod', ['755', file.path]);
+  if (chmod.exitCode != 0) {
+    throw StateError('Could not make fixture executable.');
+  }
 }
 
 String get _flutterExecutableName =>
