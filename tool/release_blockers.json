@@ -3,16 +3,157 @@
   "blockers": [
     {
       "id": "report-writer-hostile-path-race",
-      "status": "active",
+      "status": "resolved",
       "severity": "critical",
-      "reason": "The append-only retained-capability design is locally green on POSIX, but real hosted Windows NTFS conformance evidence is still required before this critical blocker can be resolved.",
+      "reason": "The append-only retained-capability design now has an exact Windows NTFS conformance contract, and release admission requires its hosted evidence to match the candidate commit.",
       "evidence": [
+        "lib/src/reporting/native/windows_bindings.dart",
+        "lib/src/reporting/native/windows_report_object_backend.dart",
         "test/reporting/immutable_report_store_test.dart",
         "test/reporting/posix_report_object_backend_test.dart",
         "test/reporting/windows_report_object_backend_test.dart",
+        "test/reporting/report_recovery_inspector_test.dart",
         "test/cli/scan_command_test.dart",
         "test/cli/apply_command_test.dart"
-      ]
+      ],
+      "requiredTestRuns": [
+        {
+          "platform": "windows",
+          "path": "test/reporting/windows_report_object_backend_test.dart",
+          "name": "walks every directory suffix relative to its retained parent"
+        },
+        {
+          "platform": "windows",
+          "path": "test/reporting/windows_report_object_backend_test.dart",
+          "name": "creates and rereads bytes through one retained Windows handle"
+        },
+        {
+          "platform": "windows",
+          "path": "test/reporting/windows_report_object_backend_test.dart",
+          "name": "foreign regular and empty collisions remain byte exact"
+        },
+        {
+          "platform": "windows",
+          "path": "test/reporting/windows_report_object_backend_test.dart",
+          "name": "retained parent handle denies hostile directory rename"
+        },
+        {
+          "platform": "windows",
+          "path": "test/reporting/windows_report_object_backend_test.dart",
+          "name": "retained object handle denies pathname replacement"
+        },
+        {
+          "platform": "windows",
+          "path": "test/reporting/windows_report_object_backend_test.dart",
+          "name": "final reparse collision is not followed or modified"
+        },
+        {
+          "platform": "windows",
+          "path": "test/reporting/immutable_report_store_test.dart",
+          "name": "valid batch becomes READY only through an exact commit"
+        },
+        {
+          "platform": "windows",
+          "path": "test/reporting/immutable_report_store_test.dart",
+          "name": "foreign object collision is byte and type exact with no commit"
+        },
+        {
+          "platform": "windows",
+          "path": "test/reporting/report_recovery_inspector_test.dart",
+          "name": "classifies an exact valid authority as committed"
+        },
+        {
+          "platform": "windows",
+          "path": "test/reporting/report_recovery_inspector_test.dart",
+          "name": "retained directory capabilities prevent authority substitution"
+        },
+        {
+          "platform": "windows",
+          "path": "test/cli/scan_command_test.dart",
+          "name": "blocked child process scan barrier preserves foreign destination"
+        },
+        {
+          "platform": "windows",
+          "path": "test/cli/apply_command_test.dart",
+          "name": "completed lifecycle is persisted before report becomes terminal"
+        }
+      ],
+      "requiredArtifacts": [
+        {
+          "path": "lib/src/reporting/native/windows_bindings.dart",
+          "sha256": "ffc2d636005e5e6b9f2f991564e6f65383b7320eee8936c9dc0d85cdb869a13e"
+        },
+        {
+          "path": "lib/src/reporting/native/windows_report_object_backend.dart",
+          "sha256": "0d31fdf37452bc4cc7a48ce8d18d6b3314c5aa8a7692916194e3ec54234576a5"
+        }
+      ],
+      "requiredHostedEvidence": {
+        "platform": "windows",
+        "filesystem": "NTFS",
+        "testRuns": [
+          {
+            "platform": "windows",
+            "path": "test/reporting/windows_report_object_backend_test.dart",
+            "name": "walks every directory suffix relative to its retained parent"
+          },
+          {
+            "platform": "windows",
+            "path": "test/reporting/windows_report_object_backend_test.dart",
+            "name": "creates and rereads bytes through one retained Windows handle"
+          },
+          {
+            "platform": "windows",
+            "path": "test/reporting/windows_report_object_backend_test.dart",
+            "name": "foreign regular and empty collisions remain byte exact"
+          },
+          {
+            "platform": "windows",
+            "path": "test/reporting/windows_report_object_backend_test.dart",
+            "name": "retained parent handle denies hostile directory rename"
+          },
+          {
+            "platform": "windows",
+            "path": "test/reporting/windows_report_object_backend_test.dart",
+            "name": "retained object handle denies pathname replacement"
+          },
+          {
+            "platform": "windows",
+            "path": "test/reporting/windows_report_object_backend_test.dart",
+            "name": "final reparse collision is not followed or modified"
+          },
+          {
+            "platform": "windows",
+            "path": "test/reporting/immutable_report_store_test.dart",
+            "name": "valid batch becomes READY only through an exact commit"
+          },
+          {
+            "platform": "windows",
+            "path": "test/reporting/immutable_report_store_test.dart",
+            "name": "foreign object collision is byte and type exact with no commit"
+          },
+          {
+            "platform": "windows",
+            "path": "test/reporting/report_recovery_inspector_test.dart",
+            "name": "classifies an exact valid authority as committed"
+          },
+          {
+            "platform": "windows",
+            "path": "test/reporting/report_recovery_inspector_test.dart",
+            "name": "retained directory capabilities prevent authority substitution"
+          },
+          {
+            "platform": "windows",
+            "path": "test/cli/scan_command_test.dart",
+            "name": "blocked child process scan barrier preserves foreign destination"
+          },
+          {
+            "platform": "windows",
+            "path": "test/cli/apply_command_test.dart",
+            "name": "completed lifecycle is persisted before report becomes terminal"
+          }
+        ]
+      }
     },
     {
       "id": "json-v3-context-integrity-asymmetry",

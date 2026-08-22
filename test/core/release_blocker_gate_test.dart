@@ -275,7 +275,47 @@ void main() {
   );
 
   test(
-    'repository registry retains unresolved blockers and C0 evidence',
+    'evidence mode defers hosted artifact validation to admission',
+    () async {
+      final testFile = File(p.join(root.path, 'test', 'resolution_test.dart'))
+        ..createSync(recursive: true);
+      final artifact = File(p.join(root.path, 'evidence', 'resolution.json'))
+        ..createSync(recursive: true)
+        ..writeAsStringSync('{"accepted":true}\n');
+      final artifactSha = sha256.convert(artifact.readAsBytesSync()).toString();
+      final requiredRun = {
+        'platform': 'windows',
+        'path': p.relative(testFile.path, from: root.path),
+        'name': 'hostile path race preserves foreign object',
+      };
+      _writeManifest(root, [
+        _blocker(
+          status: 'resolved',
+          requiredTestRuns: [requiredRun],
+          requiredArtifacts: [
+            {
+              'path': p.relative(artifact.path, from: root.path),
+              'sha256': artifactSha,
+            },
+          ],
+          requiredHostedEvidence: {
+            'platform': 'windows',
+            'filesystem': 'NTFS',
+            'testRuns': [requiredRun],
+          },
+        ),
+      ]);
+
+      final result = await _runVerifier(verifier, root, runTests: true);
+
+      expect(result.exitCode, 0);
+      expect(result.stdout, contains('Resolved blocker evidence passed'));
+      expect(result.stderr, isEmpty);
+    },
+  );
+
+  test(
+    'repository registry binds report writer resolution to hosted evidence',
     () async {
       final result = await _runVerifier(verifier, Directory.current);
       final evidence = await _runVerifier(
@@ -284,15 +324,14 @@ void main() {
         runTests: true,
       );
 
-      expect(result.exitCode, 1);
-      expect(result.stderr, contains('1 active issue(s)'));
-      expect(result.stderr, contains('report-writer-hostile-path-race'));
+      expect(result.exitCode, 2);
+      expect(result.stderr, contains('Resolved hosted blockers require'));
       expect(
         result.stderr,
         isNot(contains('corrected-oracle-o3-o4-incomplete')),
       );
       expect(evidence.exitCode, 0);
-      expect(evidence.stdout, contains('1 active release blocker remains'));
+      expect(evidence.stdout, contains('0 active release blockers remain'));
     },
     timeout: const Timeout(Duration(minutes: 2)),
   );

@@ -13,7 +13,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 - Added a machine-readable release-blocker registry and CI admission gate.
   Hosted Windows report-capability conformance is required for the retained
-  release SHA; skipped adversarial tests cannot satisfy that gate.
+  release SHA; evidence-only checks cannot replace hosted admission, and
+  skipped adversarial tests cannot satisfy that gate.
 
 ### Fixed
 

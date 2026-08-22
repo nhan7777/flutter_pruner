@@ -25,7 +25,9 @@ Future<void> main(List<String> arguments) async {
 
   try {
     final blockers = await _loadBlockers(manifest, options.root);
-    await _validateHostedEvidence(blockers, options);
+    if (options.mode != _VerificationMode.evidenceOnly) {
+      await _validateHostedEvidence(blockers, options);
+    }
     final active = blockers.where((blocker) => blocker.status == 'active');
     if (options.mode != _VerificationMode.evidenceOnly && active.isNotEmpty) {
       stderr.writeln('Release blocked by ${active.length} active issue(s):');

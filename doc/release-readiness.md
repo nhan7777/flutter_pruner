@@ -9,7 +9,7 @@ and a reproducible reporting-overhead measurement.
 Run from the Flutter Pruner repository:
 
 ```bash
-dart run tool/verify_release_blockers.dart
+dart run tool/verify_release_blockers.dart --run-tests
 dart format --output=none --set-exit-if-changed .
 dart analyze --fatal-infos
 dart test
@@ -25,10 +25,12 @@ jq -e '
 ' .flutter_pruner/reports/self-scan.json
 ```
 
-The release-blocker verifier must exit zero before the other green gates can
-support a release claim. Skipped regression tests are not evidence that an
-active blocker is resolved; the machine-readable registry remains authoritative
-until the defect and its adversarial tests are independently accepted.
+The local `--run-tests` mode validates retained artifacts and runs the required
+tests for the current platform, but it is not release admission. Hosted CI must
+download the Windows evidence artifact and invoke the verifier with both
+`--hosted-evidence-dir` and `--expected-commit`; the default admission mode
+fails closed when that exact-SHA evidence is absent. Skipped regression tests
+cannot satisfy the gate.
 
 Hosted CI remains the authority for the supported Dart floor and stable Linux,
 macOS, and Windows matrix.
