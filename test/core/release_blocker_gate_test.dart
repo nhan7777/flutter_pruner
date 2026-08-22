@@ -277,6 +277,7 @@ void main() {
   test(
     'evidence mode defers hosted artifact validation to admission',
     () async {
+      final deferredPlatform = Platform.isWindows ? 'linux' : 'windows';
       final testFile = File(p.join(root.path, 'test', 'resolution_test.dart'))
         ..createSync(recursive: true);
       final artifact = File(p.join(root.path, 'evidence', 'resolution.json'))
@@ -284,7 +285,7 @@ void main() {
         ..writeAsStringSync('{"accepted":true}\n');
       final artifactSha = sha256.convert(artifact.readAsBytesSync()).toString();
       final requiredRun = {
-        'platform': 'windows',
+        'platform': deferredPlatform,
         'path': _relativePosix(testFile.path, root.path),
         'name': 'hostile path race preserves foreign object',
       };
@@ -299,8 +300,8 @@ void main() {
             },
           ],
           requiredHostedEvidence: {
-            'platform': 'windows',
-            'filesystem': 'NTFS',
+            'platform': deferredPlatform,
+            'filesystem': 'fixture-fs',
             'testRuns': [requiredRun],
           },
         ),

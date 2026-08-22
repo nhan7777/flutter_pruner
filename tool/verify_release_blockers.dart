@@ -386,27 +386,42 @@ Future<void> _runResolutionTests(
   Directory root,
 ) async {
   final platform = _currentPlatform();
-  for (final blocker in blockers.where((entry) => entry.status == 'resolved')) {
-    for (final requiredTest in blocker.requiredTestRuns.where(
-      (run) => run.platform == platform,
+  final reporterDirectory = await Directory.systemTemp.createTemp(
+    'flutter_pruner_release_evidence_',
+  );
+  try {
+    var reporterIndex = 0;
+    for (final blocker in blockers.where(
+      (entry) => entry.status == 'resolved',
     )) {
-      final result = await Process.run(Platform.resolvedExecutable, [
-        'test',
-        '--reporter=json',
-        '--name',
-        '^${RegExp.escape(requiredTest.name)}\$',
-        requiredTest.path,
-      ], workingDirectory: root.path);
-      final observed = _observedTest(
-        result.stdout as String,
-        requiredTest.name,
-      );
-      if (result.exitCode != 0 || observed != _ObservedTest.passed) {
-        throw _ResolutionTestFailure(
-          '${blocker.id}: ${requiredTest.path} :: ${requiredTest.name} '
-          'was ${observed.name} (exit ${result.exitCode}).',
+      for (final requiredTest in blocker.requiredTestRuns.where(
+        (run) => run.platform == platform,
+      )) {
+        final reporter = File(
+          p.join(reporterDirectory.path, '${reporterIndex++}.json'),
         );
+        final result = await Process.run(Platform.resolvedExecutable, [
+          'test',
+          '--reporter=silent',
+          '--file-reporter=json:${reporter.path}',
+          '--name',
+          '^${RegExp.escape(requiredTest.name)}\$',
+          requiredTest.path,
+        ], workingDirectory: root.path);
+        final observed = reporter.existsSync()
+            ? _observedTest(await reporter.readAsString(), requiredTest.name)
+            : _ObservedTest.missing;
+        if (result.exitCode != 0 || observed != _ObservedTest.passed) {
+          throw _ResolutionTestFailure(
+            '${blocker.id}: ${requiredTest.path} :: ${requiredTest.name} '
+            'was ${observed.name} (exit ${result.exitCode}).',
+          );
+        }
       }
+    }
+  } finally {
+    if (reporterDirectory.existsSync()) {
+      await reporterDirectory.delete(recursive: true);
     }
   }
 }
