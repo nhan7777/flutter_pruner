@@ -23,6 +23,13 @@ flutter_pruner.yaml
 AGENTS.md
 .github/
 doc/superpowers/
+doc/plans/
+
+# Internal release/accuracy validation inputs are retained in the repository,
+# but are not runtime contents of the published CLI package.
+benchmark/accuracy/
+dart_test.yaml
+*.rej
 
 # Tests and their nested Flutter fixture remain available in the source
 # repository; they are not runtime contents of the published CLI package.

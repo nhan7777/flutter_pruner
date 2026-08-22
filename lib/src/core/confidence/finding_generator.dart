@@ -3,6 +3,7 @@ import '../graph/build_condition.dart';
 import '../graph/evidence.dart';
 import '../graph/node.dart';
 import '../graph/reachability_graph.dart';
+import '../graph/root.dart';
 import '../project/analysis_mode.dart';
 import '../project/project_context.dart';
 import 'action_capability.dart';
@@ -27,35 +28,49 @@ class FindingGenerator {
   List<Finding> generate({
     required ReachabilityGraph graph,
     required ProjectContext project,
+    required GraphIntegrity graphIntegrity,
     List<BuildTarget>? targets,
     Set<String>? reportingNodeSchemes,
     Map<String, AdapterReportDefinition> adapterReportDefinitions = const {},
   }) {
     final findings = <Finding>[];
     final effectiveTargets = targets ?? project.targets;
+    if (effectiveTargets.isEmpty) {
+      throw ArgumentError.value(
+        effectiveTargets,
+        'targets',
+        'At least one configured build target is required.',
+      );
+    }
     final analysisCoverageComplete =
         project.analysisCoverageComplete &&
         _targetsExactlyEquivalent(effectiveTargets, project.targets);
-    final graphIntegrityComplete =
-        graph.danglingEdgesFor(effectiveTargets).isEmpty &&
-        graph.danglingRootIdsFor(effectiveTargets).isEmpty;
+    if (!_targetsExactlyEquivalent(
+      effectiveTargets,
+      graphIntegrity.configuredTargets.toList(),
+    )) {
+      throw StateError(
+        'Graph integrity targets do not match the finding target matrix.',
+      );
+    }
+    final graphIntegrityComplete = graphIntegrity.complete;
 
-    // Compute reachability for all targets
-    final reachabilityMap = graph.reachableForAll(effectiveTargets);
-    final retainedAnywhere = <String>{
-      for (final target in effectiveTargets) ...graph.retainedFor(target),
-    };
-    final unreachableNodeIds = graph.unreachableAcrossAll(effectiveTargets);
-    final candidateNodeIds = <String>{
-      ...unreachableNodeIds,
-      for (final node in graph.nodes)
-        if (_isStructurallyEmptyLibrary(node)) node.id,
-    };
+    final auxiliaryReachability = graph.analyzeAuxiliary();
+    final reachability = _projectFindingReachability(
+      nodes: graph.nodes,
+      graphIntegrity: graphIntegrity,
+      configured: [
+        for (final target in effectiveTargets)
+          _ConfiguredReachability(
+            target: target,
+            reachability: graph.analyzeFor(target),
+          ),
+      ],
+      auxiliary: auxiliaryReachability,
+    );
 
-    // A structurally empty library cannot expose declarations or perform work.
-    // Imports pointing to it are stale references to clean up, not evidence
-    // that the empty file itself must stay alive.
-    for (final nodeId in candidateNodeIds) {
+    for (final entry in reachability.candidates.entries) {
+      final nodeId = entry.key;
       final node = graph.node(nodeId);
       if (node == null) continue;
       if (!_isReportable(node)) continue;
@@ -64,26 +79,12 @@ class FindingGenerator {
         continue;
       }
 
-      // Determine which targets can reach this node
-      final unreachableIn = <String>[];
-      final reachableIn = <String>[];
-
-      final structurallyEmpty = _isStructurallyEmptyLibrary(node);
-      for (final entry in reachabilityMap.entries) {
-        if (!structurallyEmpty && entry.value.contains(nodeId)) {
-          reachableIn.add(entry.key);
-        } else {
-          unreachableIn.add(entry.key);
-        }
-      }
-
       final finding = _createFinding(
         node: node,
         graph: graph,
         project: project,
-        retainedAnywhere: retainedAnywhere,
-        unreachableIn: unreachableIn,
-        reachableIn: reachableIn,
+        retainedAnywhere: reachability.retainedNodeIds,
+        reachability: entry.value,
         adapterReportDefinitions: adapterReportDefinitions,
         graphIntegrityComplete: graphIntegrityComplete,
         analysisCoverageComplete: analysisCoverageComplete,
@@ -102,11 +103,6 @@ class FindingGenerator {
 
     return findings;
   }
-
-  bool _isStructurallyEmptyLibrary(GraphNode node) =>
-      node.kind == NodeKind.dartLibrary &&
-      node.metadata['declarationCount'] == 0 &&
-      node.metadata['directiveCount'] == 0;
 
   /// A target override can only preserve a complete-coverage assertion when
   /// it represents every declared target with the same build-defining fields.
@@ -156,8 +152,7 @@ class FindingGenerator {
     required ReachabilityGraph graph,
     required ProjectContext project,
     required Set<String> retainedAnywhere,
-    required List<String> unreachableIn,
-    required List<String> reachableIn,
+    required _NodeFindingReachability reachability,
     required Map<String, AdapterReportDefinition> adapterReportDefinitions,
     required bool graphIntegrityComplete,
     required bool analysisCoverageComplete,
@@ -197,7 +192,8 @@ class FindingGenerator {
     // Compute safety predicates
     final predicates = SafetyPredicates(
       ruleAllowsAutoFix: capability.supported,
-      unreachableAcrossAllTargets: reachableIn.isEmpty,
+      unreachableAcrossAllTargets: reachability.unreachableAcrossAllTargets,
+      notRetained: reachability.notRetained,
       noDynamicBlockers: !hasDynamicBlockers,
       notProtected: !isProtected,
       noPublicApiRisk: !_hasExternalConsumerRisk(node, project),
@@ -233,6 +229,8 @@ class FindingGenerator {
       manualRisks: manualRisks,
       graphIntegrityComplete: graphIntegrityComplete,
       analysisCoverageComplete: analysisCoverageComplete,
+      retainedOnly:
+          reachability.unreachableAcrossAllTargets && !reachability.notRetained,
     );
 
     return Finding(
@@ -248,8 +246,10 @@ class FindingGenerator {
       evidence: evidence,
       blockers: relevantBlockers,
       protectionReasons: protectionReasons,
-      unreachableIn: unreachableIn,
-      reachableIn: reachableIn,
+      unreachableIn: reachability.unreachableIn,
+      reachableIn: reachability.reachableIn,
+      retainedIn: reachability.retainedIn,
+      auxiliaryRetainedIn: reachability.auxiliaryRetainedIn,
       proposedAction:
           confidence == Confidence.safe || confidence == Confidence.high
           ? capability.proposedAction
@@ -269,6 +269,7 @@ class FindingGenerator {
     required Set<ManualRisk> manualRisks,
     required bool graphIntegrityComplete,
     required bool analysisCoverageComplete,
+    required bool retainedOnly,
   }) {
     final reasons = <ClassificationReason>[];
     if (!project.targetMatrix.isComplete || !analysisCoverageComplete) {
@@ -282,6 +283,9 @@ class FindingGenerator {
     }
     if (!graphIntegrityComplete) {
       reasons.add(ClassificationReason.incompleteGraphIntegrity);
+    }
+    if (retainedOnly) {
+      reasons.add(ClassificationReason.retainedOnly);
     }
     if (node.kind == NodeKind.duplicateGroup) {
       reasons.add(ClassificationReason.duplicateCanonicalChoice);
@@ -355,4 +359,108 @@ class FindingGenerator {
     'duplicate' => 'duplicates',
     final scheme => scheme,
   };
+}
+
+final class _ConfiguredReachability {
+  const _ConfiguredReachability({
+    required this.target,
+    required this.reachability,
+  });
+
+  final BuildTarget target;
+  final TargetReachability reachability;
+}
+
+final class _NodeFindingReachability {
+  _NodeFindingReachability({
+    required Iterable<String> reachableIn,
+    required Iterable<String> unreachableIn,
+    required Iterable<String> retainedIn,
+    required Iterable<String> auxiliaryRetainedIn,
+    required this.unreachableAcrossAllTargets,
+  }) : reachableIn = _sortedIdentities(reachableIn),
+       unreachableIn = _sortedIdentities(unreachableIn),
+       retainedIn = _sortedIdentities(retainedIn),
+       auxiliaryRetainedIn = _sortedIdentities(auxiliaryRetainedIn);
+
+  final List<String> reachableIn;
+  final List<String> unreachableIn;
+  final List<String> retainedIn;
+  final List<String> auxiliaryRetainedIn;
+  final bool unreachableAcrossAllTargets;
+
+  bool get notRetained => retainedIn.isEmpty && auxiliaryRetainedIn.isEmpty;
+}
+
+final class _FindingReachabilityProjection {
+  _FindingReachabilityProjection({
+    required Map<String, _NodeFindingReachability> candidates,
+    required Set<String> retainedNodeIds,
+  }) : candidates = Map.unmodifiable(candidates),
+       retainedNodeIds = Set.unmodifiable(retainedNodeIds);
+
+  final Map<String, _NodeFindingReachability> candidates;
+  final Set<String> retainedNodeIds;
+}
+
+_FindingReachabilityProjection _projectFindingReachability({
+  required Iterable<GraphNode> nodes,
+  required GraphIntegrity graphIntegrity,
+  required List<_ConfiguredReachability> configured,
+  required AuxiliaryReachability auxiliary,
+}) {
+  final configuredTargets = configured
+      .map((entry) => BuildTarget.snapshot(entry.target))
+      .toSet();
+  if (configuredTargets.length != graphIntegrity.configuredTargets.length ||
+      !configuredTargets.containsAll(graphIntegrity.configuredTargets)) {
+    throw StateError(
+      'Configured reachability does not match the graph integrity snapshot.',
+    );
+  }
+
+  final retainedNodeIds = <String>{
+    ...auxiliary.retained,
+    for (final entry in configured) ...entry.reachability.configuredRetained,
+  };
+  final candidates = <String, _NodeFindingReachability>{};
+  for (final node in nodes) {
+    final reachableIn = <String>{
+      for (final entry in configured)
+        if (entry.reachability.configuredProven.contains(node.id))
+          entry.target.name,
+    };
+    final auxiliaryProven = auxiliary.proven.contains(node.id);
+    if (reachableIn.isNotEmpty || auxiliaryProven) {
+      continue;
+    }
+
+    candidates[node.id] = _NodeFindingReachability(
+      reachableIn: reachableIn,
+      unreachableIn: {
+        for (final entry in configured)
+          if (!entry.reachability.configuredProven.contains(node.id))
+            entry.target.name,
+      },
+      retainedIn: {
+        for (final entry in configured)
+          if (entry.reachability.configuredRetained.contains(node.id))
+            entry.target.name,
+      },
+      auxiliaryRetainedIn: {
+        for (final entry in auxiliary.retainedByExecutionTarget.entries)
+          if (entry.value.contains(node.id)) entry.key,
+      },
+      unreachableAcrossAllTargets: reachableIn.isEmpty && !auxiliaryProven,
+    );
+  }
+  return _FindingReachabilityProjection(
+    candidates: candidates,
+    retainedNodeIds: retainedNodeIds,
+  );
+}
+
+List<String> _sortedIdentities(Iterable<String> values) {
+  final sorted = values.toSet().toList()..sort();
+  return List.unmodifiable(sorted);
 }

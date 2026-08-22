@@ -28,7 +28,12 @@ does not backport new safety evidence into fields whose old semantics cannot
 represent it.
 
 Schema v2 is therefore retained while v3 is the default. New integrations must
-use v3 typed measurements and coverage fields.
+use v3 typed measurements and coverage fields. Schema v2 compatibility output
+is bounded before a destination is opened: it permits at most 250,000 blocker
+occurrences, 2,000,000 affected-node-ID occurrences, and 100,000 IDs in one
+blocker occurrence. A request beyond a bound fails as v2; it is never
+truncated or silently rewritten as v3. Accepted v2 output remains byte-for-byte
+compatible with the frozen legacy wire contract.
 
 ## Reader and writer behavior
 

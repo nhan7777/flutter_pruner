@@ -1,0 +1,17 @@
+{
+  "configVersion": 2,
+  "packages": [
+    {
+      "name": "dart_graph_correctness_test",
+      "rootUri": "../",
+      "packageUri": "lib/",
+      "languageVersion": "3.9"
+    },
+    {
+      "name": "nested_fixture",
+      "rootUri": "../nested/",
+      "packageUri": "lib/",
+      "languageVersion": "3.9"
+    }
+  ]
+}

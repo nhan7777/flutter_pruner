@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter_pruner/src/adapters/dart/dart_ids.dart';
 import 'package:flutter_pruner/src/core/project/project_source_path.dart';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
@@ -75,6 +76,70 @@ void main() {
         ),
       ),
     );
+  });
+
+  test('default validation rejects proven generated Dart output', () {
+    for (final path in const [
+      'lib/model.g.dart',
+      'lib/model.freezed.dart',
+      'lib/model.gen.dart',
+      'lib/model.mocks.dart',
+      'lib/routes.gr.dart',
+      'lib/generated/model.g.dart',
+      'lib/gen/model.freezed.dart',
+      'build/main.dart',
+      '.dart_tool/main.dart',
+    ]) {
+      final file = File(p.join(root.path, path))
+        ..createSync(recursive: true)
+        ..writeAsStringSync('void main() {}\n');
+
+      expect(DartIds.isGeneratedPath(file.path), isTrue, reason: path);
+      expect(
+        () => ProjectSourcePath.validate(
+          root,
+          path,
+          field: 'entrypoint',
+          kind: ProjectSourceKind.applicationEntrypoint,
+        ),
+        throwsA(
+          isA<ProjectSourcePathException>().having(
+            (error) => error.message,
+            'message',
+            contains('generated Dart output'),
+          ),
+        ),
+        reason: path,
+      );
+    }
+  });
+
+  test('default validation accepts generated-like non-generated paths', () {
+    for (final path in const [
+      'lib/manual.dart',
+      'lib/widget_g.dart',
+      'lib/gr.dart',
+      'builder/main.dart',
+      'lib/generated_value.dart',
+      'generated/main.dart',
+      'gen/main.dart',
+    ]) {
+      final file = File(p.join(root.path, path))
+        ..createSync(recursive: true)
+        ..writeAsStringSync('void main() {}\n');
+
+      expect(DartIds.isGeneratedPath(file.path), isFalse, reason: path);
+      expect(
+        ProjectSourcePath.validate(
+          root,
+          path,
+          field: 'entrypoint',
+          kind: ProjectSourceKind.applicationEntrypoint,
+        ),
+        path,
+        reason: path,
+      );
+    }
   });
 
   test('checks the semantic role and syntax of Dart sources', () {

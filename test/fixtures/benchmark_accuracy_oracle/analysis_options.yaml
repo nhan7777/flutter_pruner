@@ -1,0 +1,3 @@
+analyzer:
+  errors:
+    multiple_combinators: ignore

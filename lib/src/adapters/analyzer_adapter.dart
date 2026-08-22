@@ -1,20 +1,34 @@
 import '../core/graph/build_condition.dart';
 import '../core/graph/edge.dart';
 import '../core/graph/evidence.dart';
+import '../core/graph/execution_target.dart';
 import '../core/graph/node.dart';
 import '../core/graph/reachability_graph.dart';
 import '../core/project/project_context.dart';
 import 'adapter_report_definition.dart';
 import 'dart/dart_adapter_profile.dart';
 import 'dart/dart_analysis_workspace.dart';
+import 'dart/dart_execution_context_service.dart';
+import 'dart/dart_execution_reachability_service.dart';
 
 /// Services whose lifetime spans every adapter in one project analysis pass.
 class AdapterServices {
   /// Creates a service bundle.
-  const AdapterServices({this.dartWorkspace, this.dartProfile});
+  const AdapterServices({
+    this.dartWorkspace,
+    this.dartExecutionContextService,
+    this.dartExecutionReachabilityService,
+    this.dartProfile,
+  });
 
   /// Shared semantic analyzer state, when a selected adapter needs Dart facts.
   final DartAnalysisWorkspace? dartWorkspace;
+
+  /// Pass-scoped Dart configured/auxiliary execution-context snapshot.
+  final DartExecutionContextService? dartExecutionContextService;
+
+  /// Sole pass-scoped Dart reachability snapshot producer.
+  final DartExecutionReachabilityService? dartExecutionReachabilityService;
 
   /// Optional fine-grained Dart adapter timings for benchmark runs.
   final DartAdapterProfile? dartProfile;
@@ -165,6 +179,24 @@ class GraphBuilder {
     BuildCondition condition = BuildCondition.unconditional,
   }) {
     _graph.addRoot(nodeId, reason: reason, condition: condition);
+  }
+
+  /// Registers an immutable non-application execution target.
+  void addAuxiliaryExecutionTarget(AuxiliaryExecutionTarget target) {
+    _graph.addAuxiliaryExecutionTarget(target);
+  }
+
+  /// Registers [nodeId] as a root in exactly [executionTarget].
+  void addAuxiliaryRoot(
+    String nodeId, {
+    required String reason,
+    required AuxiliaryExecutionTarget executionTarget,
+  }) {
+    _graph.addAuxiliaryRoot(
+      nodeId,
+      reason: reason,
+      executionTarget: executionTarget,
+    );
   }
 
   /// Marks [nodeId] as never removable.

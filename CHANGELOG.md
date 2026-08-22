@@ -7,12 +7,45 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-08-22
+
+### Added
+
+- Added a machine-readable release-blocker registry and CI admission gate.
+  Hosted Windows report-capability conformance is required for the retained
+  release SHA; evidence-only checks cannot replace hosted admission, and
+  skipped adversarial tests cannot satisfy that gate.
+
 ### Fixed
 
 - Parsed project-owned Dart sources at the language version declared by the
   project's SDK lower bound, preventing newer analyzer releases from rejecting
   valid `final` formal parameters during `init` and `scan`; unparseable sources
   continue to downgrade coverage conservatively.
+- Bounded legacy JSON v2 compatibility projections before report staging,
+  preserving accepted wire bytes while rejecting oversized fan-out without
+  partial output.
+- Replaced report staging, replacement, and cleanup authority with append-only
+  native object/commit persistence. Scan and apply now reject occupied exact
+  outputs without clobbering them, validate committed bytes before READY, and
+  retain monotonic canonical apply evidence when a terminal export fails.
+- Corrected the Windows NTFS conformance contract exposed by hosted CI: an
+  existing directory or reparse leaf is a collision, a renamed retained
+  directory remains object-bound instead of following a replacement path, and
+  release evidence hashes use checkout-stable LF bytes on every runner.
+- Documented target-exact configured and auxiliary graph contexts, retained
+  usage hard gates, nested-package ownership, generated-artifact provenance,
+  and the blocked-oracle boundary for read-only natural replay evidence.
+- Classified standard Dart execution roots and exact local
+  `Isolate.spawnUri` targets without granting actionability across unresolved,
+  external, generated, or symlink boundaries.
+- Treated ordinary Dart files under `lib/gen/` and `lib/generated/` as owned
+  source unless their suffix or location proves generated provenance.
+- Rechecked every hard safety predicate, including `notRetained`, at apply
+  admission so stale or forged `SAFE` findings cannot enter a mutation plan.
+- Preserved the primary report write or flush failure when sink close also
+  fails, and retained the failed object role so canonical batch failures are
+  not mislabeled as external-export warnings.
 
 ## [1.4.0] - 2026-08-19
 
@@ -211,7 +244,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Custom runtime callback and asset registries require explicit modeling or
   project policy.
 
-[Unreleased]: https://github.com/nhan7777/flutter_pruner/compare/v1.4.0...main
+[Unreleased]: https://github.com/nhan7777/flutter_pruner/compare/v1.5.0...main
+[1.5.0]: https://github.com/nhan7777/flutter_pruner/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/nhan7777/flutter_pruner/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/nhan7777/flutter_pruner/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/nhan7777/flutter_pruner/compare/v1.1.0...v1.2.0

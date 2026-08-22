@@ -212,6 +212,47 @@ void main() {
       expect(output, contains('Route · /checkout'));
     });
 
+    test(
+      'explains retained-only configured targets and auxiliary contexts',
+      () {
+        final output = _stripAnsi(
+          const HumanFormatter(verbose: true, lineWidth: 400).format(
+            _report([
+              _finding(
+                Confidence.review,
+                'retained.dart',
+                notRetained: false,
+                retainedIn: ['web', 'android'],
+                auxiliaryRetainedIn: [
+                  'aux:test:support',
+                  'aux:runtime:callback',
+                ],
+                classificationReasons: const [
+                  ClassificationReason.retainedOnly,
+                ],
+              ),
+            ]),
+          ),
+        );
+
+        expect(
+          output,
+          contains('Retention evidence prevents automatic removal'),
+        );
+        expect(
+          output,
+          contains('Retained by configured targets: android, web'),
+        );
+        expect(
+          output,
+          contains(
+            'Retained by auxiliary contexts: aux:runtime:callback, '
+            'aux:test:support',
+          ),
+        );
+      },
+    );
+
     test('shows decision summary and friendly impact without diagnostics', () {
       final output = _stripAnsi(
         const HumanFormatter(lineWidth: 160).format(
@@ -408,6 +449,9 @@ Finding _finding(
   String adapter = 'dart',
   Map<String, Object?> metadata = const {},
   List<ClassificationReason>? classificationReasons,
+  bool notRetained = true,
+  List<String> retainedIn = const [],
+  List<String> auxiliaryRetainedIn = const [],
 }) {
   final blocker = blockerLocation == null
       ? null
@@ -435,11 +479,14 @@ Finding _finding(
       notProtected: confidence != Confidence.protected,
       noPublicApiRisk: confidence != Confidence.high,
       hasDeterministicInverse: true,
+      notRetained: notRetained,
     ),
     blockers: blocker == null ? const [] : [blocker],
     protectionReasons: confidence == Confidence.protected
         ? const ['framework entry point']
         : const [],
+    retainedIn: retainedIn,
+    auxiliaryRetainedIn: auxiliaryRetainedIn,
     proposedAction:
         confidence == Confidence.safe || confidence == Confidence.high
         ? 'Remove declaration'

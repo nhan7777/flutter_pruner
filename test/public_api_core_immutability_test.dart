@@ -85,8 +85,10 @@ void main() {
       ];
       final blockers = [Blocker(producer: 'dart', reason: 'original blocker')];
       final protectionReasons = ['original protection'];
-      final unreachableIn = ['android'];
-      final reachableIn = ['web'];
+      final unreachableIn = ['web', 'android', 'web'];
+      final reachableIn = ['ios', 'android', 'ios'];
+      final retainedIn = ['web', 'android', 'web'];
+      final auxiliaryRetainedIn = ['aux:test:z', 'aux:runtime:a', 'aux:test:z'];
       final classificationReasons = [
         ClassificationReason.incompleteTargetMatrix,
       ];
@@ -102,6 +104,8 @@ void main() {
         protectionReasons: protectionReasons,
         unreachableIn: unreachableIn,
         reachableIn: reachableIn,
+        retainedIn: retainedIn,
+        auxiliaryRetainedIn: auxiliaryRetainedIn,
         classificationReasons: classificationReasons,
         manualRisks: manualRisks,
       );
@@ -111,14 +115,18 @@ void main() {
       protectionReasons.clear();
       unreachableIn.clear();
       reachableIn.clear();
+      retainedIn.clear();
+      auxiliaryRetainedIn.clear();
       classificationReasons.clear();
       manualRisks.clear();
 
       expect(finding.evidence.single.description, 'original evidence');
       expect(finding.blockers.single.reason, 'original blocker');
       expect(finding.protectionReasons, ['original protection']);
-      expect(finding.unreachableIn, ['android']);
-      expect(finding.reachableIn, ['web']);
+      expect(finding.unreachableIn, ['android', 'web']);
+      expect(finding.reachableIn, ['android', 'ios']);
+      expect(finding.retainedIn, ['android', 'web']);
+      expect(finding.auxiliaryRetainedIn, ['aux:runtime:a', 'aux:test:z']);
       expect(finding.classificationReasons, [
         ClassificationReason.incompleteTargetMatrix,
       ]);
@@ -128,6 +136,8 @@ void main() {
       expect(() => finding.protectionReasons.clear(), throwsUnsupportedError);
       expect(() => finding.unreachableIn.clear(), throwsUnsupportedError);
       expect(() => finding.reachableIn.clear(), throwsUnsupportedError);
+      expect(() => finding.retainedIn.clear(), throwsUnsupportedError);
+      expect(() => finding.auxiliaryRetainedIn.clear(), throwsUnsupportedError);
       expect(
         () => finding.classificationReasons.clear(),
         throwsUnsupportedError,
@@ -169,6 +179,70 @@ void main() {
         () => summary.byReason['directory:build'] = 3,
         throwsUnsupportedError,
       );
+    });
+
+    test('reachability and integrity projections are deeply immutable', () {
+      final target = BuildTarget(
+        name: 'android',
+        platform: 'android',
+        entrypoint: 'lib/main.dart',
+      );
+      final auxiliary = AuxiliaryExecutionTarget(
+        id: 'aux:test:test/main_test.dart:vm',
+        domain: AuxiliaryExecutionDomain.test,
+        environmentValues: const {'dart.library.io': 'true'},
+        environmentComplete: true,
+        reason: 'VM test',
+      );
+      final graph = ReachabilityGraph()
+        ..addNode(_node())
+        ..addRoot(
+          _node().id,
+          reason: 'configured root',
+          condition: BuildCondition.forTarget(target),
+        )
+        ..addAuxiliaryRoot(
+          _node().id,
+          reason: 'test root',
+          executionTarget: auxiliary,
+        )
+        ..addEdge(
+          GraphEdge(
+            from: _node().id,
+            to: 'dart:app/lib/missing.dart#missing',
+            kind: EdgeKind.references,
+            condition: BuildCondition.forAuxiliaryTarget(auxiliary),
+            evidence: const Evidence(
+              kind: EvidenceKind.semanticReference,
+              producer: 'test',
+              description: 'missing auxiliary endpoint',
+              exact: true,
+            ),
+          ),
+        );
+
+      final auxiliaryAnalysis = graph.analyzeAuxiliary();
+      final integrity = graph.integrityFor([target]);
+      final allReachable = graph.reachableForAll([target]);
+
+      expect(() => graph.reachableFor(target).clear(), throwsUnsupportedError);
+      expect(() => allReachable.clear(), throwsUnsupportedError);
+      expect(() => allReachable.values.single.clear(), throwsUnsupportedError);
+      expect(
+        () => graph.unreachableAcrossAll([target]).clear(),
+        throwsUnsupportedError,
+      );
+      expect(
+        () => auxiliaryAnalysis.provenByExecutionTarget.clear(),
+        throwsUnsupportedError,
+      );
+      expect(
+        () => auxiliaryAnalysis.provenByExecutionTarget.values.single.clear(),
+        throwsUnsupportedError,
+      );
+      expect(() => integrity.byExecutionTarget.clear(), throwsUnsupportedError);
+      expect(() => integrity.danglingEdges.clear(), throwsUnsupportedError);
+      expect(() => integrity.configuredTargets.clear(), throwsUnsupportedError);
     });
 
     test('VerificationPolicy snapshots commands and command arguments', () {
@@ -218,4 +292,5 @@ SafetyPredicates _predicates() => const SafetyPredicates(
   notProtected: true,
   noPublicApiRisk: true,
   hasDeterministicInverse: true,
+  notRetained: true,
 );

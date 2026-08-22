@@ -1,4 +1,6 @@
 import 'package:flutter_pruner/src/core/graph/build_condition.dart';
+import 'package:flutter_pruner/src/core/graph/node.dart';
+import 'package:flutter_pruner/src/core/graph/reachability_graph.dart';
 import 'package:flutter_pruner/src/core/project/target_matrix.dart';
 import 'package:test/test.dart';
 
@@ -24,7 +26,8 @@ void main() {
       ..add('mutated issue');
 
     expect(matrix.isComplete, isTrue);
-    expect(matrix.targets, [same(target)]);
+    expect(matrix.targets, [target]);
+    expect(matrix.targets.single, isNot(same(target)));
     expect(matrix.issues, ['owner review pending']);
     expect(() => matrix.targets.clear(), throwsUnsupportedError);
     expect(() => matrix.issues.add('late issue'), throwsUnsupportedError);
@@ -48,9 +51,31 @@ void main() {
       ..clear()
       ..addAll([web, android]);
 
-    expect(matrix.targets, [same(android), same(web)]);
+    expect(matrix.targets, [android, web]);
+    expect(matrix.targets.first, isNot(same(android)));
+    expect(matrix.targets.last, isNot(same(web)));
     expect(matrix.isComplete, isTrue);
     expect(() => matrix.targets.add(android), throwsUnsupportedError);
+  });
+
+  test('rejects configured names that derive the same context identity', () {
+    final web = BuildTarget(
+      name: 'web',
+      platform: 'web',
+      entrypoint: 'lib/main.dart',
+    );
+    final prefixedWeb = BuildTarget(
+      name: 'app:web',
+      platform: 'web',
+      entrypoint: 'lib/main_staging.dart',
+      flavor: 'staging',
+      dartDefines: const {'ENV': 'staging'},
+    );
+
+    expect(
+      () => TargetMatrix.declared([web, prefixedWeb]),
+      throwsArgumentError,
+    );
   });
 
   test('root coverage snapshots public entrypoints and issues', () {
@@ -76,4 +101,73 @@ void main() {
     expect(() => coverage.publicEntrypoints.clear(), throwsUnsupportedError);
     expect(() => coverage.issues.add('late issue'), throwsUnsupportedError);
   });
+
+  test(
+    'matrix target snapshots survive mutable caller targets in graph queries',
+    () {
+      final defines = <String, String>{'MODE': 'debug'};
+      final mutable = _MutableBuildTarget(
+        name: 'android-debug',
+        platform: 'android',
+        flavor: 'debug',
+        entrypoint: 'lib/main.dart',
+        dartDefines: defines,
+      );
+      final matrix = TargetMatrix.declared([mutable]);
+      final graph = ReachabilityGraph()
+        ..addNode(
+          GraphNode(
+            id: 'configured-root',
+            kind: NodeKind.declaration,
+            origin: Uri.file('/project/lib/main.dart'),
+          ),
+        )
+        ..addRoot(
+          'configured-root',
+          reason: 'configured target root',
+          condition: BuildCondition.forTarget(matrix.targets.single),
+        );
+
+      mutable
+        ..name = 'android-release'
+        ..flavor = 'release';
+      defines['MODE'] = 'release';
+
+      final frozenTarget = matrix.targets.single;
+      expect(frozenTarget, isNot(same(mutable)));
+      expect(frozenTarget.name, 'android-debug');
+      expect(frozenTarget.flavor, 'debug');
+      expect(frozenTarget.dartDefines, {'MODE': 'debug'});
+      expect(graph.reachableFor(frozenTarget), {'configured-root'});
+      expect(
+        graph.unreachableAcrossAll(matrix.targets),
+        isNot(contains('configured-root')),
+      );
+    },
+  );
+}
+
+class _MutableBuildTarget implements BuildTarget {
+  _MutableBuildTarget({
+    required this.name,
+    required this.platform,
+    required this.flavor,
+    required this.entrypoint,
+    required this.dartDefines,
+  });
+
+  @override
+  Map<String, String> dartDefines;
+
+  @override
+  String entrypoint;
+
+  @override
+  String? flavor;
+
+  @override
+  String name;
+
+  @override
+  String platform;
 }

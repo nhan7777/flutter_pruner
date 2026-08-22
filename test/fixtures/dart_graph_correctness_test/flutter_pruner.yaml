@@ -1,0 +1,21 @@
+version: 1
+analysis:
+  mode: application
+target_matrix:
+  complete: false
+  targets:
+    - name: web
+      platform: web
+      entrypoint: lib/main.dart
+    - name: android-debug
+      platform: android
+      flavor: debug
+      entrypoint: lib/main.dart
+      dart_defines:
+        MODE: debug
+    - name: android-release
+      platform: android
+      flavor: release
+      entrypoint: lib/main.dart
+      dart_defines:
+        MODE: release

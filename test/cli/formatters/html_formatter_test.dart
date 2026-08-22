@@ -1,5 +1,6 @@
 import 'package:flutter_pruner/src/adapters/adapter_report_definition.dart';
 import 'package:flutter_pruner/src/cli/formatters/html_formatter.dart';
+import 'package:flutter_pruner/src/core/confidence/classification_reason.dart';
 import 'package:flutter_pruner/src/core/confidence/confidence.dart';
 import 'package:flutter_pruner/src/core/confidence/finding.dart';
 import 'package:flutter_pruner/src/core/graph/build_condition.dart';
@@ -37,6 +38,23 @@ void main() {
       expect(output, contains('id="render-fallback"'));
       expect(output, contains('Static audit summary'));
       expect(output, contains('Closing &lt;/script&gt; &amp; safe'));
+      expect(output, contains('"notRetained":false'));
+      expect(output, contains('"retainedIn":["android","web"]'));
+      expect(
+        output,
+        contains(
+          '"auxiliaryRetainedIn":["aux:runtime:callback",'
+          '"aux:test:support"]',
+        ),
+      );
+      expect(output, contains('Retained by configured targets: android, web'));
+      expect(
+        output,
+        contains(
+          'Retained by auxiliary contexts: aux:runtime:callback, '
+          'aux:test:support',
+        ),
+      );
       expect(output, contains("\$('render-fallback').hidden = true;"));
       expect(
         output,
@@ -123,6 +141,11 @@ void main() {
       ),
     );
     expect(output, contains("['Why not safe', snapshot.whyNotSafe]"));
+    expect(output, contains("['Retained in', snapshot.retainedIn]"));
+    expect(
+      output,
+      contains("['Auxiliary retained in', snapshot.auxiliaryRetainedIn]"),
+    );
     expect(
       output,
       contains('const domainRows = detailRows(snapshot.details, snapshot)'),
@@ -142,6 +165,8 @@ void main() {
     expect(output, contains('Duplicate files'));
     expect(output, contains('Rule supports automatic fixes'));
     expect(output, contains('Unreachable in every configured target'));
+    expect(output, contains('Not retained by any execution context'));
+    expect(output, contains('Retained without exact reachability'));
     expect(output, contains('Target coverage is incomplete'));
     expect(output, contains('Source size'));
     expect(output, contains('Base asset size'));
@@ -289,6 +314,7 @@ RunReport _report({
   RunStatus status = RunStatus.completed,
   bool partialApplied = false,
 }) {
+  final retainedOnly = confidence != Confidence.safe;
   final finding = Finding(
     ruleId: adapterReportDefinitions.isEmpty ? 'PRN-DART-001' : 'PRN-ROUTE-001',
     node: GraphNode(
@@ -300,14 +326,22 @@ RunReport _report({
     ),
     confidence: confidence,
     title: 'Closing </script> & safe',
-    predicates: const SafetyPredicates(
+    predicates: SafetyPredicates(
       ruleAllowsAutoFix: false,
       unreachableAcrossAllTargets: true,
       noDynamicBlockers: true,
       notProtected: true,
       noPublicApiRisk: true,
       hasDeterministicInverse: false,
+      notRetained: !retainedOnly,
     ),
+    retainedIn: retainedOnly ? const ['web', 'android'] : const [],
+    auxiliaryRetainedIn: retainedOnly
+        ? const ['aux:test:support', 'aux:runtime:callback']
+        : const [],
+    classificationReasons: retainedOnly
+        ? const [ClassificationReason.retainedOnly]
+        : const [],
     reportingAdapterId: adapterReportDefinitions.isEmpty ? null : 'routes',
   );
   return RunReport(
@@ -351,6 +385,15 @@ RunReport _report({
               recordedBlockerCount: 0,
               danglingEdgeCount: 0,
               danglingRootCount: danglingRoots,
+              integrityByExecutionTarget: {
+                'app:android': ExecutionTargetIntegrityReport(
+                  id: 'app:android',
+                  domain: 'configuredTarget',
+                  complete: danglingRoots == 0,
+                  danglingEdgeCount: 0,
+                  danglingRootCount: danglingRoots,
+                ),
+              },
               adapterRuns: const [],
               findingStatistics: FindingStatistics.fromFindings([finding]),
               blockerStatistics: BlockerStatistics(

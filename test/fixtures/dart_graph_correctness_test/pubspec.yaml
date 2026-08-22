@@ -1,0 +1,9 @@
+name: dart_graph_correctness_test
+publish_to: none
+
+environment:
+  sdk: ^3.9.0
+
+dependencies:
+  nested_fixture:
+    path: nested

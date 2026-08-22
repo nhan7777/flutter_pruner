@@ -114,11 +114,14 @@ class GetItAdapter extends AnalyzerAdapter {
     ProjectContext project,
     GraphBuilder graph,
     AdapterServices services,
-  ) => _analyze(
-    project,
-    graph,
-    services.dartWorkspace ?? DartAnalysisWorkspace(project),
-  );
+  ) async {
+    await services.dartExecutionContextService?.resolve(project);
+    await _analyze(
+      project,
+      graph,
+      services.dartWorkspace ?? DartAnalysisWorkspace(project),
+    );
+  }
 
   Future<void> _analyze(
     ProjectContext project,

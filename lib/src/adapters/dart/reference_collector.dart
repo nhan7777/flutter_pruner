@@ -27,6 +27,7 @@ class ReferenceCollector extends RecursiveAstVisitor<void> {
     required this.libraryId,
     required this.location,
     this.recordReferences = true,
+    this.collapseCallerToLibrary = false,
   });
 
   /// Project the analysis runs against.
@@ -43,29 +44,24 @@ class ReferenceCollector extends RecursiveAstVisitor<void> {
 
   /// Whether resolved references should become graph edges.
   ///
-  /// Generated units are intentionally not graph nodes. They still need the
-  /// unresolved-fact pass, but must not introduce edges from synthetic caller
-  /// identities.
+  /// Generated units can disable this when only unresolved facts are needed.
   final bool recordReferences;
 
+  /// Whether every reference is attributed to [libraryId].
+  ///
+  /// Generated declarations are not independently modeled. Their resolved and
+  /// unresolved uses therefore collapse to the owning generated artifact or
+  /// part library instead of fabricating declaration callers.
+  final bool collapseCallerToLibrary;
+
   final Set<UnresolvedReferenceFact> _unresolvedReferences = {};
-  final _CallbackValueResolver _callbackValues = _CallbackValueResolver();
 
   /// Facts for references the analyzer could not resolve.
   Set<UnresolvedReferenceFact> get unresolvedReferences =>
       Set.unmodifiable(_unresolvedReferences);
 
   /// Visit a library unit and collect semantic references once.
-  void visitLibrary(CompilationUnit unit) {
-    _callbackValues.indexUnit(unit);
-    unit.visitChildren(this);
-  }
-
-  @override
-  void visitMethodInvocation(MethodInvocation node) {
-    if (recordReferences) _recordCallbackBoundary(node);
-    super.visitMethodInvocation(node);
-  }
+  void visitLibrary(CompilationUnit unit) => unit.visitChildren(this);
 
   @override
   void visitSimpleIdentifier(SimpleIdentifier node) {
@@ -556,39 +552,6 @@ class ReferenceCollector extends RecursiveAstVisitor<void> {
     return false;
   }
 
-  void _recordCallbackBoundary(MethodInvocation node) {
-    final boundary = _CallbackBoundaryRegistry.match(node);
-    if (boundary == null ||
-        node.argumentList.arguments.length <= boundary.argumentIndex) {
-      return;
-    }
-
-    final argument = node.argumentList.arguments[boundary.argumentIndex];
-    final targets = _callbackValues.resolve(
-      analyzerArgumentExpression(argument),
-      project,
-    );
-    for (final nodeId in targets.nodeIds) {
-      graph.addRoot(
-        nodeId,
-        reason: 'native callback boundary: ${boundary.description}',
-      );
-    }
-    if (targets.unresolved) {
-      // The native/runtime caller is outside the Dart graph. A source-scoped
-      // blocker would disappear when this registration helper is itself not
-      // reachable, which is exactly when persisted callback handles become a
-      // false-SAFE risk. Keep this namespace blocker unconditional.
-      graph.addBlocker(
-        reason:
-            'native callback boundary has an unresolved callback target: '
-            '${boundary.description}',
-        location: location,
-        affectedNamespace: 'dart:${project.packageName}/',
-      );
-    }
-  }
-
   void _addReference(AstNode node, Element element) {
     if (!recordReferences) return;
     // Member references are represented by their owning top-level
@@ -620,6 +583,7 @@ class ReferenceCollector extends RecursiveAstVisitor<void> {
   }
 
   String _callerId(AstNode node) {
+    if (collapseCallerToLibrary) return libraryId;
     AstNode? current = node.parent;
     while (current != null) {
       final fragment = switch (current) {
@@ -641,304 +605,6 @@ class ReferenceCollector extends RecursiveAstVisitor<void> {
     }
     return libraryId;
   }
-}
-
-final class _CallbackBoundaryRegistry {
-  static _CallbackBoundary? match(MethodInvocation node) {
-    final element = node.methodName.element;
-    if (element is! ExecutableElement) return null;
-    final owner = element.enclosingElement?.name;
-    final method = element.displayName;
-    final library = element.library.firstFragment.source.uri.toString();
-
-    if (owner == 'PluginUtilities' && method == 'getCallbackHandle') {
-      // The owner/method pair is kept as a conservative fallback for analyzer
-      // contexts that cannot resolve dart:ui. A same-named project class can
-      // only over-retain code; it cannot create a false SAFE result.
-      return _CallbackBoundary(
-        argumentIndex: 0,
-        description: library == 'dart:ui'
-            ? 'dart:ui PluginUtilities.getCallbackHandle'
-            : 'PluginUtilities.getCallbackHandle',
-      );
-    }
-    if (owner == 'Isolate' && method == 'spawn') {
-      return const _CallbackBoundary(
-        argumentIndex: 0,
-        description: 'dart:isolate Isolate.spawn',
-      );
-    }
-    if (owner == 'Workmanager' && method == 'initialize') {
-      return const _CallbackBoundary(
-        argumentIndex: 0,
-        description: 'Workmanager.initialize',
-      );
-    }
-    return null;
-  }
-}
-
-final class _CallbackBoundary {
-  const _CallbackBoundary({
-    required this.argumentIndex,
-    required this.description,
-  });
-
-  final int argumentIndex;
-  final String description;
-}
-
-/// Bounded semantic propagation for callback tear-offs crossing native APIs.
-///
-/// Ordinary reference edges already cover callbacks passed from reachable
-/// code. This resolver additionally follows local aliases and zero-argument
-/// expression-bodied helpers so callback handles remain roots when native code
-/// invokes them in a later isolate or launch.
-final class _CallbackValueResolver {
-  static const int _maxDepth = 32;
-  static const int _maxTargets = 64;
-
-  final Map<Element, Expression> _variableInitializers = {};
-  final Map<Element, Expression> _executableReturns = {};
-  final Map<Element, List<Expression>> _parameterValues = {};
-
-  void indexUnit(CompilationUnit unit) {
-    unit.accept(
-      _CallbackDefinitionCollector(
-        variableInitializers: _variableInitializers,
-        executableReturns: _executableReturns,
-        parameterValues: _parameterValues,
-      ),
-    );
-  }
-
-  _CallbackTargets resolve(Expression expression, ProjectContext project) =>
-      _resolve(expression, project, const {}, 0);
-
-  _CallbackTargets _resolve(
-    Expression expression,
-    ProjectContext project,
-    Set<Element> visiting,
-    int depth,
-  ) {
-    if (depth >= _maxDepth) return const _CallbackTargets.unresolved();
-    if (expression is ParenthesizedExpression) {
-      return _resolve(expression.expression, project, visiting, depth + 1);
-    }
-    if (expression is AsExpression) {
-      return _resolve(expression.expression, project, visiting, depth + 1);
-    }
-    if (expression is ConditionalExpression) {
-      return _merge([
-        _resolve(expression.thenExpression, project, visiting, depth + 1),
-        _resolve(expression.elseExpression, project, visiting, depth + 1),
-      ]);
-    }
-    if (expression is MethodInvocation) {
-      return _resolveInvocation(
-        expression.methodName.element,
-        project,
-        visiting,
-        depth,
-      );
-    }
-    if (expression is FunctionExpressionInvocation) {
-      return _resolveInvocation(expression.element, project, visiting, depth);
-    }
-    if (expression is FunctionExpression) {
-      // Closures are not valid persisted/native entrypoints. They do not name
-      // a removable top-level or static declaration.
-      return const _CallbackTargets.known();
-    }
-
-    final element = switch (expression) {
-      SimpleIdentifier(:final element) => element,
-      PrefixedIdentifier(:final identifier) => identifier.element,
-      PropertyAccess(:final propertyName) => propertyName.element,
-      _ => null,
-    };
-    if (element == null) return const _CallbackTargets.unresolved();
-    return _resolveElement(element, project, visiting, depth + 1);
-  }
-
-  _CallbackTargets _resolveInvocation(
-    Element? element,
-    ProjectContext project,
-    Set<Element> visiting,
-    int depth,
-  ) {
-    if (element == null) return const _CallbackTargets.unresolved();
-    final base = element.baseElement;
-    final returnExpression = _executableReturns[base];
-    if (returnExpression == null) {
-      return const _CallbackTargets.unresolved();
-    }
-    if (visiting.contains(base)) return const _CallbackTargets.unresolved();
-    return _resolve(returnExpression, project, {...visiting, base}, depth + 1);
-  }
-
-  _CallbackTargets _resolveElement(
-    Element element,
-    ProjectContext project,
-    Set<Element> visiting,
-    int depth,
-  ) {
-    final base = element.baseElement;
-    final parameterValues = _parameterValues[base];
-    if (parameterValues != null) {
-      if (visiting.contains(base)) return const _CallbackTargets.unresolved();
-      return _merge(
-        parameterValues.map(
-          (value) => _resolve(value, project, {...visiting, base}, depth + 1),
-        ),
-      );
-    }
-    final initializer = _variableInitializers[base];
-    if (initializer != null) {
-      if (visiting.contains(base)) return const _CallbackTargets.unresolved();
-      return _resolve(initializer, project, {...visiting, base}, depth + 1);
-    }
-
-    final returnExpression = _executableReturns[base];
-    if (returnExpression != null) {
-      if (visiting.contains(base)) return const _CallbackTargets.unresolved();
-      return _resolve(returnExpression, project, {
-        ...visiting,
-        base,
-      }, depth + 1);
-    }
-
-    final variable = base is PropertyAccessorElement ? base.variable : base;
-    if (variable is VariableElement || base is FormalParameterElement) {
-      return const _CallbackTargets.unresolved();
-    }
-
-    final fragment = DartIds.declarationFragment(base);
-    if (fragment == null) {
-      return base.library?.isInSdk == true
-          ? const _CallbackTargets.known()
-          : const _CallbackTargets.unresolved();
-    }
-    if (!DartIds.isModeledProjectFragment(project, fragment)) {
-      return const _CallbackTargets.known();
-    }
-    return _CallbackTargets.known({DartIds.declaration(project, fragment)});
-  }
-
-  _CallbackTargets _merge(Iterable<_CallbackTargets> values) {
-    final nodeIds = <String>{};
-    var unresolved = false;
-    for (final value in values) {
-      nodeIds.addAll(value.nodeIds);
-      unresolved = unresolved || value.unresolved;
-      if (nodeIds.length > _maxTargets) {
-        return _CallbackTargets(nodeIds: nodeIds, unresolved: true);
-      }
-    }
-    return _CallbackTargets(nodeIds: nodeIds, unresolved: unresolved);
-  }
-}
-
-final class _CallbackDefinitionCollector extends RecursiveAstVisitor<void> {
-  _CallbackDefinitionCollector({
-    required this.variableInitializers,
-    required this.executableReturns,
-    required this.parameterValues,
-  });
-
-  final Map<Element, Expression> variableInitializers;
-  final Map<Element, Expression> executableReturns;
-  final Map<Element, List<Expression>> parameterValues;
-
-  @override
-  void visitVariableDeclaration(VariableDeclaration node) {
-    final fragment = node.declaredFragment;
-    final initializer = node.initializer;
-    if (fragment != null && initializer != null) {
-      variableInitializers[fragment.element.baseElement] = initializer;
-    }
-    super.visitVariableDeclaration(node);
-  }
-
-  @override
-  void visitFunctionDeclaration(FunctionDeclaration node) {
-    final fragment = node.declaredFragment;
-    final body = node.functionExpression.body;
-    if (fragment != null && body is ExpressionFunctionBody) {
-      executableReturns[fragment.element.baseElement] = body.expression;
-    }
-    super.visitFunctionDeclaration(node);
-  }
-
-  @override
-  void visitMethodDeclaration(MethodDeclaration node) {
-    final fragment = node.declaredFragment;
-    final body = node.body;
-    if (fragment != null && body is ExpressionFunctionBody) {
-      executableReturns[fragment.element.baseElement] = body.expression;
-    }
-    super.visitMethodDeclaration(node);
-  }
-
-  @override
-  void visitMethodInvocation(MethodInvocation node) {
-    final element = node.methodName.element;
-    _recordArguments(
-      element is ExecutableElement ? element : null,
-      node.argumentList.arguments,
-    );
-    super.visitMethodInvocation(node);
-  }
-
-  @override
-  void visitFunctionExpressionInvocation(FunctionExpressionInvocation node) {
-    _recordArguments(node.element, node.argumentList.arguments);
-    super.visitFunctionExpressionInvocation(node);
-  }
-
-  void _recordArguments(
-    ExecutableElement? executable,
-    Iterable<AstNode> arguments,
-  ) {
-    if (executable == null) return;
-    final parameters = executable.formalParameters;
-    var positionalIndex = 0;
-    for (final argument in arguments) {
-      FormalParameterElement? parameter;
-      final value = analyzerArgumentExpression(argument);
-      final namedArgument = analyzerNamedArgumentName(argument);
-      if (namedArgument != null) {
-        for (final candidate in parameters) {
-          if (candidate.isNamed && candidate.name == namedArgument) {
-            parameter = candidate;
-            break;
-          }
-        }
-      } else {
-        while (positionalIndex < parameters.length &&
-            !parameters[positionalIndex].isPositional) {
-          positionalIndex++;
-        }
-        if (positionalIndex < parameters.length) {
-          parameter = parameters[positionalIndex++];
-        }
-      }
-      if (parameter != null) {
-        (parameterValues[parameter.baseElement] ??= []).add(value);
-      }
-    }
-  }
-}
-
-final class _CallbackTargets {
-  const _CallbackTargets({required this.nodeIds, required this.unresolved});
-
-  const _CallbackTargets.known([this.nodeIds = const {}]) : unresolved = false;
-
-  const _CallbackTargets.unresolved() : nodeIds = const {}, unresolved = true;
-
-  final Set<String> nodeIds;
-  final bool unresolved;
 }
 
 /// Finds source declarations referenced by generated part files.

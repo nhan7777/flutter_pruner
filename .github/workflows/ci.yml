@@ -108,6 +108,24 @@ jobs:
       - name: Run tests
         run: dart test --reporter expanded
 
+      - name: Verify resolved blocker evidence
+        run: dart run tool/verify_release_blockers.dart --run-tests
+
+      - name: Generate hosted Windows blocker evidence
+        if: matrix.os == 'windows-latest'
+        run: >-
+          dart run tool/generate_windows_blocker_evidence.dart
+          --output "${{ runner.temp }}/windows-blocker-evidence"
+          --commit "${{ github.sha }}"
+
+      - name: Upload hosted Windows blocker evidence
+        if: matrix.os == 'windows-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-blocker-evidence-${{ github.sha }}
+          path: ${{ runner.temp }}/windows-blocker-evidence
+          if-no-files-found: error
+
   dependency-bounds:
     name: Dependency lower bounds
     runs-on: ubuntu-latest
@@ -172,3 +190,29 @@ jobs:
           '.statistics.findings.byTier.SAFE == 0 and
           .statistics.findings.byTier.HIGH == 0'
           .flutter_pruner/reports/self-scan.json
+
+  release-admission:
+    name: Release admission
+    needs: [analyze, latest-analyzer, test, dependency-bounds, package, smoke]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: '3.13.0'
+
+      - name: Install dependencies
+        run: dart pub get
+
+      - name: Download hosted Windows blocker evidence
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-blocker-evidence-${{ github.sha }}
+          path: ${{ runner.temp }}/windows-blocker-evidence
+
+      - name: Enforce release blockers
+        run: >-
+          dart run tool/verify_release_blockers.dart
+          --hosted-evidence-dir "${{ runner.temp }}/windows-blocker-evidence"
+          --expected-commit "${{ github.sha }}"

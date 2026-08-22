@@ -10,6 +10,8 @@ import '../adapter_report_definition.dart';
 import '../analyzer_adapter.dart';
 import '../dart/dart_analysis_workspace.dart';
 import '../dart/dart_application_reachability.dart';
+import '../dart/dart_execution_context_service.dart';
+import '../dart/dart_execution_reachability_service.dart';
 import 'arb_inventory.dart';
 import 'l10n_config.dart';
 import 'l10n_usage_resolver.dart';
@@ -89,24 +91,46 @@ class L10nAdapter extends AnalyzerAdapter {
       L10nConfig.load(project).isApplicable;
 
   @override
-  Future<void> analyze(ProjectContext project, GraphBuilder graph) =>
-      _analyze(project, graph, DartAnalysisWorkspace(project));
+  Future<void> analyze(ProjectContext project, GraphBuilder graph) async {
+    final workspace = DartAnalysisWorkspace(project);
+    final contexts = await DefaultDartExecutionContextService(
+      workspace: workspace,
+    ).resolve(project);
+    await _analyze(
+      project,
+      graph,
+      workspace,
+      DefaultDartExecutionReachabilityService(
+        workspace: workspace,
+        contexts: contexts,
+      ),
+    );
+  }
 
   @override
   Future<void> analyzeWithServices(
     ProjectContext project,
     GraphBuilder graph,
     AdapterServices services,
-  ) => _analyze(
-    project,
-    graph,
-    services.dartWorkspace ?? DartAnalysisWorkspace(project),
-  );
+  ) async {
+    final workspace = services.dartWorkspace ?? DartAnalysisWorkspace(project);
+    final reachabilityService =
+        services.dartExecutionReachabilityService ??
+        DefaultDartExecutionReachabilityService(
+          workspace: workspace,
+          contexts:
+              await (services.dartExecutionContextService ??
+                      DefaultDartExecutionContextService(workspace: workspace))
+                  .resolve(project),
+        );
+    await _analyze(project, graph, workspace, reachabilityService);
+  }
 
   Future<void> _analyze(
     ProjectContext project,
     GraphBuilder graph,
     DartAnalysisWorkspace workspace,
+    DartExecutionReachabilityService reachabilityService,
   ) async {
     final configResult = L10nConfig.load(project);
     switch (configResult) {
@@ -128,16 +152,13 @@ class L10nAdapter extends AnalyzerAdapter {
       case L10nConfigValid(:final config):
         final inventory = ArbInventory.read(project, config);
         final applicationReachability =
-            await DartApplicationReachability.discover(
-              project,
-              workspace: workspace,
+            DartApplicationReachability.fromSnapshot(
+              await reachabilityService.resolve(project),
             );
         final resolver = L10nUsageResolver(project, config, inventory);
         await resolver.analyzeProject(
           workspace: workspace,
-          includedUnitPaths: applicationReachability.isComplete
-              ? applicationReachability.unitPaths
-              : null,
+          includedUnitPaths: applicationReachability.globalUsageUnitPaths,
         );
 
         for (final key in inventory.keys) {
@@ -170,6 +191,31 @@ class L10nAdapter extends AnalyzerAdapter {
               location: reference.location,
             ),
           );
+          final sourcePath = _sourcePathFromLocation(
+            project,
+            reference.location,
+          );
+          if (sourcePath == null) continue;
+          for (final entry
+              in applicationReachability.auxiliaryContextIssues.entries) {
+            final retained =
+                applicationReachability.auxiliaryRetainedUnitPaths[entry.key];
+            final proven =
+                applicationReachability.auxiliaryProvenUnitPaths[entry.key];
+            if (retained == null ||
+                !retained.contains(sourcePath) ||
+                (proven?.contains(sourcePath) ?? false)) {
+              continue;
+            }
+            for (final issue in entry.value) {
+              graph.addBlocker(
+                reason: '${issue.code} [${entry.key}]: ${issue.reason}',
+                location: reference.location,
+                sourceNodeId: reference.callerId,
+                affectedNodeIds: {reference.l10nNodeId},
+              );
+            }
+          }
         }
 
         for (final blocker in inventory.blockers) {
@@ -311,6 +357,15 @@ String _dartNamespaceForPath(ProjectContext project, String path) {
   final candidate = _canonicalPath(path);
   final relative = p.relative(candidate, from: root).replaceAll(r'\', '/');
   return 'dart:${project.packageName}/$relative';
+}
+
+String? _sourcePathFromLocation(ProjectContext project, String location) {
+  final columnSeparator = location.lastIndexOf(':');
+  final lineSeparator = columnSeparator <= 0
+      ? -1
+      : location.lastIndexOf(':', columnSeparator - 1);
+  if (lineSeparator <= 0) return null;
+  return _canonicalPath(project.resolve(location.substring(0, lineSeparator)));
 }
 
 String _canonicalPath(String path) {

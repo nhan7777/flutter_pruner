@@ -30,6 +30,9 @@ enum ClassificationReason {
   /// External package consumers were intentionally excluded from analysis.
   externalConsumersNotScanned('external-consumers-not-scanned'),
 
+  /// An execution context retains the node without proving an exact caller.
+  retainedOnly('retained-only'),
+
   /// The operation spans a whole library or dependency closure.
   broadRemovalScope('broad-removal-scope');
 
@@ -59,6 +62,8 @@ enum ClassificationReason {
       'This change cannot be reversed exactly',
     ClassificationReason.externalConsumersNotScanned =>
       'External consumers may still use this package surface',
+    ClassificationReason.retainedOnly =>
+      'Retention evidence prevents automatic removal',
     ClassificationReason.broadRemovalScope =>
       'Removal affects a broad dependency scope',
   };

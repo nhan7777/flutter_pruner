@@ -47,6 +47,28 @@ void main() {
     ];
     final measurements = <RunMeasurement>[];
     final exclusions = <String, int>{'directory:.dart_tool': 1};
+    final integrityReasons = <String>['unknown environment'];
+    final integrityByExecutionTarget = <String, ExecutionTargetIntegrityReport>{
+      'aux:test:test.dart:incomplete': ExecutionTargetIntegrityReport(
+        id: 'aux:test:test.dart:incomplete',
+        domain: 'auxiliary',
+        complete: false,
+        danglingEdgeCount: 0,
+        danglingRootCount: 0,
+        incompleteReasons: integrityReasons,
+      ),
+    };
+    final auxiliaryExecutionTargets = <AuxiliaryExecutionTarget>[
+      AuxiliaryExecutionTarget(
+        id: 'aux:test:test.dart:incomplete',
+        domain: AuxiliaryExecutionDomain.test,
+        environmentValues: const {},
+        environmentComplete: false,
+        reason: 'unknown environment',
+      ),
+    ];
+    final auxiliaryExecutionTargetIssues =
+        <AuxiliaryExecutionTargetRegistryIssue>[];
     final requiredStepIds = <String>['analyze'];
     final observedStepIds = <String>['analyze'];
     final steps = <VerificationStepReport>[
@@ -84,6 +106,9 @@ void main() {
         rootCount: 1,
         recordedBlockerCount: 0,
         danglingEdgeCount: 0,
+        integrityByExecutionTarget: integrityByExecutionTarget,
+        auxiliaryExecutionTargets: auxiliaryExecutionTargets,
+        auxiliaryExecutionTargetIssues: auxiliaryExecutionTargetIssues,
         adapterRuns: passRuns,
         findingStatistics: FindingStatistics(
           total: 1,
@@ -155,6 +180,17 @@ void main() {
     unboundBlockers.clear();
     measurements.add(_measurement());
     exclusions.clear();
+    integrityReasons.clear();
+    integrityByExecutionTarget.clear();
+    auxiliaryExecutionTargets.clear();
+    auxiliaryExecutionTargetIssues.add(
+      const AuxiliaryExecutionTargetRegistryIssue(
+        id: 'aux:test:late',
+        acceptedDefinitionSha256: 'accepted',
+        rejectedDefinitionSha256: 'rejected',
+        reason: 'late',
+      ),
+    );
     requiredStepIds.add('test');
     observedStepIds.clear();
     steps.clear();
@@ -192,6 +228,18 @@ void main() {
     expect(report.analysisPasses.single.exclusionsByReason, {
       'directory:.dart_tool': 1,
     });
+    expect(
+      report
+          .analysisPasses
+          .single
+          .integrityByExecutionTarget
+          .values
+          .single
+          .incompleteReasons,
+      ['unknown environment'],
+    );
+    expect(report.auxiliaryExecutionTargets, hasLength(1));
+    expect(report.auxiliaryExecutionTargetIssues, isEmpty);
     expect(report.verificationAttempts.single.requiredStepIds, ['analyze']);
     expect(report.verificationAttempts.single.observedStepIds, ['analyze']);
     expect(report.verificationAttempts.single.steps, hasLength(1));
@@ -238,6 +286,25 @@ void main() {
       () => report.analysisPasses.single.unboundBlockers.clear(),
       throwsUnsupportedError,
     );
+    expect(
+      () => report.analysisPasses.single.integrityByExecutionTarget.clear(),
+      throwsUnsupportedError,
+    );
+    expect(
+      () => report
+          .analysisPasses
+          .single
+          .integrityByExecutionTarget
+          .values
+          .single
+          .incompleteReasons
+          .clear(),
+      throwsUnsupportedError,
+    );
+    expect(
+      () => report.auxiliaryExecutionTargets.clear(),
+      throwsUnsupportedError,
+    );
     expect(() => report.applyFindingOutcomes.clear(), throwsUnsupportedError);
   });
 
@@ -254,7 +321,17 @@ void main() {
     relatedNodeIds.clear();
 
     expect(outcome.relatedNodeIds, ['dart:project/lib/main.dart#main']);
+    expect(outcome.finding.retainedIn, ['android', 'web']);
+    expect(outcome.finding.auxiliaryRetainedIn, [
+      'aux:runtime:callback',
+      'aux:test:support',
+    ]);
     expect(() => outcome.relatedNodeIds.clear(), throwsUnsupportedError);
+    expect(() => outcome.finding.retainedIn.clear(), throwsUnsupportedError);
+    expect(
+      () => outcome.finding.auxiliaryRetainedIn.clear(),
+      throwsUnsupportedError,
+    );
   });
 
   test('apply selection snapshots and freezes exact finding ids', () {
@@ -320,6 +397,13 @@ Finding _finding() => Finding(
     notProtected: true,
     noPublicApiRisk: true,
     hasDeterministicInverse: true,
+    notRetained: true,
   ),
+  retainedIn: const ['web', 'android', 'web'],
+  auxiliaryRetainedIn: const [
+    'aux:test:support',
+    'aux:runtime:callback',
+    'aux:test:support',
+  ],
   reportingAdapterId: 'assets',
 );

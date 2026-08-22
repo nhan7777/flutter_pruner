@@ -1,17 +1,517 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter_pruner/src/adapters/adapter_report_definition.dart';
 import 'package:flutter_pruner/src/cli/formatters/json_formatter.dart';
+import 'package:flutter_pruner/src/cli/formatters/report_formatter.dart';
+import 'package:flutter_pruner/src/core/confidence/classification_reason.dart';
 import 'package:flutter_pruner/src/core/confidence/confidence.dart';
 import 'package:flutter_pruner/src/core/confidence/finding.dart';
-import 'package:flutter_pruner/src/core/graph/build_condition.dart';
 import 'package:flutter_pruner/src/core/graph/evidence.dart';
+import 'package:flutter_pruner/src/core/graph/execution_target.dart';
 import 'package:flutter_pruner/src/core/graph/node.dart';
 import 'package:flutter_pruner/src/core/project/target_matrix.dart';
 import 'package:flutter_pruner/src/reporting/run_report.dart';
 import 'package:test/test.dart';
 
 void main() {
+  test('v2 legacy wire contract matches frozen UTF-8 bytes', () {
+    final rendered = utf8.encode(
+      const JsonFormatter(version: 2).format(_v2WireContractReport()),
+    );
+
+    expect(rendered, _v2WireContractFixture.readAsBytesSync());
+  });
+
+  test('v2 legacy wire contract retains selectors and streams identically', () {
+    const formatter = JsonFormatter(version: 2);
+    final rendered = formatter.format(_v2WireContractReport());
+    final streamed = StringBuffer();
+    formatter.writeTo(_v2WireContractReport(), streamed);
+
+    expect(streamed.toString(), rendered);
+
+    final fixtureBytes = _v2WireContractFixture.readAsBytesSync();
+    final fixtureText = utf8.decode(fixtureBytes);
+    final output = jsonDecode(fixtureText) as Map<String, Object?>;
+
+    expect(fixtureText, contains('Unicode caf\u00e9 ✓'));
+    expect(fixtureText, contains(r'\"route\"'));
+    expect(fixtureText, contains(r'\\segment'));
+    expect(fixtureText, contains(r'\u0001'));
+    expect(fixtureText, contains(r'\n'));
+    expect(fixtureText, contains(r'\t'));
+    expect(fixtureText, contains('https://example.test/a/b//route'));
+
+    expect(output['version'], 2);
+    final summary = output['summary'] as Map<String, Object?>;
+    expect(summary['safe'], 1);
+    expect(summary['high'], 0);
+    expect(summary['review'], 0);
+    expect(summary['protected'], 1);
+    expect(summary['totalSourceBytes'], 13);
+
+    final coverage = output['analysisCoverage'] as Map<String, Object?>;
+    expect(coverage.containsKey('analysisMode'), isFalse);
+    expect(coverage['targetMatrix'], {
+      'status': 'declaredPartial',
+      'complete': false,
+      'source': '.flutter_pruner/config.json',
+      'issues': ['web target omitted'],
+      'targets': [
+        {
+          'name': 'android-prod',
+          'platform': 'android',
+          'entrypoint': 'lib/main.dart',
+          'flavor': 'prod',
+          'dartDefines': {'API_PATH': 'https://example.test/a/b//route'},
+        },
+        {
+          'name': 'ios-default',
+          'platform': 'ios',
+          'entrypoint': 'lib/main.dart',
+          'dartDefines': <String, String>{},
+        },
+      ],
+    });
+    final targets =
+        ((coverage['targetMatrix'] as Map<String, Object?>)['targets']
+                as List<Object?>)
+            .cast<Map<String, Object?>>();
+    expect(targets.first['flavor'], 'prod');
+    expect(targets.last.containsKey('flavor'), isFalse);
+    expect(coverage['roots'], {
+      'mode': 'packagePublicApi',
+      'complete': false,
+      'source': 'lib/public_api.dart',
+      'publicEntrypoints': ['lib/public_api.dart'],
+      'issues': ['external consumer path is unknown'],
+    });
+
+    final findings = (output['findings'] as List<Object?>)
+        .cast<Map<String, Object?>>();
+    expect(findings, hasLength(2));
+    final protected = findings.first;
+    final safe = findings.last;
+    for (final finding in findings) {
+      expect(finding.containsKey('retainedIn'), isFalse);
+      expect(finding.containsKey('auxiliaryRetainedIn'), isFalse);
+      expect(
+        (finding['predicates'] as Map<String, Object?>).containsKey(
+          'notRetained',
+        ),
+        isFalse,
+      );
+    }
+    expect(protected['classificationReasons'], [
+      'dynamic-reference',
+      'external-consumers-not-scanned',
+    ]);
+    expect(protected['protectionReasons'], ['public API "entry" \\ keep']);
+    expect(protected['sourceBytes'], 13);
+    expect(protected['proposedAction'], 'remove "legacy" \\ never');
+    expect(
+      protected['whyNotSafe'],
+      'rule not on auto-fix allowlist; reachable in at least one target; '
+      'an unresolved dynamic construct could match; node is protected; '
+      'node may be part of a public API surface; edit is not reversibly '
+      'invertible; analysis target/root coverage is incomplete; '
+      'no supported apply action exists',
+    );
+    expect(
+      (protected['node'] as Map<String, Object?>)['id'],
+      'asset:app/assets/đặc-biệt/"quote"\\segment\u0001\n\t/slash//like',
+    );
+    final evidence = (protected['evidence'] as List<Object?>)
+        .cast<Map<String, Object?>>();
+    expect(evidence, hasLength(2));
+    expect(evidence.first, {
+      'kind': 'configuration',
+      'producer': 'asset/scanner',
+      'description':
+          'Unicode café ✓, quote " and backslash \\; control \u0001\n\t; https://example.test/a/b//route',
+      'exact': false,
+      'location': 'pubspec.yaml:12:7',
+    });
+    expect(evidence.last, {
+      'kind': 'runtimeObservation',
+      'producer': 'asset/scanner',
+      'description': 'Observed without a source location',
+      'exact': true,
+    });
+    expect(evidence.first['location'], 'pubspec.yaml:12:7');
+    expect(evidence.last.containsKey('location'), isFalse);
+    final blockers = (protected['blockers'] as List<Object?>)
+        .cast<Map<String, Object?>>();
+    expect(blockers, hasLength(4));
+    expect(blockers.first, {
+      'producer': 'route/api',
+      'reason': 'unresolved "route" \\ name',
+      'location': 'lib/routes.dart:7:3',
+      'sourceNodeId': 'route:app:/legacy//:id',
+    });
+    expect(blockers.first.containsKey('affectedNodeIds'), isFalse);
+    expect(blockers[1], blockers[2]);
+    expect(blockers[1], {
+      'producer': 'route/api',
+      'reason': 'unresolved "route" \\ name',
+      'location': 'lib/routes.dart:8:3',
+      'sourceNodeId': 'route:app:/legacy//:id',
+      'affectedNamespace': 'assets/path//like/',
+      'affectedNodeIds': ['node:a', 'node:z'],
+    });
+    expect(blockers.last, {
+      'producer': 'route/api',
+      'reason': 'unscoped blocker lacks optional locator fields',
+    });
+    expect(blockers.first['location'], 'lib/routes.dart:7:3');
+    expect(blockers.first['sourceNodeId'], 'route:app:/legacy//:id');
+    expect(blockers.last.containsKey('location'), isFalse);
+    expect(blockers.last.containsKey('sourceNodeId'), isFalse);
+
+    for (final optionalField in [
+      'protectionReasons',
+      'blockers',
+      'evidence',
+      'proposedAction',
+      'sourceBytes',
+      'whyNotSafe',
+    ]) {
+      expect(safe.containsKey(optionalField), isFalse);
+    }
+    expect(safe['classificationReasons'], isEmpty);
+    expect(safe['confidence'], 'SAFE');
+  });
+
+  test('ReportFormatter writeTo defaults to format', () {
+    final formatter = _StringOnlyFormatter();
+    final sink = StringBuffer();
+
+    formatter.writeTo(_report(), sink);
+
+    expect(sink.toString(), 'formatted report');
+    expect(formatter.formatCalls, 1);
+  });
+
+  test('v2 preflight rejects before either public path emits output', () {
+    final formatter = JsonFormatter(
+      version: 2,
+      v2Limits: JsonV2SerializationLimits(
+        maxBlockerReferences: 0,
+        maxAffectedNodeIdReferences: 0,
+        maxAffectedNodeIdsPerBlocker: 0,
+      ),
+    );
+    final report = _report(
+      blockers: [Blocker(producer: 'adapter', reason: 'not admitted')],
+    );
+    final sink = _ChunkObservingSink();
+
+    expect(
+      () => formatter.format(report),
+      throwsA(isA<JsonV2CompatibilityLimitException>()),
+    );
+    expect(
+      () => formatter.writeTo(report, sink),
+      throwsA(isA<JsonV2CompatibilityLimitException>()),
+    );
+    expect(sink.chunks, isEmpty);
+  });
+
+  test('v2 writeTo streams compact token-sized chunks', () {
+    const formatter = JsonFormatter(version: 2);
+    final sink = _ChunkObservingSink();
+    final expected = utf8.decode(_v2WireContractFixture.readAsBytesSync());
+
+    formatter.writeTo(_v2WireContractReport(), sink);
+
+    expect(sink.toString(), expected);
+    expect(
+      sink.chunks.every((chunk) => chunk.length < expected.length),
+      isTrue,
+      reason:
+          'This checks write routing/shape, not heap allocation: no sink write '
+          'may contain the complete report-sized payload.',
+    );
+  });
+
+  test(
+    'v2 preflight returns the complete repeated compatibility projection',
+    () {
+      final repeated = Blocker(
+        producer: 'adapter',
+        reason: 'dynamic lookup',
+        affectedNodeIds: {'node:one', 'node:two'},
+      );
+      final formatter = JsonFormatter(
+        version: 2,
+        v2Limits: JsonV2SerializationLimits(
+          maxBlockerReferences: 2,
+          maxAffectedNodeIdReferences: 4,
+          maxAffectedNodeIdsPerBlocker: 2,
+        ),
+      );
+
+      final size = formatter.preflight(_report(blockers: [repeated, repeated]));
+
+      expect(size, isNotNull);
+      expect(size!.blockerReferences, 2);
+      expect(size.affectedNodeIdReferences, 4);
+      expect(size.largestAffectedNodeIdsPerBlocker, 2);
+    },
+  );
+
+  test('v2 preflight accepts zero occurrences at zero limits', () {
+    final formatter = JsonFormatter(
+      version: 2,
+      v2Limits: JsonV2SerializationLimits(
+        maxBlockerReferences: 0,
+        maxAffectedNodeIdReferences: 0,
+        maxAffectedNodeIdsPerBlocker: 0,
+      ),
+    );
+
+    final size = formatter.preflight(_report(zeroFindings: true));
+
+    expect(size, isNotNull);
+    expect(size!.blockerReferences, 0);
+    expect(size.affectedNodeIdReferences, 0);
+    expect(size.largestAffectedNodeIdsPerBlocker, 0);
+  });
+
+  test('v2 preflight rejects the first blocker reference beyond its limit', () {
+    final formatter = JsonFormatter(
+      version: 2,
+      v2Limits: JsonV2SerializationLimits(
+        maxBlockerReferences: 1,
+        maxAffectedNodeIdReferences: 10,
+        maxAffectedNodeIdsPerBlocker: 10,
+      ),
+    );
+
+    expect(
+      () => formatter.preflight(
+        _report(
+          blockers: [
+            Blocker(producer: 'adapter', reason: 'first'),
+            Blocker(producer: 'adapter', reason: 'one too many'),
+          ],
+        ),
+      ),
+      throwsA(
+        isA<JsonV2CompatibilityLimitException>()
+            .having(
+              (error) => error.limitName,
+              'limitName',
+              'maxBlockerReferences',
+            )
+            .having((error) => error.limit, 'limit', 1)
+            .having((error) => error.observed, 'observed', 2),
+      ),
+    );
+  });
+
+  test('v2 preflight rejects the first expanded ID beyond its limit', () {
+    final formatter = JsonFormatter(
+      version: 2,
+      v2Limits: JsonV2SerializationLimits(
+        maxBlockerReferences: 10,
+        maxAffectedNodeIdReferences: 2,
+        maxAffectedNodeIdsPerBlocker: 10,
+      ),
+    );
+
+    expect(
+      () => formatter.preflight(
+        _report(
+          blockers: [
+            Blocker(
+              producer: 'adapter',
+              reason: 'one too many IDs',
+              affectedNodeIds: {'node:one', 'node:two', 'node:three'},
+            ),
+          ],
+        ),
+      ),
+      throwsA(
+        isA<JsonV2CompatibilityLimitException>()
+            .having(
+              (error) => error.limitName,
+              'limitName',
+              'maxAffectedNodeIdReferences',
+            )
+            .having((error) => error.limit, 'limit', 2)
+            .having((error) => error.observed, 'observed', 3),
+      ),
+    );
+  });
+
+  test('v2 preflight rejects an oversized blocker before ID expansion', () {
+    final formatter = JsonFormatter(
+      version: 2,
+      v2Limits: JsonV2SerializationLimits(
+        maxBlockerReferences: 10,
+        maxAffectedNodeIdReferences: 10,
+        maxAffectedNodeIdsPerBlocker: 2,
+      ),
+    );
+
+    expect(
+      () => formatter.preflight(
+        _report(
+          blockers: [
+            Blocker(
+              producer: 'adapter',
+              reason: 'oversized',
+              affectedNodeIds: {'node:one', 'node:two', 'node:three'},
+            ),
+          ],
+        ),
+      ),
+      throwsA(
+        isA<JsonV2CompatibilityLimitException>()
+            .having(
+              (error) => error.limitName,
+              'limitName',
+              'maxAffectedNodeIdsPerBlocker',
+            )
+            .having((error) => error.limit, 'limit', 2)
+            .having((error) => error.observed, 'observed', 3),
+      ),
+    );
+  });
+
+  test('v2 preflight stops at the first violating occurrence', () {
+    final formatter = JsonFormatter(
+      version: 2,
+      v2Limits: JsonV2SerializationLimits(
+        maxBlockerReferences: 1,
+        maxAffectedNodeIdReferences: 100,
+        maxAffectedNodeIdsPerBlocker: 100,
+      ),
+    );
+
+    expect(
+      () => formatter.preflight(
+        _report(
+          blockers: [
+            Blocker(producer: 'adapter', reason: 'first'),
+            Blocker(producer: 'adapter', reason: 'violating occurrence'),
+            Blocker(
+              producer: 'adapter',
+              reason: 'later fan-out',
+              affectedNodeIds: {'node:one', 'node:two', 'node:three'},
+            ),
+          ],
+        ),
+      ),
+      throwsA(
+        isA<JsonV2CompatibilityLimitException>().having(
+          (error) => error.observed,
+          'observed',
+          2,
+        ),
+      ),
+    );
+  });
+
+  test(
+    'v2 preflight exception text exposes only limit counts and v3 guidance',
+    () {
+      final formatter = JsonFormatter(
+        version: 2,
+        v2Limits: JsonV2SerializationLimits(
+          maxBlockerReferences: 10,
+          maxAffectedNodeIdReferences: 10,
+          maxAffectedNodeIdsPerBlocker: 1,
+        ),
+      );
+
+      JsonV2CompatibilityLimitException? error;
+      try {
+        formatter.preflight(
+          _report(
+            blockers: [
+              Blocker(
+                producer: 'adapter',
+                reason: 'secret/path.dart:12',
+                affectedNodeIds: {'node:secret/a', 'node:secret/b'},
+              ),
+            ],
+          ),
+        );
+      } on JsonV2CompatibilityLimitException catch (caught) {
+        error = caught;
+      }
+
+      expect(error, isNotNull);
+      final text = error.toString();
+      expect(text, contains('maxAffectedNodeIdsPerBlocker'));
+      expect(text, contains('2 > 1'));
+      expect(text, contains('--json-version 3'));
+      expect(text, isNot(contains('node:secret')));
+      expect(text, isNot(contains('secret/path.dart')));
+    },
+  );
+
+  test('v3 preflight is not subject to v2 compatibility limits', () {
+    final formatter = JsonFormatter(
+      v2Limits: JsonV2SerializationLimits(
+        maxBlockerReferences: 0,
+        maxAffectedNodeIdReferences: 0,
+        maxAffectedNodeIdsPerBlocker: 0,
+      ),
+    );
+
+    expect(
+      formatter.preflight(
+        _report(
+          blockers: [
+            Blocker(
+              producer: 'adapter',
+              reason: 'v3 remains unbounded',
+              affectedNodeIds: {'node:one'},
+            ),
+          ],
+        ),
+      ),
+      isNull,
+    );
+  });
+
+  test('v2 serialization limits reject each negative input', () {
+    expect(
+      () => JsonV2SerializationLimits(maxBlockerReferences: -1),
+      throwsA(
+        isA<ArgumentError>().having(
+          (error) => error.name,
+          'name',
+          'maxBlockerReferences',
+        ),
+      ),
+    );
+    expect(
+      () => JsonV2SerializationLimits(maxAffectedNodeIdReferences: -1),
+      throwsA(
+        isA<ArgumentError>().having(
+          (error) => error.name,
+          'name',
+          'maxAffectedNodeIdReferences',
+        ),
+      ),
+    );
+    expect(
+      () => JsonV2SerializationLimits(maxAffectedNodeIdsPerBlocker: -1),
+      throwsA(
+        isA<ArgumentError>().having(
+          (error) => error.name,
+          'name',
+          'maxAffectedNodeIdsPerBlocker',
+        ),
+      ),
+    );
+  });
+
   test('v3 separates typed measurements and duplicate details', () {
     final rendered = const JsonFormatter().format(_report());
     expect(rendered, isNot(contains('\x1B[')));
@@ -39,10 +539,256 @@ void main() {
     expect(finding['reportingAdapterId'], 'duplicates');
     expect(finding['manualRiskCodes'], isEmpty);
     expect(finding['applyEligible'], isFalse);
+    expect((finding['predicates'] as Map)['notRetained'], isFalse);
+    expect(finding['retainedIn'], ['alpha', 'zeta']);
+    expect(finding['auxiliaryRetainedIn'], [
+      'aux:runtime:callback',
+      'aux:test:support',
+    ]);
     expect((finding['details'] as Map)['paths'], [
       'assets/a.png',
       'assets/b.png',
     ]);
+  });
+
+  test('v3 snapshots auxiliary coverage and per-context graph integrity', () {
+    final sourceTarget = BuildTarget(
+      name: 'android-prod',
+      platform: 'android',
+      entrypoint: 'lib/main_prod.dart',
+      flavor: 'prod',
+      dartDefines: const {'Z_LAST': '2', 'A_FIRST': '1'},
+    );
+    final auxiliaryTarget = AuxiliaryExecutionTarget(
+      id: 'aux:runtime:callback:android',
+      domain: AuxiliaryExecutionDomain.runtime,
+      environmentValues: const {'Z_LAST': '2', 'A_FIRST': '1'},
+      environmentComplete: true,
+      reason: 'native callback\ncontext',
+      sourceConfiguredTarget: sourceTarget,
+    );
+    final report = _report(
+      auxiliaryExecutionTargets: [auxiliaryTarget],
+      auxiliaryExecutionTargetIssues: const [
+        AuxiliaryExecutionTargetRegistryIssue(
+          id: 'aux:runtime:conflict',
+          acceptedDefinitionSha256: 'accepted',
+          rejectedDefinitionSha256: 'rejected',
+          reason: 'conflicting\ttarget',
+        ),
+      ],
+      integrityByExecutionTarget: {
+        auxiliaryTarget.id: ExecutionTargetIntegrityReport(
+          id: auxiliaryTarget.id,
+          domain: 'auxiliary',
+          complete: false,
+          danglingEdgeCount: 1,
+          danglingRootCount: 0,
+          incompleteReasons: const ['zeta reason', 'alpha\t reason'],
+        ),
+      },
+      unattributedIntegrity: ExecutionTargetIntegrityReport(
+        id: 'unattributed',
+        domain: 'unattributed',
+        complete: false,
+        danglingEdgeCount: 0,
+        danglingRootCount: 1,
+      ),
+    );
+
+    final output = jsonDecode(const JsonFormatter().format(report)) as Map;
+    final coverage = output['analysisCoverage'] as Map;
+    expect(coverage['auxiliaryExecutionTargets'], [
+      {
+        'id': auxiliaryTarget.id,
+        'domain': 'runtime',
+        'environmentValues': {'A_FIRST': '1', 'Z_LAST': '2'},
+        'environmentComplete': true,
+        'reason': 'native callback context',
+        'sourceConfiguredTarget': {
+          'name': 'android-prod',
+          'platform': 'android',
+          'entrypoint': 'lib/main_prod.dart',
+          'flavor': 'prod',
+          'dartDefines': {'A_FIRST': '1', 'Z_LAST': '2'},
+        },
+      },
+    ]);
+    expect(coverage['auxiliaryExecutionTargetIssues'], [
+      {
+        'id': 'aux:runtime:conflict',
+        'acceptedDefinitionSha256': 'accepted',
+        'rejectedDefinitionSha256': 'rejected',
+        'reason': 'conflicting target',
+      },
+    ]);
+    final graph =
+        (((output['execution'] as Map)['analysisPasses'] as List).single
+                as Map)['graph']
+            as Map;
+    expect(graph['integrityByExecutionTarget'], {
+      'app:android': {
+        'id': 'app:android',
+        'domain': 'configuredTarget',
+        'complete': true,
+        'danglingEdges': 0,
+        'danglingRoots': 0,
+        'incompleteReasons': <String>[],
+      },
+      auxiliaryTarget.id: {
+        'id': auxiliaryTarget.id,
+        'domain': 'auxiliary',
+        'complete': false,
+        'danglingEdges': 1,
+        'danglingRoots': 0,
+        'incompleteReasons': ['alpha reason', 'zeta reason'],
+      },
+      'unattributed': {
+        'id': 'unattributed',
+        'domain': 'unattributed',
+        'complete': false,
+        'danglingEdges': 0,
+        'danglingRoots': 1,
+        'incompleteReasons': <String>[],
+      },
+    });
+  });
+
+  test('v3 rejects an incomplete context inventory before writing', () {
+    final report = _report(omitConfiguredIntegrity: true);
+    const formatter = JsonFormatter();
+    final sink = StringBuffer();
+
+    expect(() => formatter.writeTo(report, sink), throwsStateError);
+    expect(sink.toString(), isEmpty);
+  });
+
+  test('v3 rejects integrity records it cannot serialize coherently', () {
+    void expectRejected(String key, ExecutionTargetIntegrityReport integrity) {
+      final report = _report(integrityByExecutionTarget: {key: integrity});
+      const formatter = JsonFormatter();
+      expect(() => formatter.format(report), throwsStateError);
+      final sink = StringBuffer();
+      expect(() => formatter.writeTo(report, sink), throwsStateError);
+      expect(sink.toString(), isEmpty);
+    }
+
+    expectRejected(
+      'app:ios',
+      ExecutionTargetIntegrityReport(
+        id: 'app:ios',
+        domain: 'configuredTarget',
+        complete: false,
+        danglingEdgeCount: 0,
+        danglingRootCount: 0,
+        incompleteReasons: const ['\n\t'],
+      ),
+    );
+    expectRejected(
+      'app:ios',
+      ExecutionTargetIntegrityReport(
+        id: 'app:ios',
+        domain: 'configuredTarget',
+        complete: false,
+        danglingEdgeCount: -1,
+        danglingRootCount: 0,
+      ),
+    );
+    expectRejected(
+      'app:ios',
+      ExecutionTargetIntegrityReport(
+        id: 'app:android',
+        domain: 'configuredTarget',
+        complete: true,
+        danglingEdgeCount: 0,
+        danglingRootCount: 0,
+      ),
+    );
+    expectRejected(
+      'app:ios',
+      ExecutionTargetIntegrityReport(
+        id: 'app:ios',
+        domain: 'auxiliary',
+        complete: true,
+        danglingEdgeCount: 0,
+        danglingRootCount: 0,
+      ),
+    );
+    expectRejected(
+      'app:ios',
+      ExecutionTargetIntegrityReport(
+        id: 'app:ios',
+        domain: 'configuredTarget',
+        complete: true,
+        danglingEdgeCount: 1,
+        danglingRootCount: 0,
+      ),
+    );
+    expectRejected(
+      'aux:test:test/bad\n_test.dart:vm',
+      ExecutionTargetIntegrityReport(
+        id: 'aux:test:test/bad\n_test.dart:vm',
+        domain: 'auxiliary',
+        complete: true,
+        danglingEdgeCount: 0,
+        danglingRootCount: 0,
+      ),
+    );
+    expectRejected(
+      'aux:runtime:aux:callback',
+      ExecutionTargetIntegrityReport(
+        id: 'aux:runtime:aux:callback',
+        domain: 'auxiliary',
+        complete: true,
+        danglingEdgeCount: 0,
+        danglingRootCount: 0,
+      ),
+    );
+  });
+
+  test('v3 accepts canonical path and hash execution-target IDs', () {
+    const external = 'aux:external:lib/scan_test.dart';
+    const executable =
+        'aux:runtime:executable:tool/a_b.dart~0123456789abcdef:incomplete';
+    const configured = 'app:android';
+    final report = _report(
+      auxiliaryExecutionTargets: [
+        AuxiliaryExecutionTarget(
+          id: external,
+          domain: AuxiliaryExecutionDomain.external,
+          environmentValues: const {},
+          environmentComplete: false,
+          reason: 'external public surface',
+        ),
+        AuxiliaryExecutionTarget(
+          id: executable,
+          domain: AuxiliaryExecutionDomain.runtime,
+          environmentValues: const {},
+          environmentComplete: false,
+          reason: 'runtime executable',
+        ),
+      ],
+      integrityByExecutionTarget: {
+        for (final id in [external, executable, configured])
+          id: ExecutionTargetIntegrityReport(
+            id: id,
+            domain: id.startsWith('app:') ? 'configuredTarget' : 'auxiliary',
+            complete: true,
+            danglingEdgeCount: 0,
+            danglingRootCount: 0,
+          ),
+      },
+    );
+
+    final output = jsonDecode(const JsonFormatter().format(report)) as Map;
+    final graph =
+        (((output['execution'] as Map)['analysisPasses'] as List).single
+                as Map)['graph']
+            as Map;
+    expect(
+      (graph['integrityByExecutionTarget'] as Map).keys,
+      containsAll([external, executable, configured]),
+    );
   });
 
   test('v2 compatibility retains legacy selectors for one cycle', () {
@@ -59,6 +805,10 @@ void main() {
       (output['analysisCoverage'] as Map).containsKey('analysisMode'),
       isFalse,
     );
+    final finding = (output['findings'] as List).single as Map;
+    expect(finding.containsKey('retainedIn'), isFalse);
+    expect(finding.containsKey('auxiliaryRetainedIn'), isFalse);
+    expect((finding['predicates'] as Map).containsKey('notRetained'), isFalse);
   });
 
   test('v3 snapshots adapter-scoped typed presentation metadata', () {
@@ -133,6 +883,12 @@ void main() {
     final finding = outcome['finding'] as Map;
     expect(finding['title'], 'duplicate');
     expect(((finding['node'] as Map)['projectRelativeOrigin']), 'assets/a.png');
+    expect((finding['predicates'] as Map)['notRetained'], isFalse);
+    expect(finding['retainedIn'], ['alpha', 'zeta']);
+    expect(finding['auxiliaryRetainedIn'], [
+      'aux:runtime:callback',
+      'aux:test:support',
+    ]);
   });
 
   test('v3 deduplicates blocker identities and streams deterministically', () {
@@ -198,11 +954,191 @@ void main() {
   });
 }
 
+final _v2WireContractFixture = File('test/fixtures/v2_json_wire_contract.json');
+
+final class _StringOnlyFormatter extends ReportFormatter {
+  var formatCalls = 0;
+
+  @override
+  String format(RunReport report) {
+    formatCalls++;
+    return 'formatted report';
+  }
+}
+
+final class _ChunkObservingSink implements StringSink {
+  final chunks = <String>[];
+
+  @override
+  void write(Object? object) {
+    chunks.add(object.toString());
+  }
+
+  @override
+  void writeAll(Iterable<Object?> objects, [String separator = '']) {
+    write(objects.join(separator));
+  }
+
+  @override
+  void writeln([Object? object = '']) {
+    write('$object\n');
+  }
+
+  @override
+  void writeCharCode(int charCode) {
+    write(String.fromCharCode(charCode));
+  }
+
+  @override
+  String toString() => chunks.join();
+}
+
+RunReport _v2WireContractReport() {
+  final emptyIds = Blocker(
+    producer: 'route/api',
+    reason: 'unresolved "route" \\ name',
+    location: 'lib/routes.dart:7:3',
+    sourceNodeId: 'route:app:/legacy//:id',
+  );
+  final duplicate = Blocker(
+    producer: 'route/api',
+    reason: 'unresolved "route" \\ name',
+    location: 'lib/routes.dart:8:3',
+    sourceNodeId: 'route:app:/legacy//:id',
+    affectedNamespace: 'assets/path//like/',
+    affectedNodeIds: {'node:z', 'node:a'},
+  );
+  final missingLocator = Blocker(
+    producer: 'route/api',
+    reason: 'unscoped blocker lacks optional locator fields',
+  );
+  final protected = Finding(
+    ruleId: 'PRN-WIRE-001',
+    node: GraphNode(
+      id: 'asset:app/assets/đặc-biệt/"quote"\\segment\u0001\n\t/slash//like',
+      kind: NodeKind.asset,
+      origin: Uri.file('/project/assets/đặc-biệt.png'),
+    ),
+    confidence: Confidence.protected,
+    title: 'Đường dẫn "quoted" \\control\nnext\t/end//?q=✓',
+    predicates: const SafetyPredicates(
+      ruleAllowsAutoFix: false,
+      unreachableAcrossAllTargets: false,
+      noDynamicBlockers: false,
+      notProtected: false,
+      noPublicApiRisk: false,
+      hasDeterministicInverse: false,
+      notRetained: false,
+      analysisCoverageComplete: false,
+      actionSupported: false,
+    ),
+    evidence: const [
+      Evidence(
+        kind: EvidenceKind.configuration,
+        producer: 'asset/scanner',
+        description:
+            'Unicode café ✓, quote " and backslash \\; control \u0001\n\t; https://example.test/a/b//route',
+        location: 'pubspec.yaml:12:7',
+      ),
+      Evidence(
+        kind: EvidenceKind.runtimeObservation,
+        producer: 'asset/scanner',
+        description: 'Observed without a source location',
+        exact: true,
+      ),
+    ],
+    blockers: [emptyIds, duplicate, duplicate, missingLocator],
+    protectionReasons: const ['public API "entry" \\ keep'],
+    unreachableIn: const ['android-prod'],
+    reachableIn: const ['ios-staging'],
+    retainedIn: const ['ios-staging'],
+    auxiliaryRetainedIn: const ['aux:external:public-api'],
+    proposedAction: 'remove "legacy" \\ never',
+    sourceBytes: 13,
+    classificationReasons: const [
+      ClassificationReason.dynamicReference,
+      ClassificationReason.externalConsumersNotScanned,
+    ],
+  );
+  final safe = Finding(
+    ruleId: 'PRN-WIRE-002',
+    node: GraphNode(
+      id: 'dart:app/lib/safe.dart#unused',
+      kind: NodeKind.declaration,
+      origin: Uri.file('/project/lib/safe.dart'),
+    ),
+    confidence: Confidence.safe,
+    title: 'Unused safe declaration',
+    predicates: const SafetyPredicates(
+      ruleAllowsAutoFix: true,
+      unreachableAcrossAllTargets: true,
+      noDynamicBlockers: true,
+      notProtected: true,
+      noPublicApiRisk: true,
+      hasDeterministicInverse: true,
+      notRetained: true,
+    ),
+  );
+  return RunReport(
+    identity: RunIdentity(
+      id: 'v2-wire-contract',
+      command: RunCommand.scan,
+      toolVersion: 'legacy-v2',
+      startedAtUtc: DateTime.utc(2026, 8, 20),
+      finishedAtUtc: DateTime.utc(2026, 8, 20, 0, 0, 1),
+      elapsedMicros: 1000000,
+    ),
+    status: RunStatus.completed,
+    exitCode: 0,
+    partialApplied: false,
+    projectRoot: '/project',
+    packageName: 'wire-contract',
+    requestedAdapters: const ['assets', 'dart'],
+    targetMatrix: TargetMatrix(
+      status: TargetMatrixStatus.declaredPartial,
+      source: '.flutter_pruner/config.json',
+      issues: const ['web target omitted'],
+      targets: [
+        BuildTarget(
+          name: 'android-prod',
+          platform: 'android',
+          entrypoint: 'lib/main.dart',
+          flavor: 'prod',
+          dartDefines: {'API_PATH': 'https://example.test/a/b//route'},
+        ),
+        BuildTarget(
+          name: 'ios-default',
+          platform: 'ios',
+          entrypoint: 'lib/main.dart',
+        ),
+      ],
+    ),
+    rootCoverage: RootCoverage(
+      mode: RootCoverageMode.packagePublicApi,
+      source: 'lib/public_api.dart',
+      internalBoundaryComplete: true,
+      externalConsumersCovered: false,
+      publicEntrypoints: const ['lib/public_api.dart'],
+      issues: const ['external consumer path is unknown'],
+    ),
+    analysisPasses: const [],
+    findings: [protected, safe],
+    diagnostics: const [],
+  );
+}
+
 RunReport _report({
   bool withApplyOutcome = false,
   bool zeroFindings = false,
   List<Blocker> blockers = const [],
   List<Blocker> recordedBlockers = const [],
+  List<AuxiliaryExecutionTarget> auxiliaryExecutionTargets = const [],
+  List<AuxiliaryExecutionTargetRegistryIssue> auxiliaryExecutionTargetIssues =
+      const [],
+  Map<String, ExecutionTargetIntegrityReport> integrityByExecutionTarget =
+      const {},
+  bool omitConfiguredIntegrity = false,
+  ExecutionTargetIntegrityReport? unattributedIntegrity,
 }) {
   final finding = Finding(
     ruleId: 'PRN-DUP-001',
@@ -226,7 +1162,15 @@ RunReport _report({
       notProtected: true,
       noPublicApiRisk: true,
       hasDeterministicInverse: false,
+      notRetained: false,
     ),
+    retainedIn: const ['zeta', 'alpha', 'zeta'],
+    auxiliaryRetainedIn: const [
+      'aux:test:support',
+      'aux:runtime:callback',
+      'aux:test:support',
+    ],
+    classificationReasons: const [ClassificationReason.retainedOnly],
     blockers: blockers,
     reportingAdapterId: 'duplicates',
     sourceBytes: 4,
@@ -244,6 +1188,20 @@ RunReport _report({
     recordedBlockerCount: recordedBlockers.length,
     danglingEdgeCount: 0,
     danglingRootCount: 2,
+    integrityByExecutionTarget: {
+      if (!omitConfiguredIntegrity)
+        'app:android': ExecutionTargetIntegrityReport(
+          id: 'app:android',
+          domain: 'configuredTarget',
+          complete: true,
+          danglingEdgeCount: 0,
+          danglingRootCount: 0,
+        ),
+      ...integrityByExecutionTarget,
+    },
+    unattributedIntegrity: unattributedIntegrity,
+    auxiliaryExecutionTargets: auxiliaryExecutionTargets,
+    auxiliaryExecutionTargetIssues: auxiliaryExecutionTargetIssues,
     adapterRuns: const [
       AdapterRunReport(
         id: 'duplicates',
@@ -397,6 +1355,15 @@ RunReport _presentationReport() {
         rootCount: 0,
         recordedBlockerCount: 0,
         danglingEdgeCount: 0,
+        integrityByExecutionTarget: {
+          'app:android': ExecutionTargetIntegrityReport(
+            id: 'app:android',
+            domain: 'configuredTarget',
+            complete: true,
+            danglingEdgeCount: 0,
+            danglingRootCount: 0,
+          ),
+        },
         adapterRuns: const [],
         findingStatistics: statistics,
         blockerStatistics: BlockerStatistics(
@@ -448,6 +1415,7 @@ Finding _presentationFinding({
     notProtected: true,
     noPublicApiRisk: true,
     hasDeterministicInverse: false,
+    notRetained: true,
   ),
   reportingAdapterId: adapter,
   sourceBytes: sourceBytes,

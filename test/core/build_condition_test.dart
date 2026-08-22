@@ -16,6 +16,67 @@ final BuildTarget _plain = BuildTarget(
 );
 
 void main() {
+  group('execution context identity', () {
+    test('configured target names reject empty and control suffixes', () {
+      for (final name in ['', 'web\nrelease', 'web\u007f']) {
+        expect(
+          () => BuildTarget(
+            name: name,
+            platform: 'web',
+            entrypoint: 'lib/main.dart',
+          ),
+          throwsArgumentError,
+          reason: 'invalid configured execution-context suffix: $name',
+        );
+      }
+    });
+
+    test('auxiliary IDs reject controls and nested context prefixes', () {
+      for (final id in [
+        'aux:test:',
+        'aux:test:widget\ncase',
+        'aux:test:app:web',
+        'aux:test:aux:runtime:callback',
+      ]) {
+        expect(
+          () => AuxiliaryExecutionTarget(
+            id: id,
+            domain: AuxiliaryExecutionDomain.test,
+            environmentValues: const {},
+            environmentComplete: true,
+            reason: 'test',
+          ),
+          throwsArgumentError,
+          reason: 'invalid auxiliary execution-context ID: $id',
+        );
+      }
+    });
+
+    test('auxiliary IDs preserve literal path hash and colon suffixes', () {
+      for (final id in [
+        'aux:test:test/widgets/scan_test.dart:vm',
+        'aux:runtime:executable:tool/a_b.dart~0123456789abcdef:incomplete',
+        'aux:external:lib/public_api.dart#Consumer.entry',
+      ]) {
+        final domain = id.startsWith('aux:test:')
+            ? AuxiliaryExecutionDomain.test
+            : id.startsWith('aux:runtime:')
+            ? AuxiliaryExecutionDomain.runtime
+            : AuxiliaryExecutionDomain.external;
+        expect(
+          AuxiliaryExecutionTarget(
+            id: id,
+            domain: domain,
+            environmentValues: const {},
+            environmentComplete: true,
+            reason: 'test',
+          ).id,
+          id,
+        );
+      }
+    });
+  });
+
   group('unconditional', () {
     test('applies to every target', () {
       expect(BuildCondition.unconditional.isUnconditional, isTrue);
@@ -160,6 +221,45 @@ void main() {
   });
 
   group('value semantics', () {
+    test('build target equality includes its complete immutable tuple', () {
+      final defines = <String, String>{'MODE': 'debug', 'REGION': 'vn'};
+      final first = BuildTarget(
+        name: 'android',
+        platform: 'android',
+        flavor: 'debug',
+        entrypoint: 'lib/main.dart',
+        dartDefines: defines,
+      );
+      final same = BuildTarget(
+        name: 'android',
+        platform: 'android',
+        flavor: 'debug',
+        entrypoint: 'lib/main.dart',
+        dartDefines: <String, String>{'REGION': 'vn', 'MODE': 'debug'},
+      );
+
+      defines['MODE'] = 'release';
+
+      expect(first, same);
+      expect(first.hashCode, same.hashCode);
+      expect(first.dartDefines, <String, String>{
+        'MODE': 'debug',
+        'REGION': 'vn',
+      });
+      expect(
+        first,
+        isNot(
+          BuildTarget(
+            name: 'android',
+            platform: 'android',
+            flavor: 'release',
+            entrypoint: 'lib/main.dart',
+            dartDefines: const {'MODE': 'debug', 'REGION': 'vn'},
+          ),
+        ),
+      );
+    });
+
     test('equal conditions compare equal and hash equal', () {
       final a = BuildCondition(
         platforms: {'android', 'ios'},
@@ -189,6 +289,23 @@ void main() {
       );
     });
 
+    test('toString does not depend on collection insertion order', () {
+      final first = BuildCondition(
+        platforms: {'web', 'android'},
+        flavors: {'prod', 'debug'},
+        entrypoints: {'lib/z.dart', 'lib/a.dart'},
+        dartDefines: {'REGION': 'vn', 'MODE': 'debug'},
+      );
+      final second = BuildCondition(
+        platforms: {'android', 'web'},
+        flavors: {'debug', 'prod'},
+        entrypoints: {'lib/a.dart', 'lib/z.dart'},
+        dartDefines: {'MODE': 'debug', 'REGION': 'vn'},
+      );
+
+      expect(first.toString(), second.toString());
+    });
+
     test('snapshots mutable collections before they can alter a hash key', () {
       final platforms = {'android'};
       final defines = {'ENV': 'prod'};
@@ -213,4 +330,273 @@ void main() {
       );
     });
   });
+
+  group('exact execution targets', () {
+    final debug = BuildTarget(
+      name: 'android-debug',
+      platform: 'android',
+      flavor: 'debug',
+      entrypoint: 'lib/main.dart',
+      dartDefines: const {'MODE': 'debug'},
+    );
+    final release = BuildTarget(
+      name: 'android-release',
+      platform: 'android',
+      flavor: 'release',
+      entrypoint: 'lib/main.dart',
+      dartDefines: const {'MODE': 'release'},
+    );
+    final vmTest = AuxiliaryExecutionTarget(
+      id: 'aux:test:vm-widget',
+      domain: AuxiliaryExecutionDomain.test,
+      environmentValues: const {'dart.library.io': 'true'},
+      environmentComplete: true,
+      reason: 'VM test runner',
+    );
+
+    test(
+      'exact configured conditions do not collapse same-platform targets',
+      () {
+        final condition = BuildCondition.forTarget(debug);
+
+        expect(condition.platforms, isEmpty);
+        expect(condition.flavors, isEmpty);
+        expect(condition.entrypoints, isEmpty);
+        expect(condition.dartDefines, isEmpty);
+        expect(condition.appliesTo(debug), isTrue);
+        expect(condition.appliesTo(release), isFalse);
+      },
+    );
+
+    test('one dart-define value difference does not match an exact target', () {
+      final enabled = BuildTarget(
+        name: 'android-debug',
+        platform: 'android',
+        flavor: 'debug',
+        entrypoint: 'lib/main.dart',
+        dartDefines: const {'MODE': 'debug', 'BETA': 'true'},
+      );
+
+      expect(BuildCondition.forTarget(debug).appliesTo(enabled), isFalse);
+    });
+
+    test('exact target membership snapshots caller-owned collections', () {
+      final targets = <BuildTarget>{debug};
+      final condition = BuildCondition(exactTargets: targets);
+
+      targets
+        ..clear()
+        ..add(release);
+
+      expect(condition.exactTargets, {debug});
+      expect(condition.appliesTo(debug), isTrue);
+      expect(condition.appliesTo(release), isFalse);
+      expect(() => condition.exactTargets.add(release), throwsUnsupportedError);
+    });
+
+    test(
+      'exact conditions canonicalize mutable BuildTarget implementations',
+      () {
+        final sourceDefines = <String, String>{'MODE': 'debug'};
+        final mutable = _MutableBuildTarget(
+          name: 'android-debug',
+          platform: 'android',
+          flavor: 'debug',
+          entrypoint: 'lib/main.dart',
+          dartDefines: sourceDefines,
+        );
+        final condition = BuildCondition.forTarget(mutable);
+        final expected = BuildTarget(
+          name: 'android-debug',
+          platform: 'android',
+          flavor: 'debug',
+          entrypoint: 'lib/main.dart',
+          dartDefines: const {'MODE': 'debug'},
+        );
+        final expectedCondition = BuildCondition.forTarget(expected);
+        final hashBeforeMutation = condition.hashCode;
+        final graph = ReachabilityGraph()
+          ..addNode(
+            GraphNode(
+              id: 'mutable-root',
+              kind: NodeKind.declaration,
+              origin: Uri.file('/project/lib/main.dart'),
+            ),
+          )
+          ..addRoot(
+            'mutable-root',
+            reason: 'mutable external target root',
+            condition: condition,
+          );
+
+        expect(condition.appliesTo(mutable), isTrue);
+        expect(graph.reachableFor(mutable), {'mutable-root'});
+
+        mutable
+          ..name = 'android-release'
+          ..flavor = 'release';
+        sourceDefines['MODE'] = 'release';
+
+        expect(condition.exactTargets.single, isNot(same(mutable)));
+        expect(condition.appliesTo(expected), isTrue);
+        expect(condition.appliesTo(mutable), isFalse);
+        expect(condition, expectedCondition);
+        expect(condition.hashCode, hashBeforeMutation);
+      },
+    );
+
+    test('auxiliary conditions snapshot their mutable source target', () {
+      final sourceDefines = <String, String>{'MODE': 'debug'};
+      final mutableSource = _MutableBuildTarget(
+        name: 'android-debug',
+        platform: 'android',
+        flavor: 'debug',
+        entrypoint: 'lib/main.dart',
+        dartDefines: sourceDefines,
+      );
+      final auxiliary = AuxiliaryExecutionTarget(
+        id: 'aux:test:vm-widget-source',
+        domain: AuxiliaryExecutionDomain.test,
+        environmentValues: const {'dart.library.io': 'true'},
+        environmentComplete: true,
+        reason: 'VM test runner',
+        sourceConfiguredTarget: mutableSource,
+      );
+      final condition = BuildCondition.forAuxiliaryTarget(auxiliary);
+      final expected = AuxiliaryExecutionTarget(
+        id: 'aux:test:vm-widget-source',
+        domain: AuxiliaryExecutionDomain.test,
+        environmentValues: const {'dart.library.io': 'true'},
+        environmentComplete: true,
+        reason: 'VM test runner',
+        sourceConfiguredTarget: BuildTarget(
+          name: 'android-debug',
+          platform: 'android',
+          flavor: 'debug',
+          entrypoint: 'lib/main.dart',
+          dartDefines: const {'MODE': 'debug'},
+        ),
+      );
+      final expectedCondition = BuildCondition.forAuxiliaryTarget(expected);
+      final hashBeforeMutation = condition.hashCode;
+
+      mutableSource.name = 'android-release';
+      sourceDefines['MODE'] = 'release';
+
+      expect(
+        condition.applicabilityToAuxiliaryTarget(expected),
+        ConditionApplicability.applies,
+      );
+      expect(condition, expectedCondition);
+      expect(condition.hashCode, hashBeforeMutation);
+    });
+
+    test('configured and auxiliary exact identities use OR semantics', () {
+      final web = BuildTarget(
+        name: 'web',
+        platform: 'web',
+        entrypoint: 'lib/main.dart',
+      );
+      final condition = BuildCondition(
+        exactTargets: {web},
+        exactAuxiliaryTargets: {vmTest},
+      );
+
+      expect(condition.appliesTo(web), isTrue);
+      expect(condition.appliesTo(debug), isFalse);
+      expect(
+        condition.applicabilityToAuxiliaryTarget(vmTest),
+        ConditionApplicability.applies,
+      );
+      expect(
+        condition.applicabilityToAuxiliaryTarget(
+          AuxiliaryExecutionTarget(
+            id: 'aux:runtime:vm-callback',
+            domain: AuxiliaryExecutionDomain.runtime,
+            environmentValues: const {'dart.library.io': 'true'},
+            environmentComplete: true,
+            reason: 'VM callback',
+          ),
+        ),
+        ConditionApplicability.doesNotApply,
+      );
+    });
+
+    test(
+      'auxiliary applicability preserves unknown broad legacy conditions',
+      () {
+        final legacy = BuildCondition(platforms: const {'android'});
+
+        expect(
+          legacy.applicabilityToAuxiliaryTarget(vmTest),
+          ConditionApplicability.unknown,
+        );
+        expect(
+          BuildCondition.unconditional.applicabilityToAuxiliaryTarget(vmTest),
+          ConditionApplicability.applies,
+        );
+        expect(
+          BuildCondition.forTarget(
+            debug,
+          ).applicabilityToAuxiliaryTarget(vmTest),
+          ConditionApplicability.doesNotApply,
+        );
+        expect(
+          BuildCondition.forAuxiliaryTarget(
+            vmTest,
+          ).applicabilityToAuxiliaryTarget(vmTest),
+          ConditionApplicability.applies,
+        );
+      },
+    );
+
+    test('public execution value types preserve complete value identities', () {
+      const callback = CallbackBoundaryDescriptor(
+        argumentIndex: 1,
+        description: 'native callback',
+        capability: CallbackBoundaryCapability.flutterEngineNative,
+      );
+      const sameCallback = CallbackBoundaryDescriptor(
+        argumentIndex: 1,
+        description: 'native callback',
+        capability: CallbackBoundaryCapability.flutterEngineNative,
+      );
+      const issue = AuxiliaryExecutionTargetRegistryIssue(
+        id: 'aux:runtime:callback',
+        acceptedDefinitionSha256: 'accepted',
+        rejectedDefinitionSha256: 'rejected',
+        reason: 'conflicting target definition',
+      );
+
+      expect(callback, sameCallback);
+      expect(callback.hashCode, sameCallback.hashCode);
+      expect(issue.id, 'aux:runtime:callback');
+      expect(issue.reason, 'conflicting target definition');
+    });
+  });
+}
+
+class _MutableBuildTarget implements BuildTarget {
+  _MutableBuildTarget({
+    required this.name,
+    required this.platform,
+    required this.flavor,
+    required this.entrypoint,
+    required this.dartDefines,
+  });
+
+  @override
+  Map<String, String> dartDefines;
+
+  @override
+  String entrypoint;
+
+  @override
+  String? flavor;
+
+  @override
+  String name;
+
+  @override
+  String platform;
 }

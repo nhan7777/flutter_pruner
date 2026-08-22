@@ -85,10 +85,19 @@ diagnostics instead.
 
 ## Roots
 
-Reachability needs a starting set. Roots are nodes reachable from outside the
-Dart call graph: `main()`, `@pragma('vm:entry-point')` annotations, plugin
-background handlers registered by callback handle, platform-invoked entry
-points.
+Reachability needs a starting set. A configured root is only a configured
+application `main()` entrypoint. It is not one global root set: each one carries
+the complete target tuple — `name`, `platform`, `flavor`, `entrypoint`, and
+`dart_defines` — so it is evaluated only for that declared build.
+
+Everything entered from outside that configured application entrypoint is a
+separate **auxiliary execution target**: tests are `aux:test:`, VM/FFI pragma,
+plugin/native, and platform-callback boundaries are `aux:runtime:`, and public
+external-consumer surfaces are `aux:external:`. Their stable IDs are
+domain-qualified and their environment is either complete or explicitly
+incomplete. They contribute global retention but never masquerade as a
+configured application target. A duplicate or conflicting auxiliary ID is an
+integrity issue, not a second source of proof.
 
 The asymmetry here is the single most important design fact in the project:
 
@@ -110,28 +119,45 @@ depends on what you are building. `flutter build apk --release --flavor prod`
 and `flutter build web --profile` tree-shake differently and include different
 code.
 
-So reachability is computed per target:
+Conceptually, configured **proven** reachability is computed per target:
 
 ```text
-R(target) = reachable( roots(target), edges whose condition applies to target )
+P(target) = reachable( configured proven roots(target), exact edges applicable to target )
 ```
 
-and a node is dead only when it is dead everywhere:
+The corresponding configured-proven absence condition is:
 
 ```text
-dead(node) ⟺ ∀ target ∈ targets : node ∉ R(target)
+absentFromConfiguredProven(node) ⟺ ∀ target ∈ targets : node ∉ P(target)
 ```
 
-`unreachableAcrossAll` implements exactly that, and deliberately throws on an
-empty target list rather than returning everything — with no targets the formula
-is vacuously true for every node, which would be a maximally dangerous answer
-delivered with full confidence.
+The older `reachableFor`, `reachableForAll`, and `unreachableAcrossAll` APIs are
+conservative compatibility projections over `legacyReachable`. They include
+fail-closed retention and auxiliary influence, so they remain useful for legacy
+consumers but cannot implement the conceptual proven formula, prove absence, or
+authorize a finding/action. `unreachableAcrossAll` still rejects an empty
+target list rather than returning every node: that legacy compatibility request
+would otherwise be vacuously true and dangerously misleading. Current graph
+and finding work reads `analyzeFor` snapshots: each exposes configured proven
+and retained closures for the complete configured tuple, plus auxiliary proven
+and retained closures for each exact auxiliary identity. Unknown or incomplete
+facts expand retained closure; they never become proof that a node is absent.
 
-`BuildCondition` carries platforms, flavors, entrypoints and **dart-defines**.
-The last one is easy to overlook and matters: `--dart-define` values become
-compile-time constants, `bool.fromEnvironment` folds, and whole branches vanish
-before tree shaking runs. Code that is live under
-`--dart-define=ENABLE_BETA=true` does not exist in the default build.
+`BuildCondition` carries platforms, flavors, entrypoints and **dart-defines**,
+or an exact configured/auxiliary execution-target identity. Exact identities
+are used for analyzer-resolved directive and execution-context facts; a broad
+condition is never silently reused as proof for an auxiliary context. The last
+one is easy to overlook and matters: `--dart-define` values become compile-time
+constants, `bool.fromEnvironment` folds, and whole branches vanish before tree
+shaking runs. Code that is live under `--dart-define=ENABLE_BETA=true` does not
+exist in the default build.
+
+The resolver knows SDK-owned `dart.library.io`, `dart.library.html`, and
+`dart.library.js_interop` from the selected platform, plus explicitly declared
+`dart_defines`. An unknown condition key, a missing value, or an incomplete
+auxiliary environment selects every still-possible directive branch, records a
+context blocker, and retains the affected closure. It cannot select a default
+branch as exact evidence or make a candidate `SAFE`/`HIGH`.
 
 ---
 
@@ -180,21 +206,25 @@ reported `SAFE`.
 
 ---
 
-## Structurally empty Dart libraries
+## Ownership, generated libraries, and empty libraries
 
-A Dart library with no declarations and no directives cannot expose an API or
-perform work. An import/export edge pointing at such a file is treated as a
-stale URI rather than liveness evidence. Apply removes the exact directive,
-the empty source, and any generated part companions in one atomic quarantine
-group. A verification regression restores every file in that group byte for
-byte. Import-only or export-only libraries do not use this exception; they
-must still be unreachable across all build targets before becoming `SAFE`.
+Selected-package ownership is a graph boundary. A parent package scan does not
+claim a nested package's sources are unused: nested, external, and unknown
+owners are excluded from selected candidates and retained fail-closed. Scan
+each package at its own root to make claims about that package.
 
-Apply plans actionable nodes as a consumer-to-dependency graph. Strongly
-connected components, plus actions touching the same physical path, form the
-smallest commit/rollback unit. Units execute consumer-first. After verified
-progress the graph is rebuilt; this fixed-point loop removes a source file or
-stale import revealed by an earlier declaration edit in the same invocation.
+A standalone generated library inside the selected package has a stable,
+non-reportable `dart-generated:` artifact node. It becomes proven only through
+a target-selected import/export or exact generated caller edge; discovering a
+`.g.dart` file is provenance, not liveness. Generated parts remain represented
+by their owning library. Unresolved generated callers use bounded blockers, so
+they retain rather than create deletion authority.
+
+An empty Dart library is not a stale URI override. It is handled exactly like
+any other selected library: an exact configured or auxiliary path retains it;
+an unreachable one is assessed by the ordinary all-context safety predicates.
+This prevents an exported or target-conditional empty library from being
+misclassified solely because it has no declarations.
 
 ---
 

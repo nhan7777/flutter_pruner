@@ -49,6 +49,120 @@ environment:
     expect(context.analysisCoverageComplete, isTrue);
   });
 
+  test(
+    'target parser narrowly admits a configured generated entrypoint',
+    () async {
+      File(p.join(project.path, 'scripts', 'main.gr.dart'))
+        ..createSync(recursive: true)
+        ..writeAsStringSync('void main() {}\n');
+      File(p.join(project.path, 'flutter_pruner.yaml')).writeAsStringSync('''
+version: 1
+analysis:
+  mode: application
+target_matrix:
+  complete: true
+  targets:
+    - name: generated
+      platform: android
+      entrypoint: scripts/main.gr.dart
+''');
+
+      final context = await ProjectContext.load(project);
+
+      expect(context.targets.single.entrypoint, 'scripts/main.gr.dart');
+      expect(context.targetMatrix.status, TargetMatrixStatus.declaredComplete);
+    },
+  );
+
+  for (final entrypoint in const ['build/main.dart', '.dart_tool/main.dart']) {
+    test('configured generated target rejects $entrypoint', () async {
+      File(p.join(project.path, entrypoint))
+        ..createSync(recursive: true)
+        ..writeAsStringSync('void main() {}\n');
+      File(p.join(project.path, 'flutter_pruner.yaml')).writeAsStringSync('''
+version: 1
+analysis:
+  mode: application
+target_matrix:
+  complete: true
+  targets:
+    - name: generated
+      platform: android
+      entrypoint: $entrypoint
+''');
+
+      await expectLater(
+        ProjectContext.load(project),
+        throwsA(
+          isA<ProjectLoadException>().having(
+            (error) => error.message,
+            'message',
+            contains('excluded by project path policy'),
+          ),
+        ),
+        reason: entrypoint,
+      );
+    });
+  }
+
+  test('configured generated target rejects a custom run output', () async {
+    final output = File(p.join(project.path, 'scripts', 'output.g.dart'))
+      ..createSync(recursive: true)
+      ..writeAsStringSync('void main() {}\n');
+    File(p.join(project.path, 'flutter_pruner.yaml')).writeAsStringSync('''
+version: 1
+analysis:
+  mode: application
+target_matrix:
+  complete: true
+  targets:
+    - name: generated
+      platform: android
+      entrypoint: scripts/output.g.dart
+''');
+
+    await expectLater(
+      ProjectContext.load(project, additionalExcludedPaths: [output.path]),
+      throwsA(
+        isA<ProjectLoadException>().having(
+          (error) => error.message,
+          'message',
+          contains('excluded by project path policy'),
+        ),
+      ),
+    );
+  });
+
+  test('package public entrypoint still rejects generated output', () async {
+    File(p.join(project.path, 'lib', 'public.gr.dart'))
+      ..createSync(recursive: true)
+      ..writeAsStringSync('export \'main.dart\';\n');
+    File(p.join(project.path, 'flutter_pruner.yaml')).writeAsStringSync('''
+version: 1
+analysis:
+  mode: package
+  public_entrypoints:
+    - lib/public.gr.dart
+target_matrix:
+  complete: true
+  targets:
+    - name: android
+      platform: android
+      entrypoint: lib/main.dart
+''');
+
+    await expectLater(
+      ProjectContext.load(project),
+      throwsA(
+        isA<ProjectLoadException>().having(
+          (error) => error.message,
+          'message',
+          contains('generated Dart output'),
+        ),
+      ),
+    );
+  });
+
   test('non-application API context requires explicit root coverage', () {
     final context = ProjectContext(
       root: project,
@@ -213,7 +327,68 @@ environment:
   });
 
   test(
-    'conditional imports in configured non-lib entrypoints cap coverage',
+    'resolved SDK conditional imports preserve declared completeness',
+    () async {
+      File(p.join(project.path, 'lib', 'conditional.dart')).writeAsStringSync(
+        "import 'io.dart' if (dart.library.html == 'true') 'web.dart';\n",
+      );
+      File(p.join(project.path, 'lib', 'io.dart')).writeAsStringSync('');
+      File(p.join(project.path, 'lib', 'web.dart')).writeAsStringSync('');
+      _writeConfig(project, complete: true);
+
+      final context = await ProjectContext.load(project);
+
+      expect(context.targetMatrix.status, TargetMatrixStatus.declaredComplete);
+      expect(context.analysisCoverageComplete, isTrue);
+      expect(
+        context.targetMatrix.issues,
+        isNot(contains(contains('conditional Dart imports/exports'))),
+      );
+    },
+  );
+
+  test('target-defined conditional keys preserve full target tuples', () async {
+    File(p.join(project.path, 'lib', 'conditional.dart')).writeAsStringSync(
+      "import 'prod.dart' if (MODE == 'debug') 'debug.dart';\n",
+    );
+    File(p.join(project.path, 'lib', 'prod.dart')).writeAsStringSync('');
+    File(p.join(project.path, 'lib', 'debug.dart')).writeAsStringSync('');
+    File(p.join(project.path, 'flutter_pruner.yaml')).writeAsStringSync('''
+version: 1
+analysis:
+  mode: application
+target_matrix:
+  complete: true
+  targets:
+    - name: debug
+      platform: android
+      flavor: debug
+      entrypoint: lib/main.dart
+      dart_defines:
+        MODE: debug
+    - name: release
+      platform: android
+      flavor: release
+      entrypoint: lib/main.dart
+      dart_defines:
+        MODE: release
+''');
+
+    final context = await ProjectContext.load(project);
+
+    expect(context.targetMatrix.status, TargetMatrixStatus.declaredComplete);
+    expect(context.targets.map((target) => target.flavor), {
+      'debug',
+      'release',
+    });
+    expect(context.targets.map((target) => target.dartDefines['MODE']), {
+      'debug',
+      'release',
+    });
+  });
+
+  test(
+    'resolved conditionals in configured non-lib entrypoints stay complete',
     () async {
       final binMain = File(p.join(project.path, 'bin', 'main.dart'));
       binMain.parent.createSync(recursive: true);
@@ -240,17 +415,17 @@ target_matrix:
 
       final context = await ProjectContext.load(project);
 
-      expect(context.targetMatrix.status, TargetMatrixStatus.declaredPartial);
-      expect(context.analysisCoverageComplete, isFalse);
+      expect(context.targetMatrix.status, TargetMatrixStatus.declaredComplete);
+      expect(context.analysisCoverageComplete, isTrue);
       expect(
         context.targetMatrix.issues,
-        contains(contains('conditional Dart imports/exports')),
+        isNot(contains(contains('conditional Dart imports/exports'))),
       );
     },
   );
 
   test(
-    'conditional imports in relative entrypoint closure cap coverage',
+    'resolved conditionals in relative entrypoint closure stay complete',
     () async {
       final binMain = File(p.join(project.path, 'bin', 'main.dart'));
       binMain.parent.createSync(recursive: true);
@@ -265,6 +440,49 @@ target_matrix:
       );
       File(p.join(shared.path, 'io.dart')).writeAsStringSync('');
       File(p.join(shared.path, 'web.dart')).writeAsStringSync('');
+      File(p.join(project.path, 'flutter_pruner.yaml')).writeAsStringSync('''
+version: 1
+analysis:
+  mode: application
+target_matrix:
+  complete: true
+  targets:
+    - name: command
+      platform: linux
+      entrypoint: bin/main.dart
+''');
+
+      final context = await ProjectContext.load(project);
+
+      expect(context.targetMatrix.status, TargetMatrixStatus.declaredComplete);
+      expect(context.analysisCoverageComplete, isTrue);
+      expect(
+        context.targetMatrix.issues,
+        isNot(contains(contains('conditional Dart imports/exports'))),
+      );
+    },
+  );
+
+  test(
+    'unknown conditional nested in a non-default branch stays partial',
+    () async {
+      final binMain = File(p.join(project.path, 'bin', 'main.dart'));
+      binMain.parent.createSync(recursive: true);
+      binMain.writeAsStringSync(
+        "import '../shared/helper.dart';\n"
+        'void main() {}\n',
+      );
+      final shared = Directory(p.join(project.path, 'shared'))
+        ..createSync(recursive: true);
+      File(p.join(shared.path, 'helper.dart')).writeAsStringSync(
+        "import 'default.dart' if (dart.library.io) 'io.dart';\n",
+      );
+      File(p.join(shared.path, 'default.dart')).writeAsStringSync('');
+      File(p.join(shared.path, 'io.dart')).writeAsStringSync(
+        "import 'safe.dart' if (unknown.condition) 'unknown.dart';\n",
+      );
+      File(p.join(shared.path, 'safe.dart')).writeAsStringSync('');
+      File(p.join(shared.path, 'unknown.dart')).writeAsStringSync('');
       File(p.join(project.path, 'flutter_pruner.yaml')).writeAsStringSync('''
 version: 1
 analysis:

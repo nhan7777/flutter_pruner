@@ -10,6 +10,13 @@ export 'src/adapters/adapter_report_definition.dart';
 export 'src/adapters/analyzer_adapter.dart';
 export 'src/adapters/dart/dart_adapter_profile.dart';
 export 'src/adapters/dart/dart_analysis_workspace.dart';
+export 'src/adapters/dart/dart_execution_context_service.dart'
+    show
+        DartExecutionContextIssue,
+        DartExecutionContextService,
+        DartExecutionContextSnapshot,
+        DartExecutionRootFact,
+        DartExecutionRootSubject;
 export 'src/adapters/registry.dart';
 export 'src/apply/finding_selection.dart';
 export 'src/core/confidence/action_capability.dart';
@@ -21,8 +28,10 @@ export 'src/core/confidence/finding_assessment.dart';
 export 'src/core/graph/build_condition.dart';
 export 'src/core/graph/edge.dart';
 export 'src/core/graph/evidence.dart';
+export 'src/core/graph/execution_target.dart';
 export 'src/core/graph/node.dart';
 export 'src/core/graph/reachability_graph.dart';
+export 'src/core/graph/root.dart';
 export 'src/core/project/analysis_mode.dart';
 export 'src/core/project/project_context.dart';
 export 'src/core/project/project_path_policy.dart';

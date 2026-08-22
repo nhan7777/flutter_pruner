@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter_pruner/flutter_pruner.dart';
 import 'package:flutter_pruner/src/adapters/duplicate/duplicate_adapter.dart';
 import 'package:flutter_pruner/src/analysis/project_analyzer.dart';
+import 'package:flutter_pruner/src/apply/mode_apply_policy.dart';
 import 'package:test/test.dart';
 
 void main() {
@@ -334,5 +335,85 @@ publish_to: none
       expect(snapshot.findings.single.reportingAdapterId, 'duplicates');
       expect(snapshot.findings.single.node.id, startsWith('duplicate:'));
     });
+
+    test(
+      'freezes isolated duplicate fingerprints against the full subset',
+      () async {
+        final project = await createProject(
+          files: {
+            'lib/a.txt': 'same duplicate payload',
+            'lib/b.txt': 'same duplicate payload',
+            'lib/unique.txt': 'unique payload',
+          },
+        );
+
+        final full = await ProjectAnalyzer(project: project).analyze();
+        final isolated = await ProjectAnalyzer(
+          project: project,
+          only: {'duplicates'},
+        ).analyze();
+
+        const expectedFingerprints = <String>[
+          'duplicate:test_project:eb54f6701061\u0000duplicates\u0000PRN-DUP-001\u0000REVIEW\u0000false',
+        ];
+
+        expect(isolated.adapterIds, ['duplicates']);
+        expect(isolated.findings, hasLength(expectedFingerprints.length));
+        expect(
+          isolated.findings.every(
+            (finding) => finding.reportingAdapterId == 'duplicates',
+          ),
+          isTrue,
+        );
+        expect(
+          _findingFingerprints(isolated.findings, project),
+          expectedFingerprints,
+        );
+        expect(
+          _findingFingerprints(
+            isolated.findings.where(
+              (finding) => finding.reportingAdapterId == 'duplicates',
+            ),
+            project,
+          ),
+          expectedFingerprints,
+        );
+        expect(
+          _findingFingerprints(
+            full.findings.where(
+              (finding) => finding.reportingAdapterId == 'duplicates',
+            ),
+            project,
+          ),
+          _findingFingerprints(isolated.findings, project),
+        );
+        expect(
+          isolated.findings.every(
+            (finding) =>
+                finding.confidence.name == 'review' &&
+                finding.proposedAction == null &&
+                !ModeApplyPolicy.allows(project.analysisMode, finding),
+          ),
+          isTrue,
+        );
+      },
+    );
   });
 }
+
+List<String> _findingFingerprints(
+  Iterable<Finding> findings,
+  ProjectContext project,
+) =>
+    findings
+        .map(
+          (finding) => [
+            finding.node.id,
+            finding.reportingAdapterId,
+            finding.ruleId,
+            finding.confidence.label,
+            ModeApplyPolicy.allows(project.analysisMode, finding),
+          ].join('\u0000'),
+        )
+        .toList()
+      ..sort();

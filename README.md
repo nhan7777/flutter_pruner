@@ -282,10 +282,23 @@ JSON schema v3 records coverage, blockers, findings, manual risks, verification
 and transaction outcomes. See [structured run reports](doc/run-report.md) for
 the schema, HTML features and CI selectors.
 
+Schema v3 is the default for new machine consumers. `--json-version 2` remains
+available only for byte-compatible legacy consumers and is bounded before any
+report staging: 250,000 blocker occurrences, 2,000,000 affected-node-ID
+occurrences, and 100,000 IDs in a blocker occurrence. An oversized v2 request
+fails before writing its destination; it is not truncated or converted to v3.
+
 ## Important boundaries
 
 - `scan` never changes project sources or assets, but it does write its report
   under tool-owned `.flutter_pruner/` state.
+- Report persistence exclusively creates immutable objects and commit records
+  through retained native directory capabilities. It never overwrites,
+  renames, deletes, or restores a report path; an occupied exact output is a
+  handled collision. `REPORT READY` appears only after the commit and every
+  referenced object validate. This does not claim sudden-power-loss durability
+  before containing-directory metadata flushing is proven on every supported
+  filesystem.
 - `target_matrix.complete: true` means the owner has declared every supported
   platform, flavor, entrypoint and Dart-define combination.
 - `package-internal` proves only the local boundary; external apps may still use

@@ -1,0 +1,12 @@
+# Keep fixture subprojects as scanner inputs, not root-package test suites.
+paths:
+  - test/adapters
+  - test/apply
+  - test/benchmark
+  - test/cli
+  - test/core
+  - test/quarantine
+  - test/reporting
+  - test/verification
+  - test/public_api_core_immutability_test.dart
+  - test/public_api_reporting_immutability_test.dart

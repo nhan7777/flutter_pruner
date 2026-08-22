@@ -27,6 +27,10 @@ import '../../core/project/project_operation_lock.dart';
 import '../../core/project/tool_workspace.dart';
 import '../../quarantine/manifest.dart';
 import '../../quarantine/quarantine_manager.dart';
+import '../../reporting/immutable_report_store.dart';
+import '../../reporting/io_report_object_backend.dart';
+import '../../reporting/report_object_backend.dart';
+import '../../reporting/report_output_identity.dart';
 import '../../reporting/run_recorder.dart';
 import '../../reporting/run_report.dart';
 import '../../verification/verification_runner.dart';
@@ -50,6 +54,7 @@ class ApplyCommand extends Command<int> {
     ProjectAnalyzer Function(ProjectContext, Set<String>?)? analyzerFactory,
     ImportCleanupRunner Function(Directory)? cleanupRunnerFactory,
     QuarantineManager Function(Directory)? quarantineManagerFactory,
+    ReportObjectBackend? reportBackend,
     FutureOr<void> Function(Directory)? lifecycleCompletedHook,
     InitPrompt prompt = const StdioInitPrompt(),
   }) : _verifierFactory = verifierFactory ?? VerificationRunner.new,
@@ -62,6 +67,7 @@ class ApplyCommand extends Command<int> {
                ImportCleanupRunner(projectRoot: projectRoot.path)),
        _quarantineManagerFactory =
            quarantineManagerFactory ?? QuarantineManager.new,
+       _reportBackend = reportBackend ?? createIoReportObjectBackend(),
        _lifecycleCompletedHook = lifecycleCompletedHook,
        _prompt = prompt {
     argParser
@@ -120,8 +126,10 @@ class ApplyCommand extends Command<int> {
   final ProjectAnalyzer Function(ProjectContext, Set<String>?) _analyzerFactory;
   final ImportCleanupRunner Function(Directory) _cleanupRunnerFactory;
   final QuarantineManager Function(Directory) _quarantineManagerFactory;
+  final ReportObjectBackend _reportBackend;
   final FutureOr<void> Function(Directory)? _lifecycleCompletedHook;
   final InitPrompt _prompt;
+  _ApplyReportPersistence? _activeReportPersistence;
 
   @override
   String get invocation => '${super.invocation} [project-path]';
@@ -174,21 +182,22 @@ class ApplyCommand extends Command<int> {
       return 64;
     }
     late final Directory quarantineBaseDir;
-    late final String reportOutput;
+    late final FrozenReportOutputIdentity reportOutput;
     late final File configFile;
     try {
       quarantineBaseDir = workspace.resolveQuarantineDirectory(
         args.option('quarantine'),
       );
       final reportOption = args.option('report-output');
-      reportOutput = reportOption == null
-          ? workspace
-                .resolveReportFile(
-                  'apply-${recorder.runId}.${reportFormat.name}',
-                )
-                .path
-          : workspace.resolveReportFile(reportOption).path;
-      _validateReportOutputDestination(reportOutput);
+      final requestedReportOutput = reportOption == null
+          ? workspace.resolveReportFile(
+              'apply-${recorder.runId}.${reportFormat.name}',
+            )
+          : workspace.resolveReportFile(reportOption);
+      reportOutput = await FrozenReportOutputIdentity.resolve(
+        requested: requestedReportOutput,
+        selectedProjectRoot: workspace.projectRoot,
+      );
       final configPath = args.option('config');
       final explicitConfig = configPath == null
           ? null
@@ -214,6 +223,23 @@ class ApplyCommand extends Command<int> {
       return 1;
     }
 
+    late final _ApplyReportPersistence reportPersistence;
+    try {
+      final externalOutput = await reportOutput.prepare(
+        backend: _reportBackend,
+        identity: _reportCommitIdentity(recorder.runId, 1),
+      );
+      reportPersistence = _ApplyReportPersistence(
+        runId: recorder.runId,
+        backend: _reportBackend,
+        externalOutput: externalOutput,
+      );
+      _activeReportPersistence = reportPersistence;
+    } on Object catch (error) {
+      stderr.writeln('Error: report output could not be prepared: $error');
+      return 1;
+    }
+
     late final ProjectOperationLock operationLock;
     try {
       operationLock = await ProjectOperationLock.acquire(
@@ -221,6 +247,8 @@ class ApplyCommand extends Command<int> {
         operation: dryRun ? 'apply-dry-run' : 'apply',
       );
     } on ProjectOperationLockException catch (e) {
+      await reportPersistence.close();
+      _activeReportPersistence = null;
       stderr.writeln('Error: $e');
       return 1;
     }
@@ -229,6 +257,7 @@ class ApplyCommand extends Command<int> {
         workspace: workspace,
         quarantineBaseDir: quarantineBaseDir,
         reportOutput: reportOutput,
+        reportPersistence: reportPersistence,
         configFile: configFile,
         dryRun: dryRun,
         assumeYes: assumeYes,
@@ -238,14 +267,20 @@ class ApplyCommand extends Command<int> {
         recorder: recorder,
       );
     } finally {
-      await operationLock.release();
+      try {
+        await reportPersistence.close();
+      } finally {
+        _activeReportPersistence = null;
+        await operationLock.release();
+      }
     }
   }
 
   Future<int> _runLocked({
     required ToolWorkspace workspace,
     required Directory quarantineBaseDir,
-    required String reportOutput,
+    required FrozenReportOutputIdentity reportOutput,
+    required _ApplyReportPersistence reportPersistence,
     required File configFile,
     required bool dryRun,
     required bool assumeYes,
@@ -369,7 +404,7 @@ class ApplyCommand extends Command<int> {
           findings: snapshot.findings,
           applyStatistics: applyStatistics,
         ),
-        outputPath: reportOutput,
+        outputIdentity: reportOutput,
         outputFormat: reportFormat,
       );
       return exitCode;
@@ -458,7 +493,7 @@ class ApplyCommand extends Command<int> {
           findings: snapshot.findings,
           applyStatistics: ApplyStatistics.empty,
         ),
-        outputPath: reportOutput,
+        outputIdentity: reportOutput,
         outputFormat: reportFormat,
       );
       return 0;
@@ -681,7 +716,7 @@ class ApplyCommand extends Command<int> {
             sourceBytesRemoved: 0,
           ),
         ),
-        outputPath: reportOutput,
+        outputIdentity: reportOutput,
         outputFormat: reportFormat,
       );
       return 0;
@@ -726,7 +761,7 @@ class ApplyCommand extends Command<int> {
             sourceBytesRemoved: 0,
           ),
         ),
-        outputPath: reportOutput,
+        outputIdentity: reportOutput,
         outputFormat: reportFormat,
       );
       return 2;
@@ -774,7 +809,7 @@ class ApplyCommand extends Command<int> {
             sourceBytesRemoved: 0,
           ),
         ),
-        outputPath: reportOutput,
+        outputIdentity: reportOutput,
         outputFormat: reportFormat,
       );
       return 2;
@@ -864,7 +899,7 @@ class ApplyCommand extends Command<int> {
               sourceBytesRemoved: 0,
             ),
           ),
-          outputPath: reportOutput,
+          outputIdentity: reportOutput,
           outputFormat: reportFormat,
         );
         return 2;
@@ -967,7 +1002,7 @@ class ApplyCommand extends Command<int> {
             sourceBytesRemoved: 0,
           ),
         ),
-        outputPath: reportOutput,
+        outputIdentity: reportOutput,
         outputFormat: reportFormat,
       );
       return 1;
@@ -1548,6 +1583,7 @@ class ApplyCommand extends Command<int> {
     }
 
     try {
+      await reportPersistence.prepareMutation(quarantineDir);
       while (plan.units.isNotEmpty) {
         roundCount++;
         workflow.section(
@@ -1946,7 +1982,7 @@ class ApplyCommand extends Command<int> {
           ),
           quarantinePath: quarantineDir.path,
         ),
-        outputPath: reportOutput,
+        outputIdentity: reportOutput,
         outputFormat: reportFormat,
         quarantineDir: quarantineDir,
       );
@@ -1977,7 +2013,7 @@ class ApplyCommand extends Command<int> {
           ),
           quarantinePath: quarantineDir.path,
         ),
-        outputPath: reportOutput,
+        outputIdentity: reportOutput,
         outputFormat: reportFormat,
         quarantineDir: quarantineDir,
       );
@@ -2041,7 +2077,7 @@ class ApplyCommand extends Command<int> {
           applyStatistics: buildApplyStatistics(remaining: remaining.length),
           quarantinePath: quarantineDir.path,
         ),
-        outputPath: reportOutput,
+        outputIdentity: reportOutput,
         outputFormat: reportFormat,
         quarantineDir: quarantineDir,
       );
@@ -2077,7 +2113,7 @@ class ApplyCommand extends Command<int> {
     try {
       await _writeRunReport(
         provisionalReport,
-        outputPath: reportOutput,
+        outputIdentity: reportOutput,
         outputFormat: reportFormat,
         quarantineDir: quarantineDir,
         printTerminal: false,
@@ -2095,7 +2131,7 @@ class ApplyCommand extends Command<int> {
       );
       await _writeRunReport(
         finalReport,
-        outputPath: reportOutput,
+        outputIdentity: reportOutput,
         outputFormat: reportFormat,
         quarantineDir: quarantineDir,
       );
@@ -2119,7 +2155,7 @@ class ApplyCommand extends Command<int> {
       try {
         await _writeRunReport(
           recoveryReport,
-          outputPath: reportOutput,
+          outputIdentity: reportOutput,
           outputFormat: reportFormat,
           quarantineDir: quarantineDir,
         );
@@ -2134,14 +2170,17 @@ class ApplyCommand extends Command<int> {
   Future<ProjectContext> _loadProjectForApply({
     required ToolWorkspace workspace,
     required Directory quarantineBaseDir,
-    required String reportOutput,
+    required FrozenReportOutputIdentity reportOutput,
     required File configFile,
   }) async {
     final ProjectContext project;
     try {
       project = await ProjectContext.load(
         workspace.projectRoot,
-        additionalExcludedPaths: [quarantineBaseDir.path, reportOutput],
+        additionalExcludedPaths: [
+          quarantineBaseDir.path,
+          ...reportOutput.projectExclusions,
+        ],
         configFile: configFile,
       );
     } catch (error) {
@@ -2599,101 +2638,71 @@ class ApplyCommand extends Command<int> {
 
   Future<void> _writeRunReport(
     RunReport report, {
-    String? outputPath,
+    FrozenReportOutputIdentity? outputIdentity,
     _ReportOutputFormat outputFormat = _ReportOutputFormat.json,
     Directory? quarantineDir,
     bool printTerminal = true,
   }) async {
-    final canonicalPath = quarantineDir == null
-        ? null
-        : p.normalize(
-            p.absolute(p.join(quarantineDir.path, 'run-report.json')),
-          );
-    final canonicalJson = const JsonFormatter().format(report);
-    var writtenReportPath = canonicalPath;
-    var writtenReportFormat = _ReportOutputFormat.json;
-    if (canonicalPath != null) {
-      try {
-        await _writeReportFile(
-          canonicalPath,
-          canonicalJson,
-          runId: report.identity.id,
-        );
-      } catch (error, stackTrace) {
-        _printCanonicalReportFailureSafely(canonicalPath, error);
-        Error.throwWithStackTrace(error, stackTrace);
-      }
+    final persistence = _activeReportPersistence;
+    if (persistence == null || outputIdentity == null) {
+      throw StateError('Apply report persistence was not prepared.');
     }
-    if (outputPath != null) {
-      final externalPath = p.normalize(p.absolute(outputPath));
-      try {
-        if (externalPath == canonicalPath) {
-          if (outputFormat == _ReportOutputFormat.html) {
-            throw StateError(
-              'HTML report output cannot replace the canonical quarantine JSON.',
-            );
-          }
-        } else {
-          final rendered = switch (outputFormat) {
-            _ReportOutputFormat.json => canonicalJson,
-            _ReportOutputFormat.html => const HtmlFormatter().format(report),
-          };
-          await _writeReportFile(
-            externalPath,
-            rendered,
-            runId: report.identity.id,
-          );
-          writtenReportPath = externalPath;
-          writtenReportFormat = outputFormat;
-        }
-      } catch (error, stackTrace) {
-        final failedReport = _withExternalReportFailure(
-          report,
-          outputFormat: outputFormat,
-          outputPath: externalPath,
-          error: error,
-        );
-        if (canonicalPath != null) {
-          Object? canonicalError;
-          try {
-            await _writeReportFile(
-              canonicalPath,
-              const JsonFormatter().format(failedReport),
-              runId: report.identity.id,
-            );
-          } catch (error) {
-            canonicalError = error;
-          }
-          if (canonicalError == null) {
-            if (printTerminal) {
-              try {
-                _printTerminalReport(
-                  failedReport,
-                  reportPath: canonicalPath,
-                  reportFormat: _ReportOutputFormat.json,
-                );
-              } catch (_) {
-                // The canonical report remains authoritative even if terminal
-                // rendering is unavailable.
-              }
-            }
-          } else {
-            _printCanonicalReportFailureSafely(canonicalPath, canonicalError);
-            if (printTerminal) _printTerminalSummarySafely(failedReport);
-          }
-          return;
-        } else {
-          if (printTerminal) _printTerminalSummarySafely(failedReport);
-        }
-        Error.throwWithStackTrace(error, stackTrace);
-      }
-    }
-    if (printTerminal && writtenReportPath != null) {
-      _printTerminalReport(
+
+    CommittedReport committed;
+    var terminalReport = report;
+    var terminalFormat = outputFormat;
+    try {
+      committed = await persistence.write(
         report,
-        reportPath: writtenReportPath,
-        reportFormat: writtenReportFormat,
+        outputFormat: outputFormat,
+        mutation: quarantineDir != null,
+        publishExternal: printTerminal,
       );
+    } on Object catch (error, stackTrace) {
+      if (quarantineDir == null || !printTerminal) {
+        if (quarantineDir != null) {
+          _printCanonicalReportFailureSafely(quarantineDir.path, error);
+        }
+        Error.throwWithStackTrace(error, stackTrace);
+      }
+      terminalReport = switch (error) {
+        ImmutableReportStoreException(failedRole: 'export') =>
+          _withExternalReportFailure(
+            report,
+            outputFormat: outputFormat,
+            outputPath: outputIdentity.requestedPath,
+            error: error,
+          ),
+        _ => _withReportBatchFailure(report, error: error),
+      };
+      terminalFormat = _ReportOutputFormat.json;
+      try {
+        committed = await persistence.write(
+          terminalReport,
+          outputFormat: _ReportOutputFormat.json,
+          mutation: true,
+          publishExternal: false,
+        );
+      } on Object catch (canonicalError, canonicalStackTrace) {
+        _printCanonicalReportFailureSafely(quarantineDir.path, canonicalError);
+        Error.throwWithStackTrace(canonicalError, canonicalStackTrace);
+      }
+    }
+
+    if (!printTerminal) return;
+    await persistence.close();
+    final terminalPath =
+        committed.actualObjectPaths['export'] ??
+        committed.actualObjectPaths['primary'] ??
+        committed.actualObjectPaths['canonical']!;
+    try {
+      _printTerminalReport(
+        terminalReport,
+        reportPath: terminalPath,
+        reportFormat: terminalFormat,
+      );
+    } on Object {
+      _printTerminalSummarySafely(terminalReport);
     }
   }
 
@@ -2759,7 +2768,35 @@ class ApplyCommand extends Command<int> {
     required _ReportOutputFormat outputFormat,
     required String outputPath,
     required Object error,
-  }) => RunReport(
+  }) => _withAdditionalDiagnostic(
+    report,
+    RunDiagnostic(
+      code: 'external_report_export_failed',
+      message:
+          'Failed to export the requested ${outputFormat.name.toUpperCase()} '
+          'report to $outputPath: $error',
+      phase: 'reportExport',
+    ),
+  );
+
+  RunReport _withReportBatchFailure(
+    RunReport report, {
+    required Object error,
+  }) => _withAdditionalDiagnostic(
+    report,
+    RunDiagnostic(
+      code: 'report_batch_persistence_failed',
+      message:
+          'The terminal canonical/export report batch was not committed: '
+          '$error',
+      phase: 'reportPersistence',
+    ),
+  );
+
+  RunReport _withAdditionalDiagnostic(
+    RunReport report,
+    RunDiagnostic diagnostic,
+  ) => RunReport(
     identity: report.identity,
     status: report.status,
     exitCode: report.exitCode,
@@ -2772,16 +2809,7 @@ class ApplyCommand extends Command<int> {
     rootCoverage: report.rootCoverage,
     analysisPasses: report.analysisPasses,
     findings: report.findings,
-    diagnostics: List.unmodifiable([
-      ...report.diagnostics,
-      RunDiagnostic(
-        code: 'external_report_export_failed',
-        message:
-            'Failed to export the requested ${outputFormat.name.toUpperCase()} '
-            'report to $outputPath: $error',
-        phase: 'reportExport',
-      ),
-    ]),
+    diagnostics: List.unmodifiable([...report.diagnostics, diagnostic]),
     verificationAttempts: report.verificationAttempts,
     applyFindingOutcomes: report.applyFindingOutcomes,
     applySelection: report.applySelection,
@@ -2790,69 +2818,180 @@ class ApplyCommand extends Command<int> {
     acceptedRiskCodes: report.acceptedRiskCodes,
     riskAcceptanceSource: report.riskAcceptanceSource,
   );
+}
 
-  void _validateReportOutputDestination(String? destination) {
-    if (destination == null) return;
-    final normalized = p.normalize(p.absolute(destination));
-    final destinationType = FileSystemEntity.typeSync(
-      normalized,
-      followLinks: true,
-    );
-    if (destinationType != FileSystemEntityType.notFound &&
-        destinationType != FileSystemEntityType.file) {
-      throw ToolWorkspaceException(
-        'Report destination is not a regular file: $normalized',
+final class _ApplyReportPersistence {
+  _ApplyReportPersistence({
+    required this.runId,
+    required this.backend,
+    required this.externalOutput,
+  });
+
+  final String runId;
+  final ReportObjectBackend backend;
+  final PreparedReportOutput externalOutput;
+
+  ImmutableReportStore? _mutationStore;
+  var _sequence = 0;
+  var _externalAttempted = false;
+  var _closed = false;
+
+  Future<void> prepareMutation(Directory quarantineDirectory) async {
+    if (_closed) throw StateError('Apply report persistence is closed.');
+    if (_mutationStore != null) return;
+    final reportRoot = Directory(p.join(quarantineDirectory.path, 'reports'));
+    final objectsDirectory = Directory(p.join(reportRoot.path, 'objects'));
+    final commitsDirectory = Directory(p.join(reportRoot.path, 'commits'));
+    await objectsDirectory.create(recursive: true);
+    await commitsDirectory.create(recursive: true);
+    final objects = await backend.anchor(objectsDirectory);
+    AnchoredReportDirectory? commits;
+    try {
+      commits = await backend.anchor(commitsDirectory);
+      _mutationStore = ImmutableReportStore(
+        objectsDirectory: objects,
+        commitsDirectory: commits,
       );
-    }
-
-    var current = p.dirname(normalized);
-    while (true) {
-      final type = FileSystemEntity.typeSync(current, followLinks: true);
-      if (type == FileSystemEntityType.directory) return;
-      if (type != FileSystemEntityType.notFound) {
-        throw ToolWorkspaceException(
-          'Report path has a non-directory parent: $current',
-        );
-      }
-      final parent = p.dirname(current);
-      if (parent == current) {
-        throw ToolWorkspaceException(
-          'Report path has no existing directory ancestor: $normalized',
-        );
-      }
-      current = parent;
+    } on Object {
+      if (commits != null) await commits.close();
+      await objects.close();
+      rethrow;
     }
   }
 
-  Future<void> _writeReportFile(
-    String destination,
-    String contents, {
-    required String runId,
+  Future<CommittedReport> write(
+    RunReport report, {
+    required _ReportOutputFormat outputFormat,
+    required bool mutation,
+    required bool publishExternal,
   }) async {
-    final file = File(destination);
-    await file.parent.create(recursive: true);
-    final temporary = File('$destination.$runId.tmp');
-    final previous = File('$destination.$runId.previous');
-    if (temporary.existsSync() || previous.existsSync()) {
-      throw StateError('Stale report transaction files exist for $destination');
+    if (_closed) throw StateError('Apply report persistence is closed.');
+    final sequence = ++_sequence;
+    final identity = _reportCommitIdentity(
+      runId,
+      sequence,
+      completedAtUtc: report.identity.finishedAtUtc,
+    );
+
+    if (!mutation) {
+      _externalAttempted = true;
+      return externalOutput.writeBatch(
+        identity: identity,
+        objects: [
+          ReportObjectWrite(
+            role: 'primary',
+            format: outputFormat.name,
+            reportSchemaVersion: 3,
+            writeTo: (sink) => _writeFormattedReport(
+              report,
+              outputFormat: outputFormat,
+              sink: sink,
+            ),
+          ),
+        ],
+      );
     }
-    await temporary.writeAsString('$contents\n', flush: true);
-    var movedPrevious = false;
+
+    final mutationStore = _mutationStore;
+    if (mutationStore == null) {
+      throw StateError('Mutation report persistence was not prepared.');
+    }
+    final canonicalLeaf =
+        'run-report-${sequence.toString().padLeft(6, '0')}.json';
+    final canonicalWrite = ReportObjectWrite(
+      role: 'canonical',
+      format: 'json',
+      reportSchemaVersion: 3,
+      writeTo: (sink) => const JsonFormatter().writeTo(report, sink),
+    );
+
+    if (!publishExternal || _externalAttempted) {
+      return mutationStore.writeBatch(
+        identity: identity,
+        objects: [canonicalWrite],
+        objectLeafOverrides: {'canonical': canonicalLeaf},
+        recordPathOverrides: {'canonical': 'quarantine/$canonicalLeaf'},
+      );
+    }
+
+    _externalAttempted = true;
+    final externalLeaf = externalOutput.objectLeafOverrides['primary'];
+    final adjacentCommitLeaf = externalOutput.commitLeafOverride;
+    if (externalLeaf == null || adjacentCommitLeaf == null) {
+      throw StateError('External apply output is not an exact-path profile.');
+    }
+    return externalOutput.store.writeBatch(
+      identity: identity,
+      objects: [
+        canonicalWrite,
+        ReportObjectWrite(
+          role: 'export',
+          format: outputFormat.name,
+          reportSchemaVersion: 3,
+          writeTo: (sink) => _writeFormattedReport(
+            report,
+            outputFormat: outputFormat,
+            sink: sink,
+          ),
+        ),
+      ],
+      objectDirectoryOverrides: {'canonical': mutationStore.objectsDirectory},
+      objectLeafOverrides: {'canonical': canonicalLeaf, 'export': externalLeaf},
+      recordPathOverrides: {
+        'canonical': 'quarantine/$canonicalLeaf',
+        'export': 'external/$externalLeaf',
+      },
+      commitLeafOverride: adjacentCommitLeaf,
+    );
+  }
+
+  Future<void> close() async {
+    if (_closed) return;
+    _closed = true;
+    Object? firstError;
+    StackTrace? firstStackTrace;
+    final mutationStore = _mutationStore;
+    if (mutationStore != null) {
+      try {
+        await mutationStore.close();
+      } on Object catch (error, stackTrace) {
+        firstError = error;
+        firstStackTrace = stackTrace;
+      }
+    }
     try {
-      if (file.existsSync()) {
-        await file.rename(previous.path);
-        movedPrevious = true;
-      }
-      await temporary.rename(file.path);
-      if (movedPrevious) await previous.delete();
-    } catch (_) {
-      if (!file.existsSync() && movedPrevious && previous.existsSync()) {
-        await previous.rename(file.path);
-      }
-      rethrow;
-    } finally {
-      if (temporary.existsSync()) await temporary.delete();
+      await externalOutput.close();
+    } on Object catch (error, stackTrace) {
+      firstError ??= error;
+      firstStackTrace ??= stackTrace;
     }
+    if (firstError != null) {
+      Error.throwWithStackTrace(firstError, firstStackTrace!);
+    }
+  }
+}
+
+ReportCommitIdentity _reportCommitIdentity(
+  String runId,
+  int sequence, {
+  DateTime? completedAtUtc,
+}) => ReportCommitIdentity(
+  runId: runId,
+  sequence: sequence,
+  command: 'apply',
+  completedAtUtc: canonicalReportTimestamp(completedAtUtc ?? DateTime.now()),
+);
+
+void _writeFormattedReport(
+  RunReport report, {
+  required _ReportOutputFormat outputFormat,
+  required StringSink sink,
+}) {
+  switch (outputFormat) {
+    case _ReportOutputFormat.json:
+      const JsonFormatter().writeTo(report, sink);
+    case _ReportOutputFormat.html:
+      const HtmlFormatter().writeTo(report, sink);
   }
 }
 

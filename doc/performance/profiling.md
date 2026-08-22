@@ -54,6 +54,7 @@ project analysis, dominate report cost:
 
 ```bash
 dart run benchmark/json_report_benchmark.dart \
+  --json-version 3 \
   --findings 500 \
   --blockers 1000 \
   --warmup 1 \
@@ -62,7 +63,30 @@ dart run benchmark/json_report_benchmark.dart \
 
 It constructs no source fixture and emits only aggregate counts, elapsed
 samples, and report bytes. Keep findings, unique blockers, and
-`blockerFindingLinks` identical when comparing serializer revisions.
+`blockerFindingLinks` identical when comparing serializer revisions. For a
+legacy v2 measurement, also pin `--affected-node-ids-per-blocker`; the result
+records `jsonVersion`, ID-reference fan-out, and completed iterations.
+
+Schema v2 compatibility serialization has fixed admission limits: 250,000
+blocker occurrences, 2,000,000 affected-node-ID occurrences, and 100,000 IDs
+for one blocker occurrence. Exercise the rejection path without allocating an
+output string:
+
+```bash
+dart run benchmark/json_report_benchmark.dart \
+  --json-version 2 \
+  --findings 251 \
+  --blockers 1000 \
+  --expect-v2-preflight-rejection \
+  --warmup 0 \
+  --iterations 1
+```
+
+That mode runs one preflight and no warmup or serialization sample. Its JSON
+contains `preflightRejected: true`, a rejection limit, zero completed
+iterations, and an empty sample list; it intentionally omits timing and report
+byte fields. It is a controlled bounded-rejection check, not evidence of a
+successful v2 export.
 
 Generate a synthetic profile outside the repository, then benchmark it:
 

@@ -79,6 +79,10 @@ class ProjectContext {
     }
 
     final workspace = ToolWorkspace(directory);
+    final pathPolicy = ProjectPathPolicy(
+      root: directory,
+      additionalExcludedPaths: additionalExcludedPaths,
+    );
     final discoveredConfig = configFile ?? workspace.discoveredConfigFile;
     final ProjectConfig? projectConfig;
     if (discoveredConfig.existsSync()) {
@@ -86,6 +90,7 @@ class ProjectContext {
         projectConfig = await ProjectConfig.load(
           discoveredConfig,
           projectRoot: directory,
+          pathPolicy: pathPolicy,
         );
       } on ProjectConfigException catch (error) {
         throw ProjectLoadException(error.message);
@@ -147,10 +152,7 @@ class ProjectContext {
       verificationPolicy:
           projectConfig?.verificationPolicy ??
           VerificationPolicy.flutterDefault,
-      pathPolicy: ProjectPathPolicy(
-        root: directory,
-        additionalExcludedPaths: additionalExcludedPaths,
-      ),
+      pathPolicy: pathPolicy,
     );
   }
 
@@ -224,12 +226,21 @@ class ProjectContext {
   String relative(String absolutePath) =>
       p.relative(absolutePath, from: root.path).replaceAll(r'\', '/');
 
-  /// Dart files under `lib/`, `bin/` and `test/`.
+  /// Dart files under selected standard Dart execution surfaces.
   ///
   /// Skips generated `.g.dart`/`.freezed.dart` output and hidden directories.
   List<File> get dartFiles {
     final result = <File>[];
-    for (final dir in const ['lib', 'bin', 'test']) {
+    for (final dir in const [
+      'lib',
+      'bin',
+      'test',
+      'integration_test',
+      'test_driver',
+      'benchmark',
+      'tool',
+      'example',
+    ]) {
       final directory = Directory(resolve(dir));
       if (!directory.existsSync()) continue;
       for (final entity in directory.listSync(

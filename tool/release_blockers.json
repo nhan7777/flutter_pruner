@@ -1,0 +1,350 @@
+{
+  "schemaVersion": 3,
+  "blockers": [
+    {
+      "id": "report-writer-hostile-path-race",
+      "status": "resolved",
+      "severity": "critical",
+      "reason": "The append-only retained-capability design now has an exact Windows NTFS conformance contract, and release admission requires its hosted evidence to match the candidate commit.",
+      "evidence": [
+        "lib/src/reporting/native/windows_bindings.dart",
+        "lib/src/reporting/native/windows_report_object_backend.dart",
+        "test/reporting/immutable_report_store_test.dart",
+        "test/reporting/posix_report_object_backend_test.dart",
+        "test/reporting/windows_report_object_backend_test.dart",
+        "test/reporting/report_recovery_inspector_test.dart",
+        "test/cli/scan_command_test.dart",
+        "test/cli/apply_command_test.dart"
+      ],
+      "requiredTestRuns": [
+        {
+          "platform": "windows",
+          "path": "test/reporting/windows_report_object_backend_test.dart",
+          "name": "walks every directory suffix relative to its retained parent"
+        },
+        {
+          "platform": "windows",
+          "path": "test/reporting/windows_report_object_backend_test.dart",
+          "name": "maps an existing directory leaf to a collision"
+        },
+        {
+          "platform": "windows",
+          "path": "test/reporting/windows_report_object_backend_test.dart",
+          "name": "creates and rereads bytes through one retained Windows handle"
+        },
+        {
+          "platform": "windows",
+          "path": "test/reporting/windows_report_object_backend_test.dart",
+          "name": "foreign regular and empty collisions remain byte exact"
+        },
+        {
+          "platform": "windows",
+          "path": "test/reporting/windows_report_object_backend_test.dart",
+          "name": "retained parent stays object-bound across hostile directory rename"
+        },
+        {
+          "platform": "windows",
+          "path": "test/reporting/windows_report_object_backend_test.dart",
+          "name": "retained object handle denies pathname replacement"
+        },
+        {
+          "platform": "windows",
+          "path": "test/reporting/windows_report_object_backend_test.dart",
+          "name": "final reparse collision is not followed or modified"
+        },
+        {
+          "platform": "windows",
+          "path": "test/reporting/immutable_report_store_test.dart",
+          "name": "valid batch becomes READY only through an exact commit"
+        },
+        {
+          "platform": "windows",
+          "path": "test/reporting/immutable_report_store_test.dart",
+          "name": "foreign object collision is byte and type exact with no commit"
+        },
+        {
+          "platform": "windows",
+          "path": "test/reporting/report_recovery_inspector_test.dart",
+          "name": "classifies an exact valid authority as committed"
+        },
+        {
+          "platform": "windows",
+          "path": "test/reporting/report_recovery_inspector_test.dart",
+          "name": "retained directory capabilities prevent authority substitution"
+        },
+        {
+          "platform": "windows",
+          "path": "test/cli/scan_command_test.dart",
+          "name": "blocked child process scan barrier preserves foreign destination"
+        },
+        {
+          "platform": "windows",
+          "path": "test/cli/apply_command_test.dart",
+          "name": "completed lifecycle is persisted before report becomes terminal"
+        }
+      ],
+      "requiredArtifacts": [
+        {
+          "path": "lib/src/reporting/native/windows_bindings.dart",
+          "sha256": "ffc2d636005e5e6b9f2f991564e6f65383b7320eee8936c9dc0d85cdb869a13e"
+        },
+        {
+          "path": "lib/src/reporting/native/windows_report_object_backend.dart",
+          "sha256": "411886b088fb30320b0f759b810fffce848c59f7cf21c589ce619e23bff94cff"
+        }
+      ],
+      "requiredHostedEvidence": {
+        "platform": "windows",
+        "filesystem": "NTFS",
+        "testRuns": [
+          {
+            "platform": "windows",
+            "path": "test/reporting/windows_report_object_backend_test.dart",
+            "name": "walks every directory suffix relative to its retained parent"
+          },
+          {
+            "platform": "windows",
+            "path": "test/reporting/windows_report_object_backend_test.dart",
+            "name": "maps an existing directory leaf to a collision"
+          },
+          {
+            "platform": "windows",
+            "path": "test/reporting/windows_report_object_backend_test.dart",
+            "name": "creates and rereads bytes through one retained Windows handle"
+          },
+          {
+            "platform": "windows",
+            "path": "test/reporting/windows_report_object_backend_test.dart",
+            "name": "foreign regular and empty collisions remain byte exact"
+          },
+          {
+            "platform": "windows",
+            "path": "test/reporting/windows_report_object_backend_test.dart",
+            "name": "retained parent stays object-bound across hostile directory rename"
+          },
+          {
+            "platform": "windows",
+            "path": "test/reporting/windows_report_object_backend_test.dart",
+            "name": "retained object handle denies pathname replacement"
+          },
+          {
+            "platform": "windows",
+            "path": "test/reporting/windows_report_object_backend_test.dart",
+            "name": "final reparse collision is not followed or modified"
+          },
+          {
+            "platform": "windows",
+            "path": "test/reporting/immutable_report_store_test.dart",
+            "name": "valid batch becomes READY only through an exact commit"
+          },
+          {
+            "platform": "windows",
+            "path": "test/reporting/immutable_report_store_test.dart",
+            "name": "foreign object collision is byte and type exact with no commit"
+          },
+          {
+            "platform": "windows",
+            "path": "test/reporting/report_recovery_inspector_test.dart",
+            "name": "classifies an exact valid authority as committed"
+          },
+          {
+            "platform": "windows",
+            "path": "test/reporting/report_recovery_inspector_test.dart",
+            "name": "retained directory capabilities prevent authority substitution"
+          },
+          {
+            "platform": "windows",
+            "path": "test/cli/scan_command_test.dart",
+            "name": "blocked child process scan barrier preserves foreign destination"
+          },
+          {
+            "platform": "windows",
+            "path": "test/cli/apply_command_test.dart",
+            "name": "completed lifecycle is persisted before report becomes terminal"
+          }
+        ]
+      }
+    },
+    {
+      "id": "json-v3-context-integrity-asymmetry",
+      "status": "resolved",
+      "severity": "important",
+      "reason": "Production now owns one canonical execution-context grammar, rejects configured and auxiliary collisions at intake, and preflights the complete JSON v3 context inventory before output.",
+      "evidence": [
+        "lib/src/core/graph/execution_context_identity.dart",
+        "lib/src/core/graph/execution_target.dart",
+        "lib/src/core/project/target_matrix.dart",
+        "lib/src/cli/formatters/json_formatter.dart",
+        "test/core/build_condition_test.dart",
+        "test/core/target_matrix_test.dart",
+        "test/cli/formatters/json_formatter_test.dart",
+        "test/benchmark/accuracy/scanner_report_test.dart"
+      ],
+      "requiredTestRuns": [
+        {
+          "platform": "linux",
+          "path": "test/core/build_condition_test.dart",
+          "name": "execution context identity configured target names reject empty and control suffixes"
+        },
+        {
+          "platform": "linux",
+          "path": "test/core/target_matrix_test.dart",
+          "name": "rejects configured names that derive the same context identity"
+        },
+        {
+          "platform": "linux",
+          "path": "test/cli/formatters/json_formatter_test.dart",
+          "name": "v3 rejects an incomplete context inventory before writing"
+        },
+        {
+          "platform": "linux",
+          "path": "test/benchmark/accuracy/scanner_report_test.dart",
+          "name": "production formatter auxiliary wire validates accepted contexts"
+        },
+        {
+          "platform": "macos",
+          "path": "test/core/build_condition_test.dart",
+          "name": "execution context identity configured target names reject empty and control suffixes"
+        },
+        {
+          "platform": "macos",
+          "path": "test/core/target_matrix_test.dart",
+          "name": "rejects configured names that derive the same context identity"
+        },
+        {
+          "platform": "macos",
+          "path": "test/cli/formatters/json_formatter_test.dart",
+          "name": "v3 rejects an incomplete context inventory before writing"
+        },
+        {
+          "platform": "macos",
+          "path": "test/benchmark/accuracy/scanner_report_test.dart",
+          "name": "production formatter auxiliary wire validates accepted contexts"
+        },
+        {
+          "platform": "windows",
+          "path": "test/core/build_condition_test.dart",
+          "name": "execution context identity configured target names reject empty and control suffixes"
+        },
+        {
+          "platform": "windows",
+          "path": "test/core/target_matrix_test.dart",
+          "name": "rejects configured names that derive the same context identity"
+        },
+        {
+          "platform": "windows",
+          "path": "test/cli/formatters/json_formatter_test.dart",
+          "name": "v3 rejects an incomplete context inventory before writing"
+        },
+        {
+          "platform": "windows",
+          "path": "test/benchmark/accuracy/scanner_report_test.dart",
+          "name": "production formatter auxiliary wire validates accepted contexts"
+        }
+      ],
+      "requiredArtifacts": [
+        {
+          "path": "test/fixtures/v2_json_wire_contract.json",
+          "sha256": "9356c0e04b37a875d22eb6a03e94fe8437632fe90ca4d3c2ce638d37ea2391de"
+        }
+      ]
+    },
+    {
+      "id": "corrected-oracle-o3-o4-incomplete",
+      "status": "resolved",
+      "severity": "important",
+      "reason": "O3/O4 remediation now binds the oracle to canonical source and Git-index evidence, preserves callback and public-surface closure strength fail-closed, and passed a fresh independent safety review without material false-exact, target-loss, or path-leak findings.",
+      "evidence": [
+        "benchmark/accuracy/src/scanner_report.dart",
+        "benchmark/accuracy/src/root_universe.dart",
+        "test/benchmark/accuracy/oracle_project_path_test.dart",
+        "test/benchmark/accuracy/scanner_graph_observation_test.dart",
+        "test/benchmark/accuracy/scanner_report_test.dart",
+        "test/benchmark/accuracy/root_universe_test.dart"
+      ],
+      "requiredTestRuns": [
+        {
+          "platform": "linux",
+          "path": "test/benchmark/accuracy/root_universe_test.dart",
+          "name": "does not root a callback owner sibling and tracks source ownership"
+        },
+        {
+          "platform": "linux",
+          "path": "test/benchmark/accuracy/root_universe_test.dart",
+          "name": "retains project-external sibling callbacks under their package owner"
+        },
+        {
+          "platform": "linux",
+          "path": "test/benchmark/accuracy/root_universe_test.dart",
+          "name": "does not make child exports exact through an invalid exporter"
+        },
+        {
+          "platform": "linux",
+          "path": "test/benchmark/accuracy/root_universe_test.dart",
+          "name": "rejects a Git index that changes after inventory capture"
+        },
+        {
+          "platform": "linux",
+          "path": "test/benchmark/accuracy/root_universe_test.dart",
+          "name": "rejects a Git index inventory captured from another project"
+        },
+        {
+          "platform": "macos",
+          "path": "test/benchmark/accuracy/root_universe_test.dart",
+          "name": "does not root a callback owner sibling and tracks source ownership"
+        },
+        {
+          "platform": "macos",
+          "path": "test/benchmark/accuracy/root_universe_test.dart",
+          "name": "retains project-external sibling callbacks under their package owner"
+        },
+        {
+          "platform": "macos",
+          "path": "test/benchmark/accuracy/root_universe_test.dart",
+          "name": "does not make child exports exact through an invalid exporter"
+        },
+        {
+          "platform": "macos",
+          "path": "test/benchmark/accuracy/root_universe_test.dart",
+          "name": "rejects a Git index that changes after inventory capture"
+        },
+        {
+          "platform": "macos",
+          "path": "test/benchmark/accuracy/root_universe_test.dart",
+          "name": "rejects a Git index inventory captured from another project"
+        },
+        {
+          "platform": "windows",
+          "path": "test/benchmark/accuracy/root_universe_test.dart",
+          "name": "does not root a callback owner sibling and tracks source ownership"
+        },
+        {
+          "platform": "windows",
+          "path": "test/benchmark/accuracy/root_universe_test.dart",
+          "name": "retains project-external sibling callbacks under their package owner"
+        },
+        {
+          "platform": "windows",
+          "path": "test/benchmark/accuracy/root_universe_test.dart",
+          "name": "does not make child exports exact through an invalid exporter"
+        },
+        {
+          "platform": "windows",
+          "path": "test/benchmark/accuracy/root_universe_test.dart",
+          "name": "rejects a Git index that changes after inventory capture"
+        },
+        {
+          "platform": "windows",
+          "path": "test/benchmark/accuracy/root_universe_test.dart",
+          "name": "rejects a Git index inventory captured from another project"
+        }
+      ],
+      "requiredArtifacts": [
+        {
+          "path": "test/fixtures/accuracy/strict_manifest_v1.json",
+          "sha256": "a3121b076081432dfa7f508c33e30148e2deff689a9e59fc9c8185b41f300af7"
+        }
+      ]
+    }
+  ]
+}

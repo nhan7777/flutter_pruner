@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:args/command_runner.dart' as args;
+import 'package:crypto/crypto.dart';
 import 'package:flutter_pruner/src/adapters/analyzer_adapter.dart';
 import 'package:flutter_pruner/src/analysis/analysis_snapshot.dart';
 import 'package:flutter_pruner/src/analysis/project_analyzer.dart';
@@ -9,15 +10,19 @@ import 'package:flutter_pruner/src/apply/import_cleanup_runner.dart';
 import 'package:flutter_pruner/src/cli/command_runner.dart';
 import 'package:flutter_pruner/src/cli/commands/apply_command.dart';
 import 'package:flutter_pruner/src/cli/init_prompt.dart';
+import 'package:flutter_pruner/src/core/confidence/confidence.dart';
 import 'package:flutter_pruner/src/core/confidence/finding.dart';
 import 'package:flutter_pruner/src/core/graph/node.dart';
 import 'package:flutter_pruner/src/core/process/managed_process_runner.dart';
 import 'package:flutter_pruner/src/quarantine/manifest.dart';
 import 'package:flutter_pruner/src/quarantine/quarantine_manager.dart';
+import 'package:flutter_pruner/src/reporting/report_commit.dart';
 import 'package:flutter_pruner/src/verification/verification_policy.dart';
 import 'package:flutter_pruner/src/verification/verification_runner.dart';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
+
+import 'report_output_collision_fixture.dart';
 
 void main() {
   late Directory tempDir;
@@ -30,6 +35,7 @@ publish_to: none
 environment:
   sdk: ^3.9.0
 ''');
+    _writePackageConfig(tempDir);
     File(p.join(tempDir.path, 'flutter_pruner.yaml')).writeAsStringSync('''
 version: 1
 analysis:
@@ -62,6 +68,117 @@ void unusedFunction() {}
   tearDown(() {
     if (tempDir.existsSync()) tempDir.deleteSync(recursive: true);
   });
+
+  for (final variant in ReportOutputAliasVariant.values) {
+    for (final invocation in _ReportCollisionApplyInvocation.values) {
+      test(
+        'apply rejects ${variant.name} report collision before ${invocation.name}',
+        () async {
+          final fixture = ReportOutputCollisionFixture.create(tempDir, variant);
+          addTearDown(fixture.dispose);
+          final verifier = _AlwaysPassingVerificationRunner(tempDir);
+          final arguments = <String>[
+            'apply',
+            '--report-format',
+            'json',
+            '--report-output',
+            fixture.requestedOutputPath,
+            if (invocation ==
+                _ReportCollisionApplyInvocation.dryRunNoAction) ...[
+              '--dry-run',
+              '--adapter',
+              'duplicates',
+            ] else ...[
+              '--adapter',
+              'dart',
+              '--finding-id',
+              'dart:apply_test/lib/src/helper.dart#unusedFunction',
+            ],
+            fixture.projectSelectionPath,
+          ];
+
+          final result = await _runApplyCaptured(
+            FlutterPrunerCommandRunner(verifierFactory: (_) => verifier),
+            arguments,
+          );
+
+          fixture.expectRetained();
+          expect(result.exitCode, 1);
+          expect(
+            result.stderr,
+            variant == ReportOutputAliasVariant.finalSymlink
+                ? contains('category=collision')
+                : contains('excluded by project path policy'),
+          );
+          expect(result.stderr, isNot(contains('Scanning')));
+          expect(verifier.invocationCount, 0);
+          expect(
+            '${result.stdout}\n${result.stderr}',
+            isNot(contains('REPORT READY')),
+          );
+        },
+      );
+    }
+  }
+
+  test(
+    'apply rejects a final report symlink without replacing its target',
+    () async {
+      final target = File(p.join(tempDir.path, 'foreign-report.json'))
+        ..writeAsStringSync('previous foreign report bytes');
+      final alias = Link(p.join(tempDir.path, 'foreign-report-link.json'))
+        ..createSync(target.path);
+      final sentinel = File(p.join(tempDir.path, 'foreign-positive.bin'))
+        ..writeAsBytesSync(const [9, 8, 7, 6]);
+      final sentinelBytes = sentinel.readAsBytesSync();
+      final sentinelMode = sentinel.statSync().mode & 0xfff;
+      final sentinelSha = sha256.convert(sentinelBytes).toString();
+      final originalLinkTarget = alias.targetSync();
+
+      final result = await _runApplyCaptured(FlutterPrunerCommandRunner(), [
+        'apply',
+        '--dry-run',
+        '--adapter',
+        'duplicates',
+        '--report-format',
+        'json',
+        '--report-output',
+        alias.path,
+        tempDir.path,
+      ]);
+
+      expect(result.exitCode, 1);
+      expect(result.stdout, isNot(contains('REPORT READY')));
+      expect(result.stderr, contains('category=collision'));
+      expect(
+        FileSystemEntity.typeSync(alias.path, followLinks: false),
+        FileSystemEntityType.link,
+      );
+      expect(alias.targetSync(), originalLinkTarget);
+      expect(
+        alias.resolveSymbolicLinksSync(),
+        target.resolveSymbolicLinksSync(),
+      );
+      expect(target.readAsStringSync(), 'previous foreign report bytes');
+      final retainedSentinelBytes = sentinel.readAsBytesSync();
+      expect(retainedSentinelBytes, orderedEquals(sentinelBytes));
+      expect(sentinel.statSync().mode & 0xfff, sentinelMode);
+      expect(sha256.convert(retainedSentinelBytes).toString(), sentinelSha);
+      expect(
+        target.parent
+            .listSync(followLinks: false)
+            .where(
+              (entity) =>
+                  p
+                      .basename(entity.path)
+                      .startsWith('${p.basename(target.path)}.') &&
+                  (entity.path.endsWith('.tmp') ||
+                      entity.path.endsWith('.previous')),
+            ),
+        isEmpty,
+      );
+    },
+  );
 
   test('requires init before apply starts', () async {
     File(p.join(tempDir.path, 'flutter_pruner.yaml')).deleteSync();
@@ -595,6 +712,198 @@ class InvocationOwner {
     expect(outcome['reasonCode'], 'not_attempted_batch_invalid');
   });
 
+  test('dynamic spawnUri boundary admits no exact mutation unit', () async {
+    File(p.join(tempDir.path, 'lib', 'main.dart')).writeAsStringSync('''
+import 'dart:isolate';
+import 'src/helper.dart';
+
+void main() {
+  usedFunction();
+}
+
+void launch(Uri target) {
+  Isolate.spawnUri(target, const [], null);
+}
+''');
+    final source = File(p.join(tempDir.path, 'lib', 'src', 'helper.dart'));
+    final originalBytes = source.readAsBytesSync();
+    const findingId = 'dart:apply_test/lib/src/helper.dart#unusedFunction';
+    final reportFile = File(p.join(tempDir.path, 'spawn-uri-selection.json'));
+    final verifier = _AlwaysPassingVerificationRunner(tempDir);
+
+    final exitCode =
+        await FlutterPrunerCommandRunner(verifierFactory: (_) => verifier).run([
+          'apply',
+          '--adapter',
+          'dart',
+          '--finding-id',
+          findingId,
+          '--report-format',
+          'json',
+          '--report-output',
+          reportFile.path,
+          tempDir.path,
+        ]);
+
+    expect(exitCode, 2);
+    expect(verifier.invocationCount, 0);
+    expect(source.readAsBytesSync(), originalBytes);
+    expect(
+      Directory(
+        p.join(tempDir.path, '.flutter_pruner', 'quarantine'),
+      ).existsSync(),
+      isFalse,
+    );
+    final report =
+        jsonDecode(reportFile.readAsStringSync()) as Map<String, Object?>;
+    final finding = (report['findings']! as List<Object?>)
+        .cast<Map<String, Object?>>()
+        .singleWhere(
+          (item) => (item['node']! as Map<String, Object?>)['id'] == findingId,
+        );
+    expect(finding['confidence'], 'REVIEW');
+    expect(finding['applyEligible'], isFalse);
+    expect(finding.containsKey('proposedAction'), isFalse);
+    final blockers = (report['blockers']! as Map<String, Object?>).values
+        .cast<Map<String, Object?>>();
+    expect(
+      blockers,
+      contains(
+        predicate<Map<String, Object?>>(
+          (blocker) =>
+              (blocker['reason'] as String).startsWith('spawn-uri-dynamic:'),
+        ),
+      ),
+    );
+    final apply = report['apply']! as Map<String, Object?>;
+    expect(
+      (apply['selection']! as Map<String, Object?>)['plannedFindingIds'],
+      isEmpty,
+    );
+    final outcome =
+        (apply['findingOutcomes']! as List<Object?>).single
+            as Map<String, Object?>;
+    expect(outcome['findingId'], findingId);
+    expect(outcome['status'], 'remaining');
+    expect(outcome['reasonCode'], 'not_attempted_batch_invalid');
+  }, timeout: const Timeout(Duration(minutes: 1)));
+
+  test(
+    'mixed spawnUri provenance admits no exact conditional mutation unit',
+    () async {
+      File(p.join(tempDir.path, 'flutter_pruner.yaml')).writeAsStringSync('''
+version: 1
+analysis:
+  mode: application
+target_matrix:
+  complete: true
+  targets:
+    - name: android
+      platform: android
+      entrypoint: lib/android.dart
+    - name: ios
+      platform: ios
+      entrypoint: lib/ios.dart
+''');
+      File(p.join(tempDir.path, 'lib', 'android.dart')).writeAsStringSync('''
+import 'dart:isolate';
+void main() => launch();
+void launch() {
+  Isolate.spawnUri(Uri.parse('worker.dart'), const [], null);
+}
+''');
+      File(p.join(tempDir.path, 'lib', 'ios.dart')).writeAsStringSync('''
+import 'android.dart';
+void main() => launch();
+''');
+      File(p.join(tempDir.path, 'tool', 'launcher.dart'))
+        ..createSync(recursive: true)
+        ..writeAsStringSync('''
+import '../lib/android.dart';
+void main() => launch();
+''');
+      File(p.join(tempDir.path, 'test', 'launcher_test.dart'))
+        ..createSync(recursive: true)
+        ..writeAsStringSync('''
+import '../lib/android.dart';
+void exercise() => launch();
+''');
+      File(p.join(tempDir.path, 'bin', 'launcher.dart'))
+        ..createSync(recursive: true)
+        ..writeAsStringSync('''
+import '../lib/android.dart';
+void main() => launch();
+''');
+      File(p.join(tempDir.path, 'lib', 'worker.dart')).writeAsStringSync('''
+import 'branch_default.dart'
+  if (dart.library.html) 'branch_web.dart'
+  if (dart.library.io) 'branch_io.dart';
+void main() => selectedBranch();
+''');
+      File(
+        p.join(tempDir.path, 'lib', 'branch_default.dart'),
+      ).writeAsStringSync('void selectedBranch() {}\n');
+      final source = File(p.join(tempDir.path, 'lib', 'branch_web.dart'))
+        ..writeAsStringSync('void selectedBranch() {}\n');
+      File(
+        p.join(tempDir.path, 'lib', 'branch_io.dart'),
+      ).writeAsStringSync('void selectedBranch() {}\n');
+      final originalBytes = source.readAsBytesSync();
+      const findingId = 'dart:apply_test/lib/branch_web.dart#selectedBranch';
+      final reportFile = File(
+        p.join(tempDir.path, 'mixed-spawn-uri-selection.json'),
+      );
+      final verifier = _AlwaysPassingVerificationRunner(tempDir);
+
+      final exitCode =
+          await FlutterPrunerCommandRunner(
+            verifierFactory: (_) => verifier,
+          ).run([
+            'apply',
+            '--adapter',
+            'dart',
+            '--finding-id',
+            findingId,
+            '--report-format',
+            'json',
+            '--report-output',
+            reportFile.path,
+            tempDir.path,
+          ]);
+
+      expect(exitCode, 2);
+      expect(verifier.invocationCount, 0);
+      expect(source.readAsBytesSync(), originalBytes);
+      expect(
+        Directory(
+          p.join(tempDir.path, '.flutter_pruner', 'quarantine'),
+        ).existsSync(),
+        isFalse,
+      );
+      final report =
+          jsonDecode(reportFile.readAsStringSync()) as Map<String, Object?>;
+      final finding = (report['findings']! as List<Object?>)
+          .cast<Map<String, Object?>>()
+          .singleWhere(
+            (item) =>
+                (item['node']! as Map<String, Object?>)['id'] == findingId,
+          );
+      expect(finding['confidence'], 'REVIEW');
+      expect(finding['applyEligible'], isFalse);
+      expect(finding.containsKey('proposedAction'), isFalse);
+      expect(
+        (finding['predicates']! as Map<String, Object?>)['notRetained'],
+        isFalse,
+      );
+      final apply = report['apply']! as Map<String, Object?>;
+      expect(
+        (apply['selection']! as Map<String, Object?>)['plannedFindingIds'],
+        isEmpty,
+      );
+    },
+    timeout: const Timeout(Duration(minutes: 1)),
+  );
+
   test(
     'exact execution never adopts an auxiliary path that appears after planning',
     () async {
@@ -700,6 +1009,84 @@ class InvocationOwner {
   });
 
   test(
+    'exact apply rejects a retained SAFE snapshot before verification or mutation',
+    () async {
+      final source = File(p.join(tempDir.path, 'lib', 'src', 'helper.dart'));
+      final originalBytes = source.readAsBytesSync();
+      final originalMode = source.statSync().mode & 0xfff;
+      final originalSha = sha256.convert(originalBytes).toString();
+      const findingId = 'dart:apply_test/lib/src/helper.dart#unusedFunction';
+      final verifier = _AlwaysPassingVerificationRunner(tempDir);
+      final reportFile = File(
+        p.join(tempDir.path, 'retained-safe-selection.json'),
+      );
+
+      final runner = args.CommandRunner<int>('flutter_pruner', 'test runner')
+        ..argParser.addFlag('verbose', negatable: false)
+        ..addCommand(
+          ApplyCommand(
+            verifierFactory: (_) => verifier,
+            analyzerFactory: (project, only) =>
+                _RetainedSafeFindingProjectAnalyzer(
+                  project: project,
+                  only: only,
+                  findingId: findingId,
+                ),
+          ),
+        );
+
+      final exitCode = await runner.run([
+        'apply',
+        '--adapter',
+        'dart',
+        '--finding-id',
+        findingId,
+        '--report-format',
+        'json',
+        '--report-output',
+        reportFile.path,
+        tempDir.path,
+      ]);
+
+      expect(exitCode, 2);
+      expect(verifier.invocationCount, 0);
+      final retainedBytes = source.readAsBytesSync();
+      expect(retainedBytes, orderedEquals(originalBytes));
+      expect(source.statSync().mode & 0xfff, originalMode);
+      expect(sha256.convert(retainedBytes).toString(), originalSha);
+      expect(
+        Directory(
+          p.join(tempDir.path, '.flutter_pruner', 'quarantine'),
+        ).existsSync(),
+        isFalse,
+      );
+      final report =
+          jsonDecode(reportFile.readAsStringSync()) as Map<String, Object?>;
+      final finding = (report['findings']! as List<Object?>)
+          .cast<Map<String, Object?>>()
+          .singleWhere(
+            (item) =>
+                (item['node']! as Map<String, Object?>)['id'] == findingId,
+          );
+      expect(finding['confidence'], 'SAFE');
+      expect(finding['applyEligible'], isFalse);
+      expect(
+        (finding['predicates']! as Map<String, Object?>)['notRetained'],
+        isFalse,
+      );
+      expect(
+        (report['apply']! as Map<String, Object?>)['selection'],
+        isA<Map<String, Object?>>().having(
+          (selection) => selection['plannedFindingIds'],
+          'plannedFindingIds',
+          isEmpty,
+        ),
+      );
+    },
+    timeout: const Timeout(Duration(minutes: 1)),
+  );
+
+  test(
     'exact run rolls back when requested ID remains in the final scan',
     () async {
       final source = File(p.join(tempDir.path, 'lib', 'src', 'helper.dart'));
@@ -779,7 +1166,6 @@ class InvocationOwner {
       final original = helperFile.readAsStringSync();
       final htmlReport = File(p.join(tempDir.path, 'reports', 'apply.html'));
       htmlReport.parent.createSync(recursive: true);
-      htmlReport.writeAsStringSync('previous report bytes');
 
       final verifier = _AlwaysPassingVerificationRunner(tempDir);
       Directory? verifierProject;
@@ -815,8 +1201,8 @@ class InvocationOwner {
       );
       final report =
           jsonDecode(
-                File(
-                  p.join(quarantine.path, 'run-report.json'),
+                _latestCommittedCanonicalReport(
+                  Directory(quarantine.path),
                 ).readAsStringSync(),
               )
               as Map<String, dynamic>;
@@ -931,8 +1317,8 @@ class InvocationOwner {
             lifecycleCompletedHook: (quarantine) async {
               final report =
                   jsonDecode(
-                        File(
-                          p.join(quarantine.path, 'run-report.json'),
+                        _latestCommittedCanonicalReport(
+                          quarantine,
                         ).readAsStringSync(),
                       )
                       as Map<String, dynamic>;
@@ -960,12 +1346,37 @@ class InvocationOwner {
       );
       final finalReport =
           jsonDecode(
-                File(
-                  p.join(quarantine.path, 'run-report.json'),
-                ).readAsStringSync(),
+                _latestCommittedCanonicalReport(quarantine).readAsStringSync(),
               )
               as Map<String, dynamic>;
       expect((finalReport['run'] as Map)['status'], 'completed');
+      final immutableStates =
+          Directory(
+              p.join(quarantine.path, 'reports', 'objects'),
+            ).listSync().whereType<File>().toList()
+            ..sort((left, right) => left.path.compareTo(right.path));
+      expect(immutableStates.map((file) => p.basename(file.path)), [
+        'run-report-000001.json',
+        'run-report-000002.json',
+      ]);
+      expect(
+        immutableStates
+            .map(
+              (file) =>
+                  (jsonDecode(file.readAsStringSync()) as Map)['run'] as Map,
+            )
+            .map((run) => run['status']),
+        ['interrupted', 'completed'],
+      );
+      final commits = _reportCommitsForRun(
+        tempDir,
+        p.basename(quarantine.path),
+      );
+      expect(commits.map((commit) => commit.sequence), [1, 2]);
+      expect(commits.last.objects.map((object) => object.role), [
+        'canonical',
+        'export',
+      ]);
     },
     timeout: const Timeout(Duration(minutes: 1)),
   );
@@ -1023,9 +1434,7 @@ void unusedThree() {}
       expect(manifest.transactions.single.rollbackVerified, isTrue);
       final report =
           jsonDecode(
-                File(
-                  p.join(quarantine.path, 'run-report.json'),
-                ).readAsStringSync(),
+                _latestCommittedCanonicalReport(quarantine).readAsStringSync(),
               )
               as Map;
       final outcomes = (report['apply'] as Map)['findingOutcomes'] as List;
@@ -1096,9 +1505,7 @@ void unusedConsumer() {
       expect(manifest.transactions, hasLength(1));
       final report =
           jsonDecode(
-                File(
-                  p.join(quarantine.path, 'run-report.json'),
-                ).readAsStringSync(),
+                _latestCommittedCanonicalReport(quarantine).readAsStringSync(),
               )
               as Map;
       final apply = report['apply'] as Map;
@@ -1210,9 +1617,7 @@ void removableUnused() {}
     );
     final report =
         jsonDecode(
-              File(
-                p.join(quarantine.path, 'run-report.json'),
-              ).readAsStringSync(),
+              _latestCommittedCanonicalReport(quarantine).readAsStringSync(),
             )
             as Map;
     final apply = report['apply'] as Map;
@@ -1280,9 +1685,7 @@ void removableUnused() {}
       );
       final report =
           jsonDecode(
-                File(
-                  p.join(quarantine.path, 'run-report.json'),
-                ).readAsStringSync(),
+                _latestCommittedCanonicalReport(quarantine).readAsStringSync(),
               )
               as Map;
       final apply = report['apply'] as Map;
@@ -1340,9 +1743,7 @@ void removableUnused() {}
       );
       final report =
           jsonDecode(
-                File(
-                  p.join(quarantine.path, 'run-report.json'),
-                ).readAsStringSync(),
+                _latestCommittedCanonicalReport(quarantine).readAsStringSync(),
               )
               as Map;
       final apply = report['apply'] as Map;
@@ -1428,9 +1829,7 @@ void unusedThree() {}
       expect(manifest.transactions.single.rollbackVerified, isFalse);
       final report =
           jsonDecode(
-                File(
-                  p.join(quarantine.path, 'run-report.json'),
-                ).readAsStringSync(),
+                _latestCommittedCanonicalReport(quarantine).readAsStringSync(),
               )
               as Map;
       expect((report['run'] as Map)['status'], 'recoveryRequired');
@@ -1476,9 +1875,7 @@ void unusedThree() {}
 
       final report =
           jsonDecode(
-                File(
-                  p.join(quarantine.path, 'run-report.json'),
-                ).readAsStringSync(),
+                _latestCommittedCanonicalReport(quarantine).readAsStringSync(),
               )
               as Map;
       expect((report['run'] as Map)['status'], 'recoveryRequired');
@@ -1546,9 +1943,7 @@ void unusedThree() {}
       expect(manifest.cases.single.status, QuarantineCaseStatus.backedUp);
       final report =
           jsonDecode(
-                File(
-                  p.join(quarantine.path, 'run-report.json'),
-                ).readAsStringSync(),
+                _latestCommittedCanonicalReport(quarantine).readAsStringSync(),
               )
               as Map;
       final outcome =
@@ -1622,7 +2017,7 @@ void unusedThree() {}
           tempDir.path,
         ]);
 
-    expect(exitCode, 64);
+    expect(exitCode, 1);
     expect(verifier.invocationCount, 0);
     expect(helperFile.readAsBytesSync(), originalBytes);
     expect(blockedParent.readAsStringSync(), 'preserve these bytes');
@@ -1961,8 +2356,7 @@ void editedDuringDisplacement() {}
       final manager = QuarantineManager(tempDir);
       final quarantineInfo = (await manager.listQuarantines()).single;
       final quarantine = Directory(quarantineInfo.path);
-      final canonical = File(p.join(quarantine.path, 'run-report.json'));
-      expect(canonical.existsSync(), isTrue);
+      final canonical = _latestCommittedCanonicalReport(quarantine);
       final report =
           jsonDecode(canonical.readAsStringSync()) as Map<String, dynamic>;
       final run = report['run'] as Map<String, dynamic>;
@@ -1989,6 +2383,66 @@ void editedDuringDisplacement() {}
         runId: quarantineInfo.runId,
       );
       expect(helperFile.readAsBytesSync(), originalBytes);
+    },
+    timeout: const Timeout(Duration(minutes: 1)),
+  );
+
+  test(
+    'terminal canonical collision is not mislabeled as an export failure',
+    () async {
+      final reportPath = p.join(tempDir.path, 'reports', 'apply.html');
+      final verifier = _AlwaysPassingVerificationRunner(tempDir);
+      final runner = args.CommandRunner<int>('flutter_pruner', 'test runner')
+        ..argParser.addFlag('verbose', negatable: false)
+        ..addCommand(
+          ApplyCommand(
+            verifierFactory: (_) => verifier,
+            lifecycleCompletedHook: (quarantine) {
+              Directory(
+                p.join(
+                  quarantine.path,
+                  'reports',
+                  'objects',
+                  'run-report-000002.json',
+                ),
+              ).createSync();
+            },
+          ),
+        );
+
+      final exitCode = await runner.run([
+        'apply',
+        '--adapter',
+        'dart',
+        '--report-output',
+        reportPath,
+        '--report-format',
+        'html',
+        tempDir.path,
+      ]);
+
+      expect(exitCode, 0);
+      expect(File(reportPath).existsSync(), isFalse);
+      expect(
+        File(
+          p.join(tempDir.path, 'reports', '.apply.html.commit.json'),
+        ).existsSync(),
+        isFalse,
+      );
+      final quarantine = Directory(
+        (await QuarantineManager(tempDir).listQuarantines()).single.path,
+      );
+      final report =
+          jsonDecode(
+                _latestCommittedCanonicalReport(quarantine).readAsStringSync(),
+              )
+              as Map<String, dynamic>;
+      expect((report['run'] as Map<String, dynamic>)['status'], 'completed');
+      final diagnosticCodes = (report['diagnostics'] as List<dynamic>)
+          .cast<Map<String, dynamic>>()
+          .map((diagnostic) => diagnostic['code']);
+      expect(diagnosticCodes, contains('report_batch_persistence_failed'));
+      expect(diagnosticCodes, isNot(contains('external_report_export_failed')));
     },
     timeout: const Timeout(Duration(minutes: 1)),
   );
@@ -2082,7 +2536,9 @@ void editedDuringDisplacement() {}
       expect(capturedStderr.text, contains('APPLY FAILED'));
       final manager = QuarantineManager(tempDir);
       final quarantine = (await manager.listQuarantines()).single;
-      final canonical = File(p.join(quarantine.path, 'run-report.json'));
+      final canonical = _latestCommittedCanonicalReport(
+        Directory(quarantine.path),
+      );
       expect(canonical.existsSync(), isTrue);
       final report =
           jsonDecode(canonical.readAsStringSync()) as Map<String, dynamic>;
@@ -2150,18 +2606,25 @@ void editedDuringDisplacement() {}
       expect(output, contains('REVERSIBILITY'));
       expect(output, contains('flutter_pruner rollback --project'));
       expect(output, isNot(contains('APPLY COMPLETED')));
-      expect(output, isNot(contains('REPORT READY')));
+      expect(output, contains('HTML REPORT READY'));
       final errorOutput = result.stderr as String;
       expect(errorOutput, contains('REPORT NOT SAVED'));
       expect(
         _withoutTerminalFormatting(errorOutput),
-        contains('run-report.json'),
+        contains('phase=createObject'),
       );
 
       final manager = QuarantineManager(tempDir);
       final quarantine = (await manager.listQuarantines()).single;
       expect(
-        Directory(p.join(quarantine.path, 'run-report.json')).existsSync(),
+        Directory(
+          p.join(
+            quarantine.path,
+            'reports',
+            'objects',
+            'run-report-000001.json',
+          ),
+        ).existsSync(),
         isTrue,
       );
       final manifest = await manager.readManifest(Directory(quarantine.path));
@@ -2195,9 +2658,11 @@ void editedDuringDisplacement() {}
       ).existsSync(),
       isFalse,
     );
-    final reportFile = Directory(
-      p.join(tempDir.path, '.flutter_pruner', 'reports'),
-    ).listSync().whereType<File>().single;
+    final reportFile =
+        Directory(p.join(tempDir.path, '.flutter_pruner', 'reports'))
+            .listSync()
+            .whereType<File>()
+            .singleWhere((file) => p.basename(file.path).startsWith('apply-'));
     expect(p.basename(reportFile.path), startsWith('apply-'));
     expect(p.extension(reportFile.path), '.html');
     final html = reportFile.readAsStringSync();
@@ -2249,7 +2714,8 @@ void editedDuringDisplacement() {}
     final reportIndex = output.indexOf('HTML REPORT READY');
     expect(resultIndex, greaterThanOrEqualTo(0));
     expect(reportIndex, greaterThan(resultIndex));
-    expect(_withoutTerminalFormatting(output), contains(reportFile.path));
+    final reportPath = reportFile.resolveSymbolicLinksSync();
+    expect(_withoutTerminalFormatting(output), contains(reportPath));
   });
 
   test('--report-format overrides the automatic report format', () async {
@@ -2262,9 +2728,11 @@ void editedDuringDisplacement() {}
     ]);
 
     expect(exitCode, 0);
-    final reportFile = Directory(
-      p.join(tempDir.path, '.flutter_pruner', 'reports'),
-    ).listSync().whereType<File>().single;
+    final reportFile =
+        Directory(p.join(tempDir.path, '.flutter_pruner', 'reports'))
+            .listSync()
+            .whereType<File>()
+            .singleWhere((file) => p.basename(file.path).startsWith('apply-'));
     expect(p.basename(reportFile.path), startsWith('apply-'));
     expect(p.extension(reportFile.path), '.json');
     final report = jsonDecode(reportFile.readAsStringSync()) as Map;
@@ -2516,7 +2984,7 @@ void _selectedCanary() {}
     timeout: const Timeout(Duration(minutes: 1)),
   );
 
-  test('removes a zero-byte Dart library and its stale import', () async {
+  test('retains a zero-byte Dart library reached by an exact import', () async {
     _writePackageConfig(tempDir);
     File(p.join(tempDir.path, 'lib', 'src', 'helper.dart')).deleteSync();
     final importer = File(p.join(tempDir.path, 'lib', 'main.dart'));
@@ -2530,22 +2998,14 @@ void _selectedCanary() {}
     ).run(['apply', '--adapter', 'dart', tempDir.path]);
 
     expect(exitCode, 0);
-    expect(emptyLibrary.existsSync(), isFalse);
-    expect(importer.readAsStringSync().trim(), 'void main() {}');
-
-    final manager = QuarantineManager(tempDir);
-    final quarantine = (await manager.listQuarantines()).single;
-    await manager.restore(
-      quarantineDir: Directory(quarantine.path),
-      runId: quarantine.runId,
-    );
     expect(emptyLibrary.existsSync(), isTrue);
     expect(emptyLibrary.readAsBytesSync(), isEmpty);
     expect(importer.readAsStringSync(), importerContent);
+    expect(await QuarantineManager(tempDir).listQuarantines(), isEmpty);
   }, timeout: const Timeout(Duration(minutes: 1)));
 
   test(
-    'one invocation rescans and removes a newly empty imported library',
+    'one invocation retains a newly empty imported library after pruning',
     () async {
       _writePackageConfig(tempDir);
       final mainFile = File(p.join(tempDir.path, 'lib', 'main.dart'));
@@ -2562,16 +3022,17 @@ void _selectedCanary() {}
       ).run(['apply', '--adapter', 'dart', tempDir.path]);
 
       expect(exitCode, 0);
-      expect(verifier.invocationCount, 3);
-      expect(deadFile.existsSync(), isFalse);
-      expect(mainFile.readAsStringSync().trim(), 'void main() {}');
+      expect(verifier.invocationCount, 2);
+      expect(deadFile.existsSync(), isTrue);
+      expect(deadFile.readAsBytesSync(), isEmpty);
+      expect(mainFile.readAsStringSync(), mainContent);
 
       final manager = QuarantineManager(tempDir);
       final quarantine = (await manager.listQuarantines()).single;
       final quarantineDir = Directory(quarantine.path);
       final manifest = await manager.readManifest(quarantineDir);
-      expect(manifest.transactions, hasLength(2));
-      expect(manifest.transactions.map((item) => item.round), [1, 2]);
+      expect(manifest.transactions, hasLength(1));
+      expect(manifest.transactions.map((item) => item.round), [1]);
       expect(
         manifest.cases.map((item) => item.caseId).toSet(),
         hasLength(manifest.cases.length),
@@ -2633,6 +3094,90 @@ void _selectedCanary() {}
       everyElement(QuarantineCaseStatus.rolledBack),
     );
   }, timeout: const Timeout(Duration(minutes: 1)));
+}
+
+enum _ReportCollisionApplyInvocation { dryRunNoAction, exactActionable }
+
+Future<_CapturedApplyRun> _runApplyCaptured(
+  FlutterPrunerCommandRunner runner,
+  List<String> arguments,
+) async {
+  final capturedStdout = _RecordingStdout();
+  final capturedStderr = _RecordingStdout();
+  final exitCode = await IOOverrides.runZoned(
+    () => runner.run(arguments),
+    stdout: () => capturedStdout,
+    stderr: () => capturedStderr,
+  );
+  await capturedStdout.close();
+  await capturedStderr.close();
+  return _CapturedApplyRun(
+    exitCode: exitCode,
+    stdout: capturedStdout.text,
+    stderr: capturedStderr.text,
+  );
+}
+
+final class _CapturedApplyRun {
+  const _CapturedApplyRun({
+    required this.exitCode,
+    required this.stdout,
+    required this.stderr,
+  });
+
+  final int exitCode;
+  final String stdout;
+  final String stderr;
+}
+
+File _latestCommittedCanonicalReport(Directory quarantine) {
+  final projectRoot = Directory(
+    p.dirname(p.dirname(p.dirname(quarantine.path))),
+  );
+  final commits = _reportCommitsForRun(
+    projectRoot,
+    p.basename(quarantine.path),
+  ).reversed;
+  for (final commit in commits) {
+    final canonicalRecords = commit.objects.where(
+      (object) => object.role == 'canonical',
+    );
+    if (canonicalRecords.isEmpty) continue;
+    final canonical = canonicalRecords.single;
+    final file = File(
+      p.join(
+        quarantine.path,
+        'reports',
+        'objects',
+        p.basename(canonical.relativePath),
+      ),
+    );
+    if (!file.existsSync() ||
+        file.lengthSync() != canonical.byteLength ||
+        sha256.convert(file.readAsBytesSync()).toString() != canonical.sha256) {
+      continue;
+    }
+    return file;
+  }
+  throw StateError('No committed canonical apply report was found.');
+}
+
+List<ReportCommit> _reportCommitsForRun(Directory projectRoot, String runId) {
+  final commits = <ReportCommit>[];
+  for (final file
+      in projectRoot
+          .listSync(recursive: true, followLinks: false)
+          .whereType<File>()) {
+    if (!file.path.endsWith('.commit.json')) continue;
+    try {
+      final commit = ReportCommit.parse(file.readAsStringSync());
+      if (commit.runId == runId) commits.add(commit);
+    } on Object {
+      // Invalid or unrelated commit artifacts are not authority.
+    }
+  }
+  commits.sort((left, right) => left.sequence.compareTo(right.sequence));
+  return commits;
 }
 
 String _canonicalReportFailureVerificationPolicy() {
@@ -2975,10 +3520,75 @@ class _DuplicateFindingProjectAnalyzer extends ProjectAnalyzer {
     return AnalysisSnapshot(
       project: result.project,
       graph: result.graph,
+      graphIntegrity: result.graphIntegrity,
       findings: [...result.findings, result.findings.first],
       adapterIds: result.adapterIds,
       adapterRuns: result.adapterRuns,
       elapsedMicros: result.elapsedMicros,
+      exclusions: result.exclusions,
+    );
+  }
+}
+
+class _RetainedSafeFindingProjectAnalyzer extends ProjectAnalyzer {
+  _RetainedSafeFindingProjectAnalyzer({
+    required super.project,
+    required this.findingId,
+    super.only,
+  });
+
+  final String findingId;
+
+  @override
+  Future<AnalysisSnapshot> analyze({
+    void Function(AnalyzerAdapter adapter)? onAdapter,
+  }) async {
+    final result = await super.analyze(onAdapter: onAdapter);
+    final findings = result.findings
+        .map((finding) {
+          if (finding.node.id != findingId) return finding;
+          final predicates = finding.predicates;
+          return Finding(
+            ruleId: finding.ruleId,
+            node: finding.node,
+            confidence: Confidence.safe,
+            title: finding.title,
+            predicates: SafetyPredicates(
+              ruleAllowsAutoFix: predicates.ruleAllowsAutoFix,
+              unreachableAcrossAllTargets:
+                  predicates.unreachableAcrossAllTargets,
+              notRetained: false,
+              noDynamicBlockers: predicates.noDynamicBlockers,
+              notProtected: predicates.notProtected,
+              noPublicApiRisk: predicates.noPublicApiRisk,
+              hasDeterministicInverse: predicates.hasDeterministicInverse,
+              analysisCoverageComplete: predicates.analysisCoverageComplete,
+              actionSupported: predicates.actionSupported,
+            ),
+            evidence: finding.evidence,
+            blockers: finding.blockers,
+            protectionReasons: finding.protectionReasons,
+            unreachableIn: finding.unreachableIn,
+            reachableIn: finding.reachableIn,
+            retainedIn: finding.retainedIn,
+            auxiliaryRetainedIn: const ['aux:test:retained-snapshot'],
+            proposedAction: finding.proposedAction,
+            sourceBytes: finding.sourceBytes,
+            classificationReasons: finding.classificationReasons,
+            manualRisks: finding.manualRisks,
+            reportingAdapterId: finding.reportingAdapterId,
+          );
+        })
+        .toList(growable: false);
+    return AnalysisSnapshot(
+      project: result.project,
+      graph: result.graph,
+      graphIntegrity: result.graphIntegrity,
+      findings: findings,
+      adapterIds: result.adapterIds,
+      adapterRuns: result.adapterRuns,
+      elapsedMicros: result.elapsedMicros,
+      findingElapsedMicros: result.findingElapsedMicros,
       exclusions: result.exclusions,
     );
   }
@@ -3042,6 +3652,7 @@ class _LateVariantProjectAnalyzer extends ProjectAnalyzer {
     return AnalysisSnapshot(
       project: result.project,
       graph: result.graph,
+      graphIntegrity: result.graphIntegrity,
       findings: findings,
       adapterIds: result.adapterIds,
       adapterRuns: result.adapterRuns,
@@ -3081,6 +3692,7 @@ class _ReappearingFinalProjectAnalyzer extends ProjectAnalyzer {
     return AnalysisSnapshot(
       project: result.project,
       graph: result.graph,
+      graphIntegrity: result.graphIntegrity,
       findings: [...result.findings, _initialFinding!],
       adapterIds: result.adapterIds,
       adapterRuns: result.adapterRuns,

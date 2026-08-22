@@ -53,6 +53,7 @@ class FindingAssessment {
   bool get hardGatesHold =>
       predicates.analysisCoverageComplete &&
       predicates.unreachableAcrossAllTargets &&
+      predicates.notRetained &&
       predicates.noDynamicBlockers &&
       predicates.notProtected &&
       predicates.ruleAllowsAutoFix &&

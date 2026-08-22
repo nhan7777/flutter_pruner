@@ -1,0 +1,35 @@
+{
+  "configVersion": 2,
+  "packages": [
+    {
+      "name": "benchmark_accuracy_oracle",
+      "rootUri": "../",
+      "packageUri": "lib/",
+      "languageVersion": "3.9"
+    },
+    {
+      "name": "workmanager",
+      "rootUri": "../dependencies/workmanager/",
+      "packageUri": "lib/",
+      "languageVersion": "3.9"
+    },
+    {
+      "name": "flutter",
+      "rootUri": "../dependencies/flutter/",
+      "packageUri": "lib/",
+      "languageVersion": "3.9"
+    },
+    {
+      "name": "ffi",
+      "rootUri": "../dependencies/ffi/",
+      "packageUri": "lib/",
+      "languageVersion": "3.9"
+    },
+    {
+      "name": "sibling",
+      "rootUri": "../dependencies/sibling/",
+      "packageUri": "lib/",
+      "languageVersion": "3.9"
+    }
+  ]
+}

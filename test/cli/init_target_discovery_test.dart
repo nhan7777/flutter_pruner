@@ -113,4 +113,21 @@ flutter run --flavor dev -t lib/main_dev.dart
       );
     },
   );
+
+  test('resolved SDK condition is syntactically owner-complete', () {
+    File(p.join(root.path, 'lib', 'conditional.dart')).writeAsStringSync(
+      "import 'a.dart' if (dart.library.io == 'false') 'b.dart';\n",
+    );
+    File(p.join(root.path, 'lib', 'a.dart')).writeAsStringSync('');
+    File(p.join(root.path, 'lib', 'b.dart')).writeAsStringSync('');
+
+    final discovery = InitTargetDiscovery(root).discoverApplication();
+
+    expect(
+      discovery.issues.where(
+        (issue) => issue.message.contains('Conditional Dart imports'),
+      ),
+      isEmpty,
+    );
+  });
 }

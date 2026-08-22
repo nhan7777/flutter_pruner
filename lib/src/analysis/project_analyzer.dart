@@ -2,6 +2,8 @@ import '../adapters/adapter_report_definition.dart';
 import '../adapters/analyzer_adapter.dart';
 import '../adapters/dart/dart_adapter_profile.dart';
 import '../adapters/dart/dart_analysis_workspace.dart';
+import '../adapters/dart/dart_execution_context_service.dart';
+import '../adapters/dart/dart_execution_reachability_service.dart';
 import '../adapters/registry.dart';
 import '../core/confidence/finding_generator.dart';
 import '../core/graph/reachability_graph.dart';
@@ -48,11 +50,36 @@ class ProjectAnalyzer {
     final analysisStopwatch = Stopwatch()..start();
     final graph = ReachabilityGraph();
     final adapterRuns = <AdapterRunReport>[];
+    const dartSemanticAdapterIds = {
+      'dart',
+      'assets',
+      'get_it',
+      'go_router',
+      'l10n',
+    };
     final needsDartWorkspace = adapters.any(
-      (adapter) => adapter.id == 'dart' || adapter.id == 'assets',
+      (adapter) => dartSemanticAdapterIds.contains(adapter.id),
     );
+    final dartWorkspace = needsDartWorkspace
+        ? DartAnalysisWorkspace(project)
+        : null;
+    final dartExecutionContextService = dartWorkspace == null
+        ? null
+        : DefaultDartExecutionContextService(workspace: dartWorkspace);
+    final dartExecutionContexts = dartExecutionContextService == null
+        ? null
+        : await dartExecutionContextService.resolve(project);
+    final dartExecutionReachabilityService =
+        dartWorkspace == null || dartExecutionContexts == null
+        ? null
+        : DefaultDartExecutionReachabilityService(
+            workspace: dartWorkspace,
+            contexts: dartExecutionContexts,
+          );
     final services = AdapterServices(
-      dartWorkspace: needsDartWorkspace ? DartAnalysisWorkspace(project) : null,
+      dartWorkspace: dartWorkspace,
+      dartExecutionContextService: dartExecutionContextService,
+      dartExecutionReachabilityService: dartExecutionReachabilityService,
       dartProfile: dartProfile,
     );
     for (final adapter in adapters) {
@@ -119,10 +146,12 @@ class ProjectAnalyzer {
         rethrow;
       }
     }
+    final graphIntegrity = graph.integrityFor(project.targets);
     final findingStopwatch = Stopwatch()..start();
     final findings = const FindingGenerator().generate(
       graph: graph,
       project: project,
+      graphIntegrity: graphIntegrity,
       reportingNodeSchemes: _reportingNodeSchemes,
       adapterReportDefinitions: {
         for (final definition in adapterReportDefinitions)
@@ -134,6 +163,7 @@ class ProjectAnalyzer {
     return AnalysisSnapshot(
       project: project,
       graph: graph,
+      graphIntegrity: graphIntegrity,
       findings: findings,
       adapterIds: List.unmodifiable(adapters.map((adapter) => adapter.id)),
       adapterRuns: List.unmodifiable(adapterRuns),

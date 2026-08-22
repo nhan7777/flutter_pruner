@@ -9,6 +9,7 @@ and a reproducible reporting-overhead measurement.
 Run from the Flutter Pruner repository:
 
 ```bash
+dart run tool/verify_release_blockers.dart --run-tests
 dart format --output=none --set-exit-if-changed .
 dart analyze --fatal-infos
 dart test
@@ -23,6 +24,19 @@ jq -e '
   .statistics.findings.byTier.HIGH == 0
 ' .flutter_pruner/reports/self-scan.json
 ```
+
+The local `--run-tests` mode validates retained artifacts and runs the required
+tests for the current platform, but it is not release admission. Hosted CI must
+download the Windows evidence artifact and invoke the verifier with both
+`--hosted-evidence-dir` and `--expected-commit`; the default admission mode
+fails closed when that exact-SHA evidence is absent. Skipped regression tests
+cannot satisfy the gate.
+
+The Windows evidence must prove object identity, not that NTFS always rejects a
+directory rename. A retained handle may remain usable after its pathname moves;
+the safe contract is that relative operations still target that retained object
+and path revalidation rejects any replacement directory. Existing regular,
+directory, and reparse leaves must all remain non-clobbering collisions.
 
 Hosted CI remains the authority for the supported Dart floor and stable Linux,
 macOS, and Windows matrix.

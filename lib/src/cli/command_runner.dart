@@ -18,6 +18,7 @@ class FlutterPrunerCommandRunner extends CommandRunner<int> {
     VerificationRunner Function(Directory)? verifierFactory,
     InitPrompt initPrompt = const StdioInitPrompt(),
     InitPrompt? applyPrompt,
+    ScanCommand Function()? scanCommandFactory,
   }) : super(
          'flutter_pruner',
          'Find unused assets, duplicate files and unreachable code in '
@@ -37,7 +38,7 @@ class FlutterPrunerCommandRunner extends CommandRunner<int> {
       );
 
     addCommand(InitCommand(prompt: initPrompt));
-    addCommand(ScanCommand());
+    addCommand((scanCommandFactory ?? ScanCommand.new)());
     addCommand(
       ApplyCommand(
         verifierFactory: verifierFactory,
