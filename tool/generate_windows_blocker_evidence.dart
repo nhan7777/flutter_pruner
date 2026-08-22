@@ -88,29 +88,43 @@ Future<void> main(List<String> arguments) async {
   }
 
   final observed = <Map<String, Object?>>[];
-  for (final testRun in _testRuns) {
-    final result = await Process.run(Platform.resolvedExecutable, [
-      'test',
-      '--reporter=json',
-      '--name',
-      '^${RegExp.escape(testRun.name)}\$',
-      testRun.path,
-    ], workingDirectory: options.root.path);
-    final status = _observedTest(result.stdout as String, testRun.name);
-    if (result.exitCode != 0 || status != 'passed') {
-      stderr.writeln(
-        '${testRun.path} :: ${testRun.name} was $status '
-        '(exit ${result.exitCode}).',
-      );
-      exitCode = 3;
-      return;
+  final reporterDirectory = await Directory.systemTemp.createTemp(
+    'flutter_pruner_windows_evidence_',
+  );
+  try {
+    for (var index = 0; index < _testRuns.length; index++) {
+      final testRun = _testRuns[index];
+      final reporter = File(p.join(reporterDirectory.path, '$index.json'));
+      final result = await Process.run(Platform.resolvedExecutable, [
+        'test',
+        '--reporter=silent',
+        '--file-reporter=json:${reporter.path}',
+        '--name',
+        '^${RegExp.escape(testRun.name)}\$',
+        testRun.path,
+      ], workingDirectory: options.root.path);
+      final status = reporter.existsSync()
+          ? _observedTest(await reporter.readAsString(), testRun.name)
+          : 'missing';
+      if (result.exitCode != 0 || status != 'passed') {
+        stderr.writeln(
+          '${testRun.path} :: ${testRun.name} was $status '
+          '(exit ${result.exitCode}).',
+        );
+        exitCode = 3;
+        return;
+      }
+      observed.add({
+        'platform': 'windows',
+        'path': testRun.path,
+        'name': testRun.name,
+        'status': 'passed',
+      });
     }
-    observed.add({
-      'platform': 'windows',
-      'path': testRun.path,
-      'name': testRun.name,
-      'status': 'passed',
-    });
+  } finally {
+    if (reporterDirectory.existsSync()) {
+      await reporterDirectory.delete(recursive: true);
+    }
   }
 
   options.output.createSync(recursive: true);
