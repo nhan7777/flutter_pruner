@@ -18,6 +18,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- Recognized exact localization-member uses in execution-selected path
+  dependencies without admitting dependency sources as removal candidates;
+  imports reachable only from dead selected source remain non-live.
 - Parsed project-owned Dart sources at the language version declared by the
   project's SDK lower bound, preventing newer analyzer releases from rejecting
   valid `final` formal parameters during `init` and `scan`; unparseable sources

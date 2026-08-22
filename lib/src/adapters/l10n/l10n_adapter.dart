@@ -151,14 +151,14 @@ class L10nAdapter extends AnalyzerAdapter {
         return;
       case L10nConfigValid(:final config):
         final inventory = ArbInventory.read(project, config);
+        final reachability = await reachabilityService.resolve(project);
         final applicationReachability =
-            DartApplicationReachability.fromSnapshot(
-              await reachabilityService.resolve(project),
-            );
+            DartApplicationReachability.fromSnapshot(reachability);
         final resolver = L10nUsageResolver(project, config, inventory);
         await resolver.analyzeProject(
           workspace: workspace,
           includedUnitPaths: applicationReachability.globalUsageUnitPaths,
+          executionReachability: reachability,
         );
 
         for (final key in inventory.keys) {
@@ -176,6 +176,13 @@ class L10nAdapter extends AnalyzerAdapter {
                 'declaredAt': key.location,
               },
             ),
+          );
+        }
+
+        for (final nodeId in resolver.externallyUsedNodeIds) {
+          graph.addRoot(
+            nodeId,
+            reason: 'used by an execution-selected external Dart source',
           );
         }
 

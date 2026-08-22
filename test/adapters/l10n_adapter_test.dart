@@ -726,6 +726,68 @@ void main() {
     });
 
     test(
+      'exact use in an execution-selected path dependency protects the key',
+      () async {
+        final root = await _createExternalConsumerFixture();
+        addTearDown(() => root.delete(recursive: true));
+        final project = await _loadCompleteProject(root);
+
+        final snapshot = await ProjectAnalyzer(
+          project: project,
+          only: {'l10n'},
+        ).analyze();
+
+        const externalKey = 'l10n:l10n_test:externalOnly';
+        expect(snapshot.graph.rootIds, contains(externalKey));
+        expect(
+          snapshot.graph.rootRecords
+              .where((root) => root.nodeId == externalKey)
+              .map((root) => root.reason),
+          contains('used by an execution-selected external Dart source'),
+        );
+        expect(
+          snapshot.findings.map((finding) => finding.node.id),
+          isNot(contains(externalKey)),
+        );
+        expect(
+          snapshot.findings.map((finding) => finding.node.id),
+          contains('l10n:l10n_test:deadOnly'),
+        );
+        expect(
+          snapshot.graph.nodes.any(
+            (node) => node.origin.path.contains('/external_consumer/'),
+          ),
+          isFalse,
+        );
+        expect(snapshot.graph.danglingEdgesFor(project.targets), isEmpty);
+        expect(snapshot.graph.danglingRootIdsFor(project.targets), isEmpty);
+      },
+    );
+
+    test(
+      'external use reachable only from dead selected source stays a finding',
+      () async {
+        final root = await _createExternalConsumerFixture(
+          executionSelected: false,
+        );
+        addTearDown(() => root.delete(recursive: true));
+        final project = await _loadCompleteProject(root);
+
+        final snapshot = await ProjectAnalyzer(
+          project: project,
+          only: {'l10n'},
+        ).analyze();
+
+        const externalKey = 'l10n:l10n_test:externalOnly';
+        expect(snapshot.graph.rootIds, isNot(contains(externalKey)));
+        expect(
+          snapshot.findings.map((finding) => finding.node.id),
+          contains(externalKey),
+        );
+      },
+    );
+
+    test(
       'scan --adapter l10n expands Dart support and emits no actions',
       () async {
         final root = await _createReachabilityFixture(
@@ -935,6 +997,94 @@ void main() {
 ''',
   );
   await _writePackageConfig(root);
+  return root;
+}
+
+Future<Directory> _createExternalConsumerFixture({
+  bool executionSelected = true,
+}) async {
+  final root = await Directory.systemTemp.createTemp('l10n_external_consumer_');
+  await Directory(p.join(root.path, 'lib/l10n')).create(recursive: true);
+  await Directory(
+    p.join(root.path, 'external_consumer', 'lib'),
+  ).create(recursive: true);
+  await File(p.join(root.path, 'pubspec.yaml')).writeAsString('''
+name: l10n_test
+publish_to: none
+environment:
+  sdk: ^3.9.0
+dependencies:
+  external_consumer:
+    path: external_consumer
+  flutter:
+    sdk: flutter
+flutter:
+  generate: true
+''');
+  await File(p.join(root.path, 'l10n.yaml')).writeAsString('''
+arb-dir: lib/l10n
+template-arb-file: app_en.arb
+''');
+  await File(p.join(root.path, 'lib/l10n/app_en.arb')).writeAsString('''
+{
+  "@@locale": "en",
+  "externalOnly": "External",
+  "deadOnly": "Dead"
+}
+''');
+  await File(
+    p.join(root.path, 'lib/l10n/app_localizations.dart'),
+  ).writeAsString('''
+class AppLocalizations {
+  const AppLocalizations();
+
+  String get externalOnly => 'External';
+  String get deadOnly => 'Dead';
+}
+''');
+  await File(p.join(root.path, 'lib/main.dart')).writeAsString(
+    executionSelected
+        ? '''
+import 'package:external_consumer/external_consumer.dart';
+
+void main() => useExternalLocalization();
+'''
+        : 'void main() {}\n',
+  );
+  if (!executionSelected) {
+    await File(
+      p.join(root.path, 'lib/unreachable_external.dart'),
+    ).writeAsString('''
+import 'package:external_consumer/external_consumer.dart';
+
+String unreachableExternalUse() => useExternalLocalization();
+''');
+  }
+  await File(
+    p.join(root.path, 'external_consumer', 'pubspec.yaml'),
+  ).writeAsString('''
+name: external_consumer
+publish_to: none
+environment:
+  sdk: ^3.9.0
+''');
+  await File(
+    p.join(root.path, 'external_consumer', 'lib', 'external_consumer.dart'),
+  ).writeAsString('''
+import 'package:l10n_test/l10n/app_localizations.dart';
+
+String useExternalLocalization() => const AppLocalizations().externalOnly;
+''');
+  final packageConfig = File(
+    p.join(root.path, '.dart_tool', 'package_config.json'),
+  );
+  await packageConfig.parent.create(recursive: true);
+  await packageConfig.writeAsString('''
+{"configVersion":2,"packages":[
+  {"name":"l10n_test","rootUri":"../","packageUri":"lib/","languageVersion":"3.9"},
+  {"name":"external_consumer","rootUri":"../external_consumer/","packageUri":"lib/","languageVersion":"3.9"}
+]}
+''');
   return root;
 }
 
