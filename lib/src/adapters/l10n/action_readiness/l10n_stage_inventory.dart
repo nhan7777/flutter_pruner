@@ -54,6 +54,7 @@ final class L10nStageEntry {
     required this.kind,
     required this.sha256,
     required this.posixMode,
+    this.authorityIdentity,
     required ImmutableBytes? capturedBytes,
   }) : capturedBytes = capturedBytes == null
            ? null
@@ -66,6 +67,10 @@ final class L10nStageEntry {
     }
     if (posixMode != null && (posixMode! < 0 || posixMode! > 0xfff)) {
       throw ArgumentError.value(posixMode, 'posixMode');
+    }
+    if (authorityIdentity != null &&
+        !RegExp(r'^[0-9a-f]{64}$').hasMatch(authorityIdentity!)) {
+      throw ArgumentError.value(authorityIdentity, 'authorityIdentity');
     }
     if (kind != L10nStageEntryKind.regularFile &&
         (sha256 != null || capturedBytes != null)) {
@@ -84,6 +89,9 @@ final class L10nStageEntry {
 
   /// Permission bits on POSIX, otherwise null. Links are never followed.
   final int? posixMode;
+
+  /// SHA-256 of the committed physical file stamp for ABA detection.
+  final String? authorityIdentity;
 
   /// Defensively copied bytes only for explicitly requested regular files.
   final ImmutableBytes? capturedBytes;
@@ -266,6 +274,7 @@ Future<L10nStageInventoryCapture> _capture(
           kind: current.kind,
           sha256: null,
           posixMode: current.posixMode,
+          authorityIdentity: null,
           capturedBytes: null,
         );
       }
@@ -301,6 +310,7 @@ Future<_CapturedEntry> _captureEntry(
         kind: initialKind,
         sha256: null,
         posixMode: null,
+        authorityIdentity: null,
         capturedBytes: null,
       ),
       valid: false,
@@ -316,6 +326,7 @@ Future<_CapturedEntry> _captureEntry(
         kind: initialKind,
         sha256: null,
         posixMode: stamp?.posixMode,
+        authorityIdentity: null,
         capturedBytes: null,
       ),
       valid: false,
@@ -342,6 +353,9 @@ Future<_CapturedEntry> _captureEntry(
         kind: initialKind,
         sha256: null,
         posixMode: before?.posixMode,
+        authorityIdentity: valid && after != null
+            ? _authorityIdentity(relativePath, after)
+            : null,
         capturedBytes: null,
       ),
       valid: valid,
@@ -381,6 +395,7 @@ Future<_CapturedEntry> _captureEntry(
       kind: initialKind,
       sha256: contentHash,
       posixMode: before.posixMode,
+      authorityIdentity: _authorityIdentity(relativePath, after),
       capturedBytes: retained,
     ),
     valid: true,
@@ -398,6 +413,7 @@ _CapturedEntry _invalidEntry(
     kind: kind,
     sha256: null,
     posixMode: posixMode,
+    authorityIdentity: null,
     capturedBytes: null,
   ),
   valid: false,
@@ -598,6 +614,22 @@ String _fingerprint(
   }
   return sha256.convert(framed.takeBytes()).toString();
 }
+
+String _authorityIdentity(String relativePath, _EntityStamp stamp) => sha256
+    .convert(
+      utf8.encode(
+        jsonEncode(<Object?>[
+          relativePath,
+          stamp.kind.name,
+          stamp.canonicalPath,
+          stamp.posixMode,
+          stamp.size,
+          stamp.modifiedMicros,
+          stamp.changedMicros,
+        ]),
+      ),
+    )
+    .toString();
 
 final class _CapturedEntry {
   const _CapturedEntry({

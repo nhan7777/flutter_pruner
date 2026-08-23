@@ -14,12 +14,14 @@ import 'analysis_snapshot.dart';
 /// Builds one graph and finding set for both scan and apply.
 class ProjectAnalyzer {
   /// Creates an analyzer for [project] and an optional adapter filter.
-  ProjectAnalyzer({required this.project, Set<String>? only, this.dartProfile})
-    : _requestedAdapterIds = only,
-      _reportingNodeSchemes = _reportingSchemes(only),
-      adapters = AdapterRegistry.resolve(
-        only: only == null ? null : _withDependencies(only),
-      ) {
+  ProjectAnalyzer({
+    required this.project,
+    Set<String>? only,
+    this.dartProfile,
+    List<AnalyzerAdapter>? adapterCatalog,
+  }) : _requestedAdapterIds = only,
+       _reportingNodeSchemes = _reportingSchemes(only, adapterCatalog),
+       adapters = _resolveAdapters(only, adapterCatalog) {
     adapterReportDefinitions = List.unmodifiable(
       adapters.map((adapter) => adapter.reportDefinition.snapshot()),
     );
@@ -173,10 +175,24 @@ class ProjectAnalyzer {
     );
   }
 
-  static Set<String> _withDependencies(Set<String> requested) {
-    final byId = {
-      for (final adapter in AdapterRegistry.builtIn) adapter.id: adapter,
-    };
+  static List<AnalyzerAdapter> _resolveAdapters(
+    Set<String>? requested,
+    List<AnalyzerAdapter>? adapterCatalog,
+  ) {
+    final available = adapterCatalog == null
+        ? AdapterRegistry.builtIn
+        : List<AnalyzerAdapter>.unmodifiable(adapterCatalog);
+    return AdapterRegistry.resolve(
+      only: requested == null ? null : _withDependencies(requested, available),
+      adapters: available,
+    );
+  }
+
+  static Set<String> _withDependencies(
+    Set<String> requested,
+    List<AnalyzerAdapter> available,
+  ) {
+    final byId = {for (final adapter in available) adapter.id: adapter};
     final expanded = <String>{};
 
     void add(String id) {
@@ -194,10 +210,14 @@ class ProjectAnalyzer {
     return expanded;
   }
 
-  static Set<String>? _reportingSchemes(Set<String>? requested) {
+  static Set<String>? _reportingSchemes(
+    Set<String>? requested,
+    List<AnalyzerAdapter>? adapterCatalog,
+  ) {
     if (requested == null) return null;
+    final available = adapterCatalog ?? AdapterRegistry.builtIn;
     return {
-      for (final adapter in AdapterRegistry.builtIn)
+      for (final adapter in available)
         if (requested.contains(adapter.id)) ...adapter.findingNodeSchemes,
     };
   }

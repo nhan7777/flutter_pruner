@@ -121,6 +121,19 @@ final class L10nStageRoot {
   /// Whether cleanup may still remove this exact owned root.
   bool get safeToDelete => _authority.safeToDelete;
 
+  /// Revalidates the exact physical root allocated by this materializer.
+  /// Identity drift permanently revokes cleanup authority.
+  bool revalidateIdentity() {
+    if (!safeToDelete) return false;
+    try {
+      _requireRootIdentity(this);
+      return true;
+    } on Object {
+      markUnsafeToDelete();
+      return false;
+    }
+  }
+
   /// Retains the root as diagnostic residue after process uncertainty.
   void markUnsafeToDelete() {
     _authority.markUnsafeToDelete();

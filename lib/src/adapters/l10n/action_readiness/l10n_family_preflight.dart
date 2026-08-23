@@ -160,6 +160,7 @@ final class L10nPackageConfigProjection {
     required ImmutableBytes sourceBytes,
     required ImmutableBytes stageBytes,
     required this.identity,
+    required this.authorityIdentity,
     required Map<String, String> canonicalRootsByPackage,
     required List<_ExternalPackageAuthority> externalAuthorities,
   }) : sourceBytes = ImmutableBytes.copyOf(sourceBytes.copy()),
@@ -177,6 +178,10 @@ final class L10nPackageConfigProjection {
 
   /// Identity of source/stage bytes and every physical package authority.
   final String identity;
+
+  /// Stage-root-independent identity of package resolution and every external
+  /// physical authority.
+  final String authorityIdentity;
 
   /// Canonical physical package roots by logical package name.
   final Map<String, String> canonicalRootsByPackage;
@@ -243,6 +248,19 @@ final class L10nPackageConfigProjector {
       );
     }
   }
+}
+
+/// Root-independent semantic projection of one exact l10n graph family.
+final class L10nAnalysisFingerprintProjector {
+  /// Creates the stateless projector shared by snapshot and stage evidence.
+  const L10nAnalysisFingerprintProjector();
+
+  /// Fingerprints nodes, incident edges/evidence, blockers, findings, target
+  /// reachability, auxiliary state, ownership, and protection facts.
+  String project({
+    required AnalysisSnapshot analysis,
+    required Set<String> familyNodeIds,
+  }) => _l10nAnalysisFingerprintForIds(analysis, familyNodeIds);
 }
 
 /// Default fail-closed family preflight.
@@ -610,6 +628,16 @@ final class L10nFamilyPreflight implements L10nFamilySnapshotter {
       );
     }
     capture.verifySecondRead();
+    final optionsRevalidation = optionsAuthority.revalidate();
+    if (optionsRevalidation is L10nAnalysisOptionsRevalidationRejected) {
+      final failure = optionsRevalidation.failure;
+      throw _Problem(
+        failure.code,
+        failure.stage,
+        failure.detailCode,
+        failure.relativePath,
+      );
+    }
     final secondPackageProjectionResult = const L10nPackageConfigProjector()
         .project(
           sourceBytes: packageCapture.bytes!,
@@ -636,16 +664,6 @@ final class L10nFamilyPreflight implements L10nFamilySnapshotter {
       );
     }
     packageProjection._verifyExternalAuthorities();
-    final optionsRevalidation = optionsAuthority.revalidate();
-    if (optionsRevalidation is L10nAnalysisOptionsRevalidationRejected) {
-      final failure = optionsRevalidation.failure;
-      throw _Problem(
-        failure.code,
-        failure.stage,
-        failure.detailCode,
-        failure.relativePath,
-      );
-    }
     final finalArbPaths = _rediscoverMembershipForDrift(
       () => _enumerateArbPaths(canonicalRoot, config.arbDirectory),
     );
@@ -735,7 +753,7 @@ final class L10nFamilyPreflight implements L10nFamilySnapshotter {
         selectionFingerprint: selectionFingerprint,
         l10nAnalysisFingerprint: l10nFingerprint,
         configurationIdentity: config.configurationIdentity,
-        packageConfigProjectionIdentity: packageProjection.identity,
+        packageConfigProjectionIdentity: packageProjection.authorityIdentity,
         packageResolutionIdentity: packageResolutionIdentity,
         toolchainIdentity: toolchain.identitySha256,
         projectSemantics: L10nProjectSemantics(
@@ -2372,10 +2390,25 @@ L10nPackageConfigProjection _projectPackageConfig({
       for (final authority in externalAuthorities) authority.identity,
     ],
   });
+  final authorityIdentity = _hashCanonical({
+    'stageSha256': sha256.convert(stageBytes).toString(),
+    'records': [
+      for (final record in records)
+        {
+          ...record.identity,
+          if (record.name == selectedPackageName)
+            'root': 'selected-project-root',
+        },
+    ],
+    'external': [
+      for (final authority in externalAuthorities) authority.identity,
+    ],
+  });
   return L10nPackageConfigProjection._(
     sourceBytes: source,
     stageBytes: ImmutableBytes.copyOf(stageBytes),
     identity: identity,
+    authorityIdentity: authorityIdentity,
     canonicalRootsByPackage: {
       for (final record in records) record.name: record.canonicalRoot,
     },
@@ -2586,21 +2619,36 @@ final class _ExternalPackageAuthority {
     required this.rootMode,
     required this.pubspecBytes,
     required this.pubspecMode,
+    required this.pubspecSize,
+    required this.pubspecModifiedMicros,
+    required this.pubspecChangedMicros,
     required this.rootModifiedMicros,
+    required this.rootChangedMicros,
+    required this.libIdentity,
   });
   final String name;
   final String root;
   final int? rootMode;
   final List<int> pubspecBytes;
   final int? pubspecMode;
+  final int pubspecSize;
+  final int pubspecModifiedMicros;
+  final int pubspecChangedMicros;
   final int rootModifiedMicros;
+  final int rootChangedMicros;
+  final String libIdentity;
   Map<String, Object?> get identity => {
     'name': name,
     'root': root,
     'rootMode': rootMode,
     'rootModifiedMicros': rootModifiedMicros,
+    'rootChangedMicros': rootChangedMicros,
     'pubspecSha256': sha256.convert(pubspecBytes).toString(),
     'pubspecMode': pubspecMode,
+    'pubspecSize': pubspecSize,
+    'pubspecModifiedMicros': pubspecModifiedMicros,
+    'pubspecChangedMicros': pubspecChangedMicros,
+    'libIdentity': libIdentity,
   };
 
   void verify() {
@@ -2684,14 +2732,163 @@ _ExternalPackageAuthority _captureExternalPackage(String name, String root) {
       'external-package-name-mismatch',
     );
   }
+  final libIdentity = _captureExternalLibIdentity(root);
   return _ExternalPackageAuthority(
     name: name,
     root: root,
     rootMode: rootMode,
     pubspecBytes: List.unmodifiable(bytes),
     pubspecMode: pubspecMode,
+    pubspecSize: before.size,
+    pubspecModifiedMicros: before.modified.microsecondsSinceEpoch,
+    pubspecChangedMicros: before.changed.microsecondsSinceEpoch,
     rootModifiedMicros: rootStat.modified.microsecondsSinceEpoch,
+    rootChangedMicros: rootStat.changed.microsecondsSinceEpoch,
+    libIdentity: libIdentity,
   );
+}
+
+String _captureExternalLibIdentity(String packageRoot) {
+  final libPath = p.normalize(p.join(packageRoot, 'lib'));
+  final type = FileSystemEntity.typeSync(libPath, followLinks: false);
+  if (type == FileSystemEntityType.notFound) {
+    return _hashCanonical(const {'state': 'absent'});
+  }
+  if (type != FileSystemEntityType.directory) {
+    throw const _Problem(
+      L10nEvidenceRejectionCode.packageResolutionDrift,
+      _packageStage,
+      'external-package-lib-invalid',
+    );
+  }
+  try {
+    final directory = Directory(libPath);
+    if (p.normalize(directory.resolveSymbolicLinksSync()) != libPath) {
+      throw const _Problem(
+        L10nEvidenceRejectionCode.packageResolutionDrift,
+        _packageStage,
+        'external-package-lib-invalid',
+      );
+    }
+    final beforeRoot = directory.statSync();
+    final rootMode = Platform.isWindows ? null : beforeRoot.mode & 0xfff;
+    if (rootMode != null && (rootMode & 0x12) != 0) {
+      throw const _Problem(
+        L10nEvidenceRejectionCode.packageResolutionDrift,
+        _packageStage,
+        'external-package-lib-writable',
+      );
+    }
+    final entities = directory.listSync(recursive: true, followLinks: false)
+      ..sort((left, right) => left.path.compareTo(right.path));
+    final foldedPaths = <String, String>{};
+    final entries = <Map<String, Object?>>[];
+    for (final entity in entities) {
+      final absolute = p.normalize(p.absolute(entity.path));
+      final relative = _relative(libPath, absolute);
+      if (!_isSafeRelative(relative) || !_within(libPath, absolute)) {
+        throw const _Problem(
+          L10nEvidenceRejectionCode.packageResolutionDrift,
+          _packageStage,
+          'external-package-lib-invalid',
+        );
+      }
+      final folded = _asciiFold(relative);
+      final prior = foldedPaths[folded];
+      if (prior != null && prior != relative) {
+        throw const _Problem(
+          L10nEvidenceRejectionCode.packageResolutionDrift,
+          _packageStage,
+          'external-package-lib-casefold-collision',
+        );
+      }
+      foldedPaths[folded] = relative;
+      final entityType = FileSystemEntity.typeSync(
+        absolute,
+        followLinks: false,
+      );
+      if (entityType != FileSystemEntityType.file &&
+          entityType != FileSystemEntityType.directory) {
+        throw const _Problem(
+          L10nEvidenceRejectionCode.packageResolutionDrift,
+          _packageStage,
+          'external-package-lib-invalid',
+        );
+      }
+      final canonical = entityType == FileSystemEntityType.file
+          ? File(absolute).resolveSymbolicLinksSync()
+          : Directory(absolute).resolveSymbolicLinksSync();
+      if (p.normalize(canonical) != absolute) {
+        throw const _Problem(
+          L10nEvidenceRejectionCode.packageResolutionDrift,
+          _packageStage,
+          'external-package-lib-invalid',
+        );
+      }
+      final before = FileStat.statSync(absolute);
+      final mode = Platform.isWindows ? null : before.mode & 0xfff;
+      if (mode != null && (mode & 0x12) != 0) {
+        throw const _Problem(
+          L10nEvidenceRejectionCode.packageResolutionDrift,
+          _packageStage,
+          'external-package-lib-writable',
+        );
+      }
+      if (entityType == FileSystemEntityType.file) {
+        final fileBytes = File(absolute).readAsBytesSync();
+        final after = FileStat.statSync(absolute);
+        if (!_sameFileStat(before, after)) {
+          throw const _Problem(
+            L10nEvidenceRejectionCode.packageResolutionDrift,
+            _packageStage,
+            'external-package-lib-drift',
+          );
+        }
+        entries.add({
+          'path': relative,
+          'kind': 'file',
+          'mode': mode,
+          'size': before.size,
+          'modifiedMicros': before.modified.microsecondsSinceEpoch,
+          'changedMicros': before.changed.microsecondsSinceEpoch,
+          'sha256': sha256.convert(fileBytes).toString(),
+        });
+      } else {
+        entries.add({
+          'path': relative,
+          'kind': 'directory',
+          'mode': mode,
+          'size': before.size,
+          'modifiedMicros': before.modified.microsecondsSinceEpoch,
+          'changedMicros': before.changed.microsecondsSinceEpoch,
+        });
+      }
+    }
+    final afterRoot = directory.statSync();
+    if (!_sameFileStat(beforeRoot, afterRoot)) {
+      throw const _Problem(
+        L10nEvidenceRejectionCode.packageResolutionDrift,
+        _packageStage,
+        'external-package-lib-drift',
+      );
+    }
+    return _hashCanonical({
+      'state': 'present',
+      'mode': rootMode,
+      'size': beforeRoot.size,
+      'modifiedMicros': beforeRoot.modified.microsecondsSinceEpoch,
+      'changedMicros': beforeRoot.changed.microsecondsSinceEpoch,
+      'entries': entries,
+    });
+  } on _Problem {
+    rethrow;
+  } on Object {
+    throw const _Problem(
+      L10nEvidenceRejectionCode.packageResolutionDrift,
+      _packageStage,
+      'external-package-lib-drift',
+    );
+  }
 }
 
 List<ByteSpan> _arrayObjectSpans(List<int> bytes, ByteSpan arraySpan) {
@@ -2766,12 +2963,22 @@ List<int> _splice(List<int> source, List<_ByteReplacement> replacements) {
 String _l10nAnalysisFingerprint(
   AnalysisSnapshot analysis,
   ArbInventory inventory,
+) => _l10nAnalysisFingerprintForIds(
+  analysis,
+  inventory.keys.map((key) => key.nodeId).toSet(),
+);
+
+String _l10nAnalysisFingerprintForIds(
+  AnalysisSnapshot analysis,
+  Set<String> familyIds,
 ) {
-  final familyIds = inventory.keys.map((key) => key.nodeId).toSet();
-  final relevantNodeIds = <String>{...familyIds};
+  final frozenFamilyIds = SplayTreeSet<String>.of(familyIds);
+  final relevantNodeIds = <String>{...frozenFamilyIds};
   final edges = analysis.graph.edges
       .where(
-        (edge) => familyIds.contains(edge.to) || familyIds.contains(edge.from),
+        (edge) =>
+            frozenFamilyIds.contains(edge.to) ||
+            frozenFamilyIds.contains(edge.from),
       )
       .toList();
   for (final edge in edges) {
@@ -2779,7 +2986,8 @@ String _l10nAnalysisFingerprint(
     relevantNodeIds.add(edge.to);
   }
   for (final blocker in analysis.graph.blockers) {
-    if (familyIds.any(blocker.couldAddress) && blocker.sourceNodeId != null) {
+    if (frozenFamilyIds.any(blocker.couldAddress) &&
+        blocker.sourceNodeId != null) {
       relevantNodeIds.add(blocker.sourceNodeId!);
     }
   }
@@ -2804,12 +3012,12 @@ String _l10nAnalysisFingerprint(
   ]..sort((left, right) => jsonEncode(left).compareTo(jsonEncode(right)));
   final blockerFacts = [
     for (final blocker in analysis.graph.blockers)
-      if (familyIds.any(blocker.couldAddress))
+      if (frozenFamilyIds.any(blocker.couldAddress))
         _blockerIdentity(blocker, analysis.project),
   ]..sort((left, right) => jsonEncode(left).compareTo(jsonEncode(right)));
   final findings = [
     for (final finding in analysis.findings)
-      if (familyIds.contains(finding.node.id) &&
+      if (frozenFamilyIds.contains(finding.node.id) &&
           finding.reportingAdapterId == 'l10n')
         _findingIdentity(finding, analysis.project),
   ]..sort(_compareCanonicalMaps);
@@ -2833,21 +3041,21 @@ String _l10nAnalysisFingerprint(
         {
           'target': _targetIdentity(target),
           'configuredProven': [
-            for (final id in familyIds)
+            for (final id in frozenFamilyIds)
               if (analysis.graph.configuredProvenFor(target).contains(id)) id,
           ]..sort(),
           'configuredRetained': [
-            for (final id in familyIds)
+            for (final id in frozenFamilyIds)
               if (analysis.graph.configuredRetainedFor(target).contains(id)) id,
           ]..sort(),
         },
     ],
     'auxiliaryProven': [
-      for (final id in familyIds)
+      for (final id in frozenFamilyIds)
         if (analysis.graph.auxiliaryProven().contains(id)) id,
     ]..sort(),
     'auxiliaryRetained': [
-      for (final id in familyIds)
+      for (final id in frozenFamilyIds)
         if (analysis.graph.auxiliaryRetained().contains(id)) id,
     ]..sort(),
     'auxiliaryTargets': auxiliaryTargets,

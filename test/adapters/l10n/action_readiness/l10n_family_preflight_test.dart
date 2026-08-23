@@ -214,7 +214,9 @@ void main() {
         );
         expect(reprojected, isA<L10nPackageConfigProjectionReady>());
         expect(
-          (reprojected as L10nPackageConfigProjectionReady).projection.identity,
+          (reprojected as L10nPackageConfigProjectionReady)
+              .projection
+              .authorityIdentity,
           isNot(snapshot.packageConfigProjectionIdentity),
         );
       },
