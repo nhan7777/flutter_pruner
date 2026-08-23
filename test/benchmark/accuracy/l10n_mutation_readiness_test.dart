@@ -9,6 +9,8 @@ import '../../../benchmark/accuracy/l10n_mutation_readiness.dart';
 
 const _fakeSha256 =
     '0000000000000000000000000000000000000000000000000000000000000000';
+const _productionManifestSha256 =
+    '58fb9adb4c5d4e1056c3485f482402eb29de59d9088bb9a9d582fcb4a0694fed';
 
 void main() {
   group('strict argv', () {
@@ -108,6 +110,160 @@ void main() {
         );
       }
     });
+  });
+
+  group('production manifest plan', () {
+    late Directory sandbox;
+    late Directory corpusRoot;
+    late Map<String, Directory> repositories;
+
+    setUp(() {
+      sandbox = _canonicalTempDirectory('l10n-production-plan-builder-');
+      corpusRoot = Directory(p.join(sandbox.path, 'corpus'))
+        ..createSync(recursive: true);
+      Directory(p.join(corpusRoot.path, 'results')).createSync();
+      repositories = {
+        'gitjournal': Directory(p.join(corpusRoot.path, 'GitJournal'))
+          ..createSync(),
+        'gsy': Directory(p.join(corpusRoot.path, 'gsy_github_app_flutter'))
+          ..createSync(),
+        'smooth': Directory(p.join(corpusRoot.path, 'smooth-app'))
+          ..createSync(),
+      };
+    });
+
+    tearDown(() => sandbox.deleteSync(recursive: true));
+
+    test('loads the complete frozen production scope', () async {
+      final options = _productionOptions(
+        sandbox: sandbox,
+        corpusRoot: corpusRoot,
+      );
+      final plan = await buildProductionL10nReadinessPlanFromManifest(
+        options,
+        identities: _productionIdentities(),
+        retainedRepositoriesByProject: repositories,
+      );
+
+      expect(plan.profile, L10nReadinessProfile.productionStage1);
+      expect(plan.oracleVersion, 'l10n-mutation-readiness-v1');
+      expect(plan.oracleCases, hasLength(2602));
+      expect(plan.individualCaseIds, hasLength(378));
+      expect(plan.familyProjectIds, ['gitjournal', 'gsy', 'smooth']);
+      expect(plan.mutationNegativeFixtures, hasLength(14));
+      expect(
+        plan.expectedDenominators.toJson(),
+        L10nReadinessDenominators.productionFull.toJson(),
+      );
+      expect(
+        plan.individualCaseIds,
+        orderedEquals([...plan.individualCaseIds]..sort()),
+      );
+      expect(plan.artifactRoot.path, p.join(corpusRoot.path, 'results'));
+    });
+
+    test('case and family scopes retain the complete project oracle', () async {
+      const rows = <(String, String, int, int)>[
+        ('gitjournal', 'drawerFs', 38, 381),
+        ('gsy', 'app_back_tip', 17, 386),
+        ('smooth', 'about_this_app', 323, 1457),
+      ];
+      for (final (projectId, key, positives, negatives) in rows) {
+        for (final family in [false, true]) {
+          final options = _productionOptions(
+            sandbox: sandbox,
+            corpusRoot: corpusRoot,
+            caseSelection: family ? null : '$projectId:$key',
+            familySelection: family ? projectId : null,
+            outputName: '$projectId-${family ? 'family' : 'case'}.json',
+          );
+          final plan = await buildProductionL10nReadinessPlanFromManifest(
+            options,
+            identities: _productionIdentities(),
+            retainedRepositoriesByProject: repositories,
+          );
+
+          expect(plan.oracleCases, hasLength(positives + negatives));
+          expect(plan.oracleCases.map((entry) => entry.projectId).toSet(), {
+            projectId,
+          });
+          expect(plan.expectedDenominators.staticPositiveCandidates, positives);
+          expect(
+            plan.expectedDenominators.staticNegativeNonCandidates,
+            negatives,
+          );
+          expect(plan.expectedDenominators.individualKeys, family ? 0 : 1);
+          expect(plan.expectedDenominators.familyBatches, family ? 1 : 0);
+          expect(plan.expectedDenominators.mutationNegativeFixtures, 0);
+          expect(plan.expectedDenominators.requiredRestorations, 1);
+        }
+      }
+    });
+
+    test(
+      'rejects negative or unknown smoke cases and aliased repositories',
+      () {
+        Future<L10nReadinessPlan> load({
+          required String selection,
+          Map<String, Directory>? roots,
+        }) => buildProductionL10nReadinessPlanFromManifest(
+          _productionOptions(
+            sandbox: sandbox,
+            corpusRoot: corpusRoot,
+            caseSelection: selection,
+            outputName: '${selection.hashCode}.json',
+          ),
+          identities: _productionIdentities(),
+          retainedRepositoriesByProject: roots ?? repositories,
+        );
+
+        expect(
+          load(selection: 'gitjournal:actionsNewChecklist'),
+          throwsFormatException,
+        );
+        expect(
+          load(selection: 'smooth:not_a_manifest_key'),
+          throwsFormatException,
+        );
+        expect(
+          load(
+            selection: 'smooth:about_this_app',
+            roots: {...repositories, 'smooth': repositories['gsy']!},
+          ),
+          throwsFormatException,
+        );
+        expect(
+          buildProductionL10nReadinessPlanFromManifest(
+            _productionOptions(
+              sandbox: sandbox,
+              corpusRoot: corpusRoot,
+              caseSelection: 'smooth:about_this_app',
+              outputName: 'manifest-identity-drift.json',
+            ),
+            identities: {
+              ..._productionIdentities(),
+              'manifestSha256': _fakeSha256,
+            },
+            retainedRepositoriesByProject: repositories,
+          ),
+          throwsFormatException,
+        );
+        expect(
+          buildProductionL10nReadinessPlanFromManifest(
+            _productionOptions(
+              sandbox: sandbox,
+              corpusRoot: corpusRoot,
+              caseSelection: 'smooth:about_this_app',
+              outputName: '.l10n-readiness-forbidden-smoke.json',
+              outputParentOverride: Directory.current,
+            ),
+            identities: _productionIdentities(),
+            retainedRepositoriesByProject: repositories,
+          ),
+          throwsFormatException,
+        );
+      },
+    );
   });
 
   test(
@@ -1400,6 +1556,46 @@ List<String> _replaceValue(List<String> argv, String option, String value) {
   result[result.indexOf(option) + 1] = value;
   return result;
 }
+
+L10nMutationReadinessOptions _productionOptions({
+  required Directory sandbox,
+  required Directory corpusRoot,
+  String? caseSelection,
+  String? familySelection,
+  String outputName = 'full.json',
+  Directory? outputParentOverride,
+}) {
+  final outputParent =
+      outputParentOverride ??
+      (caseSelection == null && familySelection == null
+            ? Directory(p.join(corpusRoot.path, 'results'))
+            : Directory(p.join(sandbox.path, 'smoke'))
+        ..createSync(recursive: true));
+  return L10nMutationReadinessOptions.parse([
+    '--manifest',
+    'benchmark/accuracy/manifests/l10n-mutation-readiness-v1.json',
+    '--corpus-root',
+    corpusRoot.path,
+    for (final version in const ['3.38.7', '3.41.5', '3.44.1']) ...[
+      '--sdk',
+      '$version=${_flutterBinary(sandbox, 'production-$version').path}',
+    ],
+    '--output',
+    p.join(outputParent.path, outputName),
+    if (caseSelection != null) ...['--case', caseSelection],
+    if (familySelection != null) ...['--family', familySelection],
+  ]);
+}
+
+Map<String, Object?> _productionIdentities() => const {
+  'coverageSpecSha256': _fakeSha256,
+  'implementationSha256': _fakeSha256,
+  'manifestSha256': _productionManifestSha256,
+  'negativeRecipeMatrixSha256': _fakeSha256,
+  'policySetSha256': _fakeSha256,
+  'repositorySetSha256': _fakeSha256,
+  'sdkSetSha256': _fakeSha256,
+};
 
 enum _ProductionPlanFault { none, invalidHash, repeatedProtectedRoot }
 

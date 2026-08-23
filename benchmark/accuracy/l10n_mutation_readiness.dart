@@ -6,10 +6,13 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
+import 'package:crypto/crypto.dart';
 import 'package:flutter_pruner/src/reporting/io_report_object_backend.dart';
 import 'package:flutter_pruner/src/reporting/recoverable_report_writer.dart';
 import 'package:flutter_pruner/src/reporting/report_object_backend.dart';
 import 'package:path/path.dart' as p;
+
+import 'src/l10n_mutation_manifest.dart';
 
 const _schemaVersion = 1;
 const _artifactKind = 'flutter-pruner-l10n-stage1-readiness';
@@ -32,7 +35,9 @@ const _topLevelKeys = <String>{
 /// Parsed inputs for the private benchmark entrypoint.
 final class L10nMutationReadinessOptions {
   L10nMutationReadinessOptions._({
+    required this.repositoryRoot,
     required this.manifestPath,
+    required this.manifestFile,
     required this.corpusRoot,
     required this.sdkFlutterByVersion,
     required this.outputFile,
@@ -164,7 +169,9 @@ final class L10nMutationReadinessOptions {
       throw const FormatException('output overlaps the manifest authority');
     }
     return L10nMutationReadinessOptions._(
+      repositoryRoot: repositoryRoot,
       manifestPath: manifestPath,
+      manifestFile: manifestFile,
       corpusRoot: corpusRoot,
       sdkFlutterByVersion: Map.unmodifiable(sdkByVersion),
       outputFile: outputFile,
@@ -174,7 +181,11 @@ final class L10nMutationReadinessOptions {
     );
   }
 
+  /// Canonical source checkout captured while parsing argv.
+  final Directory repositoryRoot;
+
   final String manifestPath;
+  final File manifestFile;
   final Directory corpusRoot;
   final Map<String, File> sdkFlutterByVersion;
   final File outputFile;
@@ -290,6 +301,241 @@ final class L10nReadinessPlan {
 
   /// Runtime-only corpus/source authorities that the output must not overlap.
   final List<Directory> protectedRoots;
+}
+
+/// Builds the immutable production work scope from the frozen manifest.
+///
+/// Repository, SDK, policy, recipe, coverage, and implementation authorities
+/// are intentionally supplied as already-probed SHA-256 identities. The
+/// production composition owns those expensive probes; this builder only
+/// translates the independently parsed oracle into exact full/case/family
+/// denominators and never consults scanner output.
+final class ProductionL10nReadinessPlanBuilder {
+  const ProductionL10nReadinessPlanBuilder();
+
+  L10nReadinessPlan build({
+    required L10nMutationReadinessOptions options,
+    required L10nMutationManifest manifest,
+    required Map<String, Object?> identities,
+    required Map<String, Directory> retainedRepositoriesByProject,
+  }) {
+    const productionProjects = {'gitjournal', 'gsy', 'smooth'};
+    const retainedDirectoryByProject = {
+      'gitjournal': 'GitJournal',
+      'gsy': 'gsy_github_app_flutter',
+      'smooth': 'smooth-app',
+    };
+    if (manifest.projectsById.keys
+            .toSet()
+            .difference(productionProjects)
+            .isNotEmpty ||
+        productionProjects
+            .difference(manifest.projectsById.keys.toSet())
+            .isNotEmpty ||
+        retainedRepositoriesByProject.keys
+            .toSet()
+            .difference(productionProjects)
+            .isNotEmpty ||
+        productionProjects
+            .difference(retainedRepositoriesByProject.keys.toSet())
+            .isNotEmpty) {
+      throw const FormatException('production project authority set drift');
+    }
+
+    final protectedRoots = <Directory>[
+      options.repositoryRoot,
+      for (final projectId in productionProjects.toList()..sort())
+        _productionRetainedRepository(
+          options.corpusRoot,
+          retainedDirectoryByProject[projectId]!,
+          retainedRepositoriesByProject[projectId]!,
+        ),
+    ];
+    if (protectedRoots.map((root) => root.path).toSet().length !=
+        productionProjects.length + 1) {
+      throw const FormatException('production repository authorities alias');
+    }
+
+    final allCases =
+        manifest.cases
+            .map(
+              (entry) => L10nReadinessOracleCase(
+                caseId: entry.canonicalNodeId,
+                projectId: entry.projectId,
+                decodedKey: entry.decodedKey,
+                mutationPositive: entry.isMutationPositive,
+                expectedScannerPresence: entry.expectedScannerPresence,
+              ),
+            )
+            .toList(growable: false)
+          ..sort((left, right) => left.caseId.compareTo(right.caseId));
+
+    late final List<L10nReadinessOracleCase> oracleCases;
+    late final List<String> individualCaseIds;
+    late final List<String> familyProjectIds;
+    late final Map<String, List<String>> negativeFixtures;
+    if (options.caseSelection case final String selection) {
+      final separator = selection.indexOf(':');
+      final projectId = selection.substring(0, separator);
+      final decodedKey = selection.substring(separator + 1);
+      final matches = allCases
+          .where(
+            (entry) =>
+                entry.projectId == projectId &&
+                entry.decodedKey == decodedKey &&
+                entry.mutationPositive,
+          )
+          .toList(growable: false);
+      if (matches.length != 1) {
+        throw const FormatException(
+          'production case selection is not one positive oracle row',
+        );
+      }
+      oracleCases = _productionProjectCases(allCases, projectId);
+      individualCaseIds = [matches.single.caseId];
+      familyProjectIds = const [];
+      negativeFixtures = const {};
+    } else if (options.familySelection case final String projectId) {
+      if (!productionProjects.contains(projectId)) {
+        throw const FormatException('production family selection is unknown');
+      }
+      oracleCases = _productionProjectCases(allCases, projectId);
+      individualCaseIds = const [];
+      familyProjectIds = [projectId];
+      negativeFixtures = const {};
+    } else {
+      oracleCases = allCases;
+      individualCaseIds = [
+        for (final entry in allCases)
+          if (entry.mutationPositive) entry.caseId,
+      ];
+      familyProjectIds = productionProjects.toList()..sort();
+      negativeFixtures = {
+        for (final entry in manifest.mutationNegativeReasons.entries)
+          entry.key: [...entry.value]..sort(),
+      };
+    }
+
+    final positives = oracleCases
+        .where((entry) => entry.mutationPositive)
+        .length;
+    final negatives = oracleCases.length - positives;
+    final denominators = L10nReadinessDenominators(
+      individualKeys: individualCaseIds.length,
+      familyBatches: familyProjectIds.length,
+      staticPositiveCandidates: positives,
+      staticNegativeNonCandidates: negatives,
+      mutationNegativeFixtures: negativeFixtures.length,
+      requiredRestorations: individualCaseIds.length + familyProjectIds.length,
+    );
+    final artifactRoot =
+        options.caseSelection == null && options.familySelection == null
+        ? _canonicalDirectory(
+            Directory(p.join(options.corpusRoot.path, 'results')),
+          )
+        : _canonicalDirectory(options.outputFile.parent);
+    final corpusPath = options.corpusRoot.path;
+    final sourcePath = options.repositoryRoot.path;
+    if ((options.caseSelection != null || options.familySelection != null) &&
+        (p.equals(artifactRoot.path, corpusPath) ||
+            p.isWithin(corpusPath, artifactRoot.path))) {
+      throw const FormatException(
+        'production smoke artifact must be outside the corpus root',
+      );
+    }
+    if (p.equals(artifactRoot.path, sourcePath) ||
+        p.isWithin(sourcePath, artifactRoot.path) ||
+        p.isWithin(artifactRoot.path, sourcePath)) {
+      throw const FormatException(
+        'production artifact must be disjoint from the source checkout',
+      );
+    }
+
+    return L10nReadinessPlan(
+      profile: L10nReadinessProfile.productionStage1,
+      oracleVersion: manifest.oracleVersion,
+      identities: identities,
+      oracleCases: oracleCases,
+      individualCaseIds: individualCaseIds,
+      familyProjectIds: familyProjectIds,
+      mutationNegativeFixtures: negativeFixtures,
+      expectedDenominators: denominators,
+      artifactRoot: artifactRoot,
+      protectedRoots: protectedRoots,
+    );
+  }
+}
+
+Directory _productionRetainedRepository(
+  Directory corpusRoot,
+  String expectedLeaf,
+  Directory supplied,
+) {
+  final expectedPath = p.join(corpusRoot.path, expectedLeaf);
+  if (!p.equals(supplied.path, expectedPath) ||
+      FileSystemEntity.typeSync(supplied.path, followLinks: false) !=
+          FileSystemEntityType.directory ||
+      !p.equals(supplied.resolveSymbolicLinksSync(), supplied.path)) {
+    throw const FormatException(
+      'production retained repository layout is not canonical',
+    );
+  }
+  return Directory(supplied.path);
+}
+
+List<L10nReadinessOracleCase> _productionProjectCases(
+  List<L10nReadinessOracleCase> allCases,
+  String projectId,
+) {
+  final cases = allCases
+      .where((entry) => entry.projectId == projectId)
+      .toList(growable: false);
+  if (cases.isEmpty) {
+    throw const FormatException('production project has no oracle cases');
+  }
+  return cases;
+}
+
+/// Reads the root and linked manifests through their frozen SHA-checked parser
+/// before constructing a production scope.
+/// This is deliberately not the complete production authority loader: callers
+/// must supply identities from separately completed repository, SDK, coverage,
+/// policy, recipe, and implementation probes. [main] remains disabled until
+/// that composition exists, so synthetic hashes cannot become runnable proof.
+Future<L10nReadinessPlan> buildProductionL10nReadinessPlanFromManifest(
+  L10nMutationReadinessOptions options, {
+  required Map<String, Object?> identities,
+  required Map<String, Directory> retainedRepositoriesByProject,
+}) async {
+  _revalidateProductionManifestAuthority(options);
+  final before = await options.manifestFile.readAsBytes();
+  if (identities['manifestSha256'] != sha256.convert(before).toString()) {
+    throw const FormatException('production manifest identity mismatch');
+  }
+  final manifest = L10nMutationManifest.read(options.manifestFile);
+  final after = await options.manifestFile.readAsBytes();
+  _revalidateProductionManifestAuthority(options);
+  if (!_sameBytes(before, after)) {
+    throw const FormatException('production manifest changed while loading');
+  }
+  return const ProductionL10nReadinessPlanBuilder().build(
+    options: options,
+    manifest: manifest,
+    identities: identities,
+    retainedRepositoriesByProject: retainedRepositoriesByProject,
+  );
+}
+
+void _revalidateProductionManifestAuthority(
+  L10nMutationReadinessOptions options,
+) {
+  final file = options.manifestFile;
+  if (FileSystemEntity.typeSync(file.path, followLinks: false) !=
+          FileSystemEntityType.file ||
+      !p.equals(file.resolveSymbolicLinksSync(), file.path) ||
+      !p.isWithin(options.repositoryRoot.path, file.path)) {
+    throw const FormatException('production manifest authority drift');
+  }
 }
 
 /// Minimal disposable-view authority exposed to the contract layer.
