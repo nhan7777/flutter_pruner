@@ -105,6 +105,15 @@ void main() {
         expect(pair.baseline.identity, matches(RegExp(r'^[a-f0-9]{64}$')));
         expect(pair.candidate.identity, matches(RegExp(r'^[a-f0-9]{64}$')));
         expect(pair.baseline.identity, isNot(pair.candidate.identity));
+        expect(pair.baseline.role, L10nStageRole.baseline);
+        expect(pair.candidate.role, L10nStageRole.candidate);
+        expect(pair.baseline.toolchainIdentity, _identity);
+        expect(pair.candidate.toolchainIdentity, _identity);
+        expect(pair.baseline.generationOutputPaths, {'lib/generated/app.dart'});
+        expect(
+          pair.candidate.generationOutputPaths,
+          pair.baseline.generationOutputPaths,
+        );
         expect(pair.copiedBytes, _presentStageByteCount(snapshot) * 2);
         expect(pair.baseline.publishablePaths, {
           'lib/l10n/app_en.arb',
@@ -113,6 +122,10 @@ void main() {
         expect(pair.candidate.publishablePaths, pair.baseline.publishablePaths);
         expect(
           () => pair.baseline.publishablePaths.add('later'),
+          throwsUnsupportedError,
+        );
+        expect(
+          () => pair.baseline.generationOutputPaths.add('later'),
           throwsUnsupportedError,
         );
 

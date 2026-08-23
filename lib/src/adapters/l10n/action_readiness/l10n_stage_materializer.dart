@@ -18,6 +18,15 @@ const _unsafeWritableModeMask = 0x12;
 /// Allocates one fresh stage directory.
 typedef L10nStageDirectoryAllocator = Future<Directory> Function();
 
+/// The immutable generation role assigned to one owned stage root.
+enum L10nStageRole {
+  /// Frozen unedited inputs used as the comparison baseline.
+  baseline,
+
+  /// Inputs after the exact witnessed candidate ARB mutation.
+  candidate,
+}
+
 /// An observable filesystem operation used only by deterministic tests.
 enum L10nStageOperation {
   /// A root has been validated and registered for cleanup.
@@ -55,10 +64,12 @@ final class L10nStageRoot {
   L10nStageRoot._({
     required this.directory,
     required this.identity,
+    required this.role,
+    required this.toolchainIdentity,
     required Set<String> publishablePaths,
+    required Set<String> generationOutputPaths,
     required _StageRootAuthority authority,
     required Object owner,
-    required _StageRootRole role,
     required Map<String, _ExpectedStageFile> expectedFiles,
     required Set<String> absentPaths,
     required Map<String, ImmutableBytes> expectedCandidateArbs,
@@ -66,9 +77,11 @@ final class L10nStageRoot {
   }) : publishablePaths = Set<String>.unmodifiable(
          SplayTreeSet<String>.of(publishablePaths),
        ),
+       generationOutputPaths = Set<String>.unmodifiable(
+         SplayTreeSet<String>.of(generationOutputPaths),
+       ),
        _authority = authority,
        _owner = owner,
-       _role = role,
        _expectedFiles = Map<String, _ExpectedStageFile>.of(expectedFiles),
        _absentPaths = Set<String>.unmodifiable(absentPaths),
        _expectedCandidateArbs = Map<String, ImmutableBytes>.unmodifiable({
@@ -83,12 +96,20 @@ final class L10nStageRoot {
   /// SHA-256 identity of the canonical root path and physical filesystem node.
   final String identity;
 
+  /// Generation role bound by the materializer.
+  final L10nStageRole role;
+
+  /// Toolchain identity witnessed by the frozen family snapshot.
+  final String toolchainIdentity;
+
   /// Paths that may later be published after all evidence succeeds.
   final Set<String> publishablePaths;
 
+  /// Exact generated-output allowlist for this stage.
+  final Set<String> generationOutputPaths;
+
   final _StageRootAuthority _authority;
   final Object _owner;
-  final _StageRootRole _role;
   final Map<String, _ExpectedStageFile> _expectedFiles;
   final Set<String> _absentPaths;
   final Map<String, ImmutableBytes> _expectedCandidateArbs;
@@ -115,7 +136,7 @@ final class L10nStageRoot {
     if (!safeToDelete) {
       throw StateError('stage-root-unsafe-for-generation');
     }
-    if (_role == _StageRootRole.candidate && !_candidateArbsInstalled) {
+    if (role == L10nStageRole.candidate && !_candidateArbsInstalled) {
       throw StateError('candidate-arbs-not-installed');
     }
     try {
@@ -317,12 +338,12 @@ final class DefaultL10nStageMaterializer implements L10nStageMaterializer {
       final baseline = await _allocateAndRegister(
         cleanupLease,
         blueprint,
-        _StageRootRole.baseline,
+        L10nStageRole.baseline,
       );
       final candidate = await _allocateAndRegister(
         cleanupLease,
         blueprint,
-        _StageRootRole.candidate,
+        L10nStageRole.candidate,
       );
       if (_rootsOverlap(baseline.directory.path, candidate.directory.path)) {
         baseline.markUnsafeToDelete();
@@ -354,7 +375,7 @@ final class DefaultL10nStageMaterializer implements L10nStageMaterializer {
   Future<L10nStageRoot> _allocateAndRegister(
     L10nStageCleanupLease cleanupLease,
     _StageBlueprint blueprint,
-    _StageRootRole role,
+    L10nStageRole role,
   ) async {
     late final _AllocatedStageRoot allocated;
     try {
@@ -387,10 +408,12 @@ final class DefaultL10nStageMaterializer implements L10nStageMaterializer {
     final root = L10nStageRoot._(
       directory: canonicalDirectory,
       identity: sha256.convert(utf8.encode(rawIdentity)).toString(),
+      role: role,
+      toolchainIdentity: blueprint.toolchainIdentity,
       publishablePaths: blueprint.publishablePaths,
+      generationOutputPaths: blueprint.generationOutputPaths,
       authority: allocated.authority,
       owner: _owner,
-      role: role,
       expectedFiles: blueprint.expectedFiles,
       absentPaths: blueprint.absentPaths,
       expectedCandidateArbs: blueprint.expectedCandidateArbs,
@@ -421,7 +444,7 @@ final class DefaultL10nStageMaterializer implements L10nStageMaterializer {
     L10nStageCleanupLease cleanupLease,
     _AllocatedStageRoot allocated,
     _StageBlueprint blueprint,
-    _StageRootRole role,
+    L10nStageRole role,
   ) {
     String diagnosticPath;
     try {
@@ -439,10 +462,12 @@ final class DefaultL10nStageMaterializer implements L10nStageMaterializer {
             ),
           )
           .toString(),
+      role: role,
+      toolchainIdentity: blueprint.toolchainIdentity,
       publishablePaths: blueprint.publishablePaths,
+      generationOutputPaths: blueprint.generationOutputPaths,
       authority: allocated.authority,
       owner: _owner,
-      role: role,
       expectedFiles: blueprint.expectedFiles,
       absentPaths: blueprint.absentPaths,
       expectedCandidateArbs: blueprint.expectedCandidateArbs,
@@ -501,7 +526,7 @@ final class DefaultL10nStageMaterializer implements L10nStageMaterializer {
         );
 
     if (!identical(candidate._owner, _owner) ||
-        candidate._role != _StageRootRole.candidate ||
+        candidate.role != L10nStageRole.candidate ||
         !candidate.safeToDelete ||
         candidate._sealedForGeneration) {
       return List.unmodifiable([reject('candidate-root-invalid')]);
@@ -625,11 +650,11 @@ final class DefaultL10nStageMaterializer implements L10nStageMaterializer {
     var candidateRemoved = false;
     final failures = <L10nEvidenceFailure>[];
     for (final root in lease._createdRoots.reversed) {
-      final label = root._role == _StageRootRole.baseline
+      final label = root.role == L10nStageRole.baseline
           ? 'baseline'
           : 'candidate';
       final outcome = await _cleanupRoot(root, label);
-      if (root._role == _StageRootRole.baseline) {
+      if (root.role == L10nStageRole.baseline) {
         baselineRemoved = outcome.removed;
       } else {
         candidateRemoved = outcome.removed;
@@ -735,6 +760,8 @@ final class _StageBlueprint {
     required this.absentPaths,
     required this.expectedCandidateArbs,
     required this.publishablePaths,
+    required this.generationOutputPaths,
+    required this.toolchainIdentity,
     required this.presentByteCount,
   });
 
@@ -801,11 +828,17 @@ final class _StageBlueprint {
       ...snapshot.expectedGeneratedPaths,
       if (snapshot.optionalUntranslatedPath case final path?) path,
     };
+    final generationOutputPaths = <String>{
+      ...snapshot.expectedGeneratedPaths,
+      if (snapshot.optionalUntranslatedPath case final path?) path,
+    };
     return _StageBlueprint(
       expectedFiles: Map.unmodifiable(expectedFiles),
       absentPaths: Set.unmodifiable(absentPaths),
       expectedCandidateArbs: Map.unmodifiable(candidateArbs),
       publishablePaths: Set.unmodifiable(publishable),
+      generationOutputPaths: Set.unmodifiable(generationOutputPaths),
+      toolchainIdentity: snapshot.toolchainIdentity,
       presentByteCount: byteCount,
     );
   }
@@ -814,6 +847,8 @@ final class _StageBlueprint {
   final Set<String> absentPaths;
   final Map<String, ImmutableBytes> expectedCandidateArbs;
   final Set<String> publishablePaths;
+  final Set<String> generationOutputPaths;
+  final String toolchainIdentity;
   final int presentByteCount;
 }
 
@@ -828,8 +863,6 @@ final class _ExpectedStageFile {
   final ImmutableBytes bytes;
   final int? posixMode;
 }
-
-enum _StageRootRole { baseline, candidate }
 
 final class _AllocatedStageRoot {
   const _AllocatedStageRoot({required this.directory, required this.authority});
