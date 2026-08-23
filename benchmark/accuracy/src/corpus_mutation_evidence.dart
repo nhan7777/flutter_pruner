@@ -496,10 +496,13 @@ final class DefaultCorpusProjectViewFactory
       final retained = _canonicalLocalDirectory(retainedRepositoryPath);
       final flutter = _canonicalFlutter(canonicalFlutterExecutable);
       final manifestDirectory = _manifestDirectory.absolute;
+      final fixtureSources = _preflightFixtureSources(project, retained);
       lease = _OwnedProjectViewLease.create(
         _temporaryDirectoryFactory,
         disjointDirectories: [
           retained,
+          if (fixtureSources.isNotEmpty)
+            _canonicalDirectoryEntry(retained.parent),
           flutter.parent.parent,
           if (manifestDirectory.existsSync()) manifestDirectory,
         ],
@@ -544,8 +547,6 @@ final class DefaultCorpusProjectViewFactory
             : 'repositoryRevisionDrift';
         throw const _CorpusGateException();
       }
-      final fixtureSources = _preflightFixtureSources(project, retained);
-
       var repository = Directory(p.join(lease.root.path, 'repository'));
       await _requireGitSuccess(
         [
@@ -839,6 +840,11 @@ final class DefaultCorpusProjectViewFactory
             includePhysical: true,
           ),
       };
+      failureStatus = 'retainedRepositoryDrift';
+      if (!_fixtureSourcesStillMatch(fixtureSources)) {
+        throw const _CorpusGateException();
+      }
+      failureStatus = 'protectedAuthorityDrift';
       if (!_factoryViewAuthorityCurrent(
             lease: lease,
             repository: repository,
@@ -1893,15 +1899,21 @@ final class _OwnedProjectViewLease implements CorpusProjectViewLease {
 final class _FixtureSource {
   const _FixtureSource({
     required this.overlay,
+    required this.authorityRoot,
+    required this.sourceIdentity,
     required this.file,
     required this.bytes,
     required this.mode,
+    required this.physicalFingerprint,
   });
 
   final L10nFixtureOverlay overlay;
+  final Directory authorityRoot;
+  final String sourceIdentity;
   final File file;
   final ImmutableBytes bytes;
   final int? mode;
+  final String physicalFingerprint;
 }
 
 final class _OverlayWrite {
@@ -2013,11 +2025,17 @@ List<_FixtureSource> _preflightFixtureSources(
   Directory retained,
 ) {
   final sources = <_FixtureSource>[];
+  final sourceAuthorityRoot = _canonicalDirectoryEntry(retained.parent);
   for (final overlay in project.fixtureOverlays) {
     if (overlay.containsSecrets) throw const _CorpusGateException();
-    // sourceIdentity is provenance only. The authoritative ignored stub is at
-    // the same declared target path in the retained corpus worktree.
-    final file = _regularFileWithin(retained, overlay.relativePath);
+    final file = _regularFileWithin(
+      sourceAuthorityRoot,
+      overlay.sourceIdentity,
+    );
+    if (p.equals(file.path, retained.path) ||
+        p.isWithin(retained.path, file.path)) {
+      throw const _CorpusGateException();
+    }
     final state = _readRegularFile(file);
     if (state.bytes.sha256Hex != overlay.sha256 ||
         (_isPosix && state.mode != 0x1a4)) {
@@ -2026,9 +2044,12 @@ List<_FixtureSource> _preflightFixtureSources(
     sources.add(
       _FixtureSource(
         overlay: overlay,
+        authorityRoot: sourceAuthorityRoot,
+        sourceIdentity: overlay.sourceIdentity,
         file: file,
         bytes: state.bytes,
         mode: state.mode,
+        physicalFingerprint: _fileFingerprint(file, includePhysical: true),
       ),
     );
   }
@@ -2062,9 +2083,16 @@ void _validateToolchainSelectionEvidence(
 bool _fixtureSourcesStillMatch(List<_FixtureSource> sources) {
   try {
     for (final source in sources) {
-      final state = _readRegularFile(source.file);
-      if (!state.bytes.contentEquals(source.bytes) ||
-          state.mode != source.mode) {
+      final current = _regularFileWithin(
+        source.authorityRoot,
+        source.sourceIdentity,
+      );
+      final state = _readRegularFile(current);
+      if (!p.equals(current.path, source.file.path) ||
+          !state.bytes.contentEquals(source.bytes) ||
+          state.mode != source.mode ||
+          _fileFingerprint(current, includePhysical: true) !=
+              source.physicalFingerprint) {
         return false;
       }
     }

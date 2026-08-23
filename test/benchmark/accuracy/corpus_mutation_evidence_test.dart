@@ -349,17 +349,26 @@ void main() {
     );
 
     test(
-      'copies a real-shape ignored fixture only from the retained root',
+      'copies a real-shape ignored fixture only from its source authority',
       () async {
-        final retained = Directory(
-          p.join(suiteRoot.path, 'worktrees', 'v2-natural-accuracy', 'gsy'),
-        )..createSync(recursive: true);
+        final retained = Directory(p.join(suiteRoot.path, 'gsy'))
+          ..createSync(recursive: true);
         _writeRootPackageRepository(retained);
         const overlayPath = 'lib/common/config/ignoreConfig.dart';
-        final source = File(_rootPath(retained, overlayPath));
-        source.parent.createSync(recursive: true);
-        source.writeAsStringSync('const ignoredFixture = true;\n');
-        _chmod(source, 0x1a4);
+        const sourceIdentity = 'worktrees/v2-natural-accuracy/gsy/$overlayPath';
+        final sourceFile = File(
+          p.joinAll([
+            suiteRoot.path,
+            'worktrees',
+            'v2-natural-accuracy',
+            'gsy',
+            ...overlayPath.split('/'),
+          ]),
+        );
+        sourceFile.parent.createSync(recursive: true);
+        sourceFile.writeAsStringSync('const ignoredFixture = true;\n');
+        _chmod(sourceFile, 0x1a4);
+        final sourceBytes = sourceFile.readAsBytesSync();
         File(p.join(retained.path, '.gitignore')).writeAsStringSync(
           '$overlayPath\n.dart_tool/\n.flutter-plugins\n'
           '.flutter-plugins-dependencies\n',
@@ -368,9 +377,9 @@ void main() {
         final retainedStatusBefore = _gitStatusBytes(retained);
         final overlay = L10nFixtureOverlay(
           relativePath: overlayPath,
-          sourceIdentity: 'worktrees/v2-natural-accuracy/gsy/$overlayPath',
+          sourceIdentity: sourceIdentity,
           purpose: 'non-secret deterministic config stub',
-          sha256: ImmutableBytes.copyOf(source.readAsBytesSync()).sha256Hex,
+          sha256: ImmutableBytes.copyOf(sourceFile.readAsBytesSync()).sha256Hex,
           containsSecrets: false,
         );
         final fixtureProject = _rootProject(
@@ -395,9 +404,10 @@ void main() {
         });
         expect(
           File(_rootPath(view.repositoryRoot, overlayPath)).readAsBytesSync(),
-          source.readAsBytesSync(),
+          sourceFile.readAsBytesSync(),
         );
-        expect(source.readAsStringSync(), 'const ignoredFixture = true;\n');
+        expect(File(_rootPath(retained, overlayPath)).existsSync(), isFalse);
+        expect(sourceFile.readAsStringSync(), 'const ignoredFixture = true;\n');
         expect(_gitStatusBytes(retained), retainedStatusBefore);
         expect(
           view.repositoryRoot.path,
@@ -455,7 +465,66 @@ void main() {
           driftOutcome.commandResults.single['status'],
           'overlayTargetDrift',
         );
-        expect(source.readAsStringSync(), 'const ignoredFixture = true;\n');
+        expect(sourceFile.readAsStringSync(), 'const ignoredFixture = true;\n');
+        expect(_gitStatusBytes(retained), retainedStatusBefore);
+
+        final physicalDriftRunner = _CorpusProcessRunner(
+          onPubGet: (_) {
+            sourceFile.deleteSync();
+            sourceFile.writeAsBytesSync(sourceBytes, flush: true);
+            _chmod(sourceFile, 0x1a4);
+            sourceFile.setLastModifiedSync(
+              sourceFile.lastModifiedSync().add(const Duration(seconds: 2)),
+            );
+          },
+        );
+        final physicallyDrifted =
+            await DefaultCorpusProjectViewFactory(
+              processRunner: physicalDriftRunner,
+            ).create(
+              project: fixtureProject,
+              retainedRepositoryPath: retained.path,
+              canonicalFlutterExecutable: canonicalFlutter.path,
+            );
+        expect(physicallyDrifted, isA<CorpusProjectViewRejected>());
+        expect(
+          (physicallyDrifted as CorpusProjectViewRejected)
+              .outcome
+              .commandResults
+              .single['status'],
+          'retainedRepositoryDrift',
+        );
+
+        var statusInvocations = 0;
+        final lateDriftRunner = _CorpusProcessRunner(
+          onGitInvocation: (invocation) {
+            if (!invocation.arguments.contains('status')) return;
+            statusInvocations++;
+            if (statusInvocations == 5) {
+              sourceFile.writeAsStringSync('late source drift\n', flush: true);
+            }
+          },
+        );
+        final lateDrifted =
+            await DefaultCorpusProjectViewFactory(
+              processRunner: lateDriftRunner,
+            ).create(
+              project: fixtureProject,
+              retainedRepositoryPath: retained.path,
+              canonicalFlutterExecutable: canonicalFlutter.path,
+            );
+        expect(statusInvocations, 5);
+        expect(lateDrifted, isA<CorpusProjectViewRejected>());
+        expect(
+          (lateDrifted as CorpusProjectViewRejected)
+              .outcome
+              .commandResults
+              .single['status'],
+          'retainedRepositoryDrift',
+        );
+        expect(sourceFile.readAsStringSync(), 'late source drift\n');
+        sourceFile.writeAsBytesSync(sourceBytes, flush: true);
+        _chmod(sourceFile, 0x1a4);
         expect(_gitStatusBytes(retained), retainedStatusBefore);
       },
     );
@@ -2016,6 +2085,7 @@ final class _CorpusProcessRunner implements ProcessExecutionRunner {
     this.mutateManagedAuthority = false,
     this.breakManagedFingerprintOnUnconfirmed = false,
     this.onPubGet,
+    this.onGitInvocation,
     this.toolchainMachine,
     this.onFirstPolicy,
     this.onToolchainProbe,
@@ -2028,6 +2098,7 @@ final class _CorpusProcessRunner implements ProcessExecutionRunner {
   final bool mutateManagedAuthority;
   final bool breakManagedFingerprintOnUnconfirmed;
   final void Function(Directory packageRoot)? onPubGet;
+  final void Function(_Invocation invocation)? onGitInvocation;
   final Map<String, Object?>? toolchainMachine;
   final void Function(_Invocation invocation)? onFirstPolicy;
   final void Function(int occurrence)? onToolchainProbe;
@@ -2062,6 +2133,7 @@ final class _CorpusProcessRunner implements ProcessExecutionRunner {
     );
     if (p.basename(executable) != 'flutter') {
       gitInvocations.add(invocation);
+      onGitInvocation?.call(invocation);
       if (_unconfirmedGitStatusAt != null && arguments.contains('status')) {
         _armedGitStatusCount++;
         if (_armedGitStatusCount == _unconfirmedGitStatusAt) {
