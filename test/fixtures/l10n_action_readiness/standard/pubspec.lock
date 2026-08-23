@@ -1,0 +1,5 @@
+# Generated fixture lock authority. It is intentionally minimal because tests
+# never resolve dependencies.
+packages: {}
+sdks:
+  dart: ">=3.9.0 <4.0.0"
