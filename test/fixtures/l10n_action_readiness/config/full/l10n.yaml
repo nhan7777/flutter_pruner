@@ -1,0 +1,19 @@
+arb-dir: lib/i18n
+output-dir: lib/generated
+template-arb-file: app_en.arb
+output-localization-file: strings.dart
+untranslated-messages-file: build/untranslated.json
+output-class: Strings
+header-file: headers/banner.txt
+use-deferred-loading: true
+preferred-supported-locales:
+  - vi
+  - en
+required-resource-attributes: true
+nullable-getter: false
+format: false
+use-escaping: true
+suppress-warnings: true
+relax-syntax: true
+use-named-parameters: true
+synthetic-package: false
