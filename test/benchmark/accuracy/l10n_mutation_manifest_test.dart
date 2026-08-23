@@ -3,6 +3,8 @@ import 'dart:io';
 
 import 'package:test/test.dart';
 
+import '../../../benchmark/accuracy/src/l10n_mutation_manifest.dart';
+
 const expectedOracleHashes = {
   'smooth': '3ba9fb5be7bb70dcb68856cf4339c3e80626d30844fbc93dd7c81ecf5cc99020',
   'gsy': '9e113537db5e2a7b057bffc0d1ff74ce6799c2b31b36b89ff36bcf3afda65d35',
@@ -28,6 +30,281 @@ const expectedNegativeReasons = {
 };
 
 void main() {
+  test('strict reader exposes immutable scanner-independent values', () {
+    final manifest = L10nMutationManifest.read(
+      File('benchmark/accuracy/manifests/l10n-mutation-readiness-v1.json'),
+    );
+
+    expect(manifest.schemaVersion, 1);
+    expect(manifest.oracleVersion, 'l10n-mutation-readiness-v1');
+    expect(manifest.projects.map((project) => project.id), [
+      'gitjournal',
+      'gsy',
+      'smooth',
+    ]);
+    expect(manifest.projectsById['smooth']!.toolchainVersion, '3.38.7');
+    expect(manifest.totals.positiveKeys, 378);
+    expect(manifest.totals.negativeKeys, 2224);
+    expect(manifest.cases, hasLength(2602));
+    expect(
+      () => manifest.projects.add(manifest.projects.first),
+      throwsUnsupportedError,
+    );
+    expect(
+      () => manifest.mutationNegativeReasons['scan-blocker']!.add('leak'),
+      throwsUnsupportedError,
+    );
+    expect(
+      () => manifest.publicSurfaceBaseline['leak'] = true,
+      throwsUnsupportedError,
+    );
+    final normalization =
+        manifest.projectsById['gsy']!.normalizationOverlays.single;
+    expect(normalization.manifest, 'gsy-normalized-family-v1.json');
+    expect(normalization.normalizationManifest!.changedArbs, hasLength(4));
+  });
+
+  group('strict mutation manifest validation', () {
+    test('rejects unknown or missing structural fields', () {
+      final mutations = <void Function(Map<String, Object?>)>[
+        (json) => json['unknown'] = true,
+        (json) => json.remove('cases'),
+        (json) => _objectMap(json['totals'])['unknown'] = true,
+        (json) => _objectMap(json['totals']).remove('positiveKeys'),
+        (json) =>
+            _objectMap(_objectMap(json['sourceOracles'])['gsy'])['unknown'] =
+                true,
+        (json) => _objectMap(
+          _objectMap(json['sourceOracles'])['gsy'],
+        ).remove('sha256'),
+        (json) => _family(json, 'gsy')['unknown'] = true,
+        (json) => _family(json, 'gsy').remove('arbPaths'),
+        (json) => _objectMap(
+          _objectList(_family(json, 'gsy')['verificationPolicy']).first,
+        )['unknown'] = true,
+        (json) => _objectMap(
+          _objectList(_family(json, 'gsy')['verificationPolicy']).first,
+        ).remove('arguments'),
+        (json) => _objectMap(
+          _objectList(_family(json, 'gsy')['normalizationOverlays']).single,
+        )['manifest'] = '../../escape.json',
+        (json) => _positiveCase(json)['unknown'] = true,
+        (json) => _positiveCase(json).remove('expectedArbMembersByPath'),
+        (json) => _objectMap(json['publicSurfaceBaseline'])['unknown'] = true,
+      ];
+
+      for (var index = 0; index < mutations.length; index++) {
+        _expectRejected(mutations[index], reason: 'mutation $index');
+      }
+    });
+
+    test('rejects schema, identity, truth, and reason drift', () {
+      final mutations = <void Function(Map<String, Object?>)>[
+        (json) => json['schemaVersion'] = 2,
+        (json) => json['oracleVersion'] = 'future-oracle',
+        (json) => _family(json, 'gsy')['project'] = 'unknown',
+        (json) => _negativeCase(json)['project'] = 'unknown',
+        (json) => _negativeCase(json)['truthLabel'] = 'unknown',
+        (json) => _objectMap(json['mutationNegativeFixtures'])['unknown'] = [
+          'cleanupFailed',
+        ],
+        (json) =>
+            _objectMap(json['mutationNegativeFixtures'])['cleanup-failure'] = [
+              'unknownFailure',
+            ],
+        (json) => _objectMap(
+          json['mutationNegativeFixtures'],
+        ).remove('cleanup-failure'),
+        (json) =>
+            _objectMap(_objectMap(json['sourceOracles'])['gsy'])['sha256'] =
+                '0' * 64,
+      ];
+
+      for (var index = 0; index < mutations.length; index++) {
+        _expectRejected(mutations[index], reason: 'mutation $index');
+      }
+    });
+
+    test('rejects duplicate IDs or keys, count drift, and unsorted cases', () {
+      _expectRejected((json) {
+        final cases = json['cases']! as List<Object?>;
+        cases[1] = jsonDecode(jsonEncode(cases.first));
+      });
+      _expectRejected((json) {
+        final positive = _positiveCase(json);
+        final membersByPath = _objectMap(positive['expectedArbMembersByPath']);
+        final firstMembers = membersByPath.values.first as List<Object?>;
+        firstMembers.add(firstMembers.last);
+      });
+      _expectRejected(
+        (json) => _objectMap(json['totals'])['positiveKeys'] = 377,
+      );
+      _expectRejected((json) {
+        final cases = json['cases']! as List<Object?>;
+        final first = cases[0];
+        cases[0] = cases[1];
+        cases[1] = first;
+      });
+      _expectRejected((json) => (json['cases']! as List<Object?>).removeLast());
+    });
+
+    test('rejects malformed positive and negative mutation authority', () {
+      _expectRejected((json) {
+        final positive = _positiveCase(json);
+        final project = _family(json, positive['project']! as String);
+        _objectMap(
+          positive['expectedArbMembersByPath'],
+        ).remove(project['templateArbPath']);
+      });
+      _expectRejected((json) {
+        final positive = _positiveCase(json);
+        final membersByPath = _objectMap(positive['expectedArbMembersByPath']);
+        membersByPath[membersByPath.keys.first] = ['not-the-decoded-key'];
+      });
+      _expectRejected((json) {
+        _negativeCase(json)['expectedArbMembersByPath'] = {
+          'lib/l10n/app_en.arb': ['unsafe'],
+        };
+      });
+    });
+
+    test('rejects noncanonical and unsafe verification policy', () {
+      final mutations = <void Function(Map<String, Object?>)>[
+        (json) => (_policyCommand(json, 'gsy', 0)['arguments']! as List).remove(
+          '--no-pub',
+        ),
+        (json) => (_policyCommand(json, 'gsy', 0)['arguments']! as List).add(
+          '--no-pub',
+        ),
+        (json) =>
+            _objectMap(_policyCommand(json, 'gsy', 0)['executable'])['kind'] =
+                'fvm',
+        (json) => _policyCommand(json, 'gsy', 0)['arguments'] = [
+          'analyze',
+          '--no-pub',
+          '&&',
+          'touch',
+          'leak',
+        ],
+        (json) => _policyCommand(json, 'gsy', 0)['arguments'] = [
+          'custom',
+          '--no-pub',
+        ],
+        (json) => _policyCommand(json, 'gsy', 0)['workingDirectory'] = '/tmp',
+        (json) =>
+            _policyCommand(json, 'gsy', 0)['workingDirectory'] = '../escape',
+        (json) {
+          final policy = _family(json, 'gsy')['verificationPolicy']! as List;
+          final first = policy[0];
+          policy[0] = policy[1];
+          policy[1] = first;
+        },
+      ];
+
+      for (var index = 0; index < mutations.length; index++) {
+        _expectRejected(mutations[index], reason: 'mutation $index');
+      }
+    });
+
+    test('public command model allows only direct canonical Flutter argv', () {
+      final build = CorpusVerificationCommand(
+        workingDirectoryRelativeToRepository: '.',
+        argumentsAfterCanonicalFlutter: const ['build', 'web', '--no-pub'],
+      );
+      expect(build.identity, matches(_sha256));
+      expect(
+        () => CorpusVerificationCommand(
+          workingDirectoryRelativeToRepository: '.',
+          argumentsAfterCanonicalFlutter: const [
+            'bash',
+            '-c',
+            'flutter test --no-pub',
+          ],
+        ),
+        throwsFormatException,
+      );
+      for (final unsafeArgument in const [
+        '/tmp/outside',
+        '../outside',
+        r'C:\outside',
+        'file:///tmp/outside',
+        '~/outside',
+        '--output=/tmp/outside',
+        '--output=../outside',
+      ]) {
+        expect(
+          () => CorpusVerificationCommand(
+            workingDirectoryRelativeToRepository: '.',
+            argumentsAfterCanonicalFlutter: [
+              'test',
+              '--no-pub',
+              unsafeArgument,
+            ],
+          ),
+          throwsFormatException,
+          reason: unsafeArgument,
+        );
+      }
+    });
+
+    test('defensively copies caller-owned nested collections', () {
+      final json = _manifestClone();
+      final manifest = L10nMutationManifest.fromJson(json);
+      final firstId = manifest.cases.first.canonicalNodeId;
+      final firstCommand = manifest.projects.first.verificationPolicy.first;
+
+      _objectMap(json['publicSurfaceBaseline'])['captureBoundary'] = 'changed';
+      _objectMap(json['mutationNegativeFixtures'])['scan-blocker'] = [
+        'changed',
+      ];
+      (json['cases']! as List<Object?>).clear();
+      (_family(json, 'gitjournal')['verificationPolicy']! as List).clear();
+
+      expect(manifest.cases.first.canonicalNodeId, firstId);
+      expect(
+        manifest.publicSurfaceBaseline['captureBoundary'],
+        'argv-only-child-process',
+      );
+      expect(manifest.mutationNegativeReasons['scan-blocker'], [
+        'scanBlockerPresent',
+      ]);
+      expect(
+        manifest.projects.first.verificationPolicy.first.identity,
+        firstCommand.identity,
+      );
+    });
+
+    test('file reader rejects tampered or linked normalization authority', () {
+      final temporary = Directory.systemTemp.createTempSync(
+        'flutter-pruner-l10n-manifest-',
+      );
+      addTearDown(() => temporary.deleteSync(recursive: true));
+      final rootSource = File(
+        'benchmark/accuracy/manifests/l10n-mutation-readiness-v1.json',
+      );
+      final normalizationSource = File(
+        'benchmark/accuracy/manifests/gsy-normalized-family-v1.json',
+      );
+      final root = File('${temporary.path}/l10n-mutation-readiness-v1.json')
+        ..writeAsBytesSync(rootSource.readAsBytesSync());
+      final normalization = File(
+        '${temporary.path}/gsy-normalized-family-v1.json',
+      )..writeAsBytesSync(normalizationSource.readAsBytesSync());
+
+      normalization.writeAsStringSync('${normalization.readAsStringSync()} ');
+      expect(() => L10nMutationManifest.read(root), throwsFormatException);
+
+      normalization.deleteSync();
+      Link(normalization.path).createSync(normalizationSource.absolute.path);
+      expect(() => L10nMutationManifest.read(root), throwsFormatException);
+
+      final rootJson = _objectMap(jsonDecode(root.readAsStringSync()));
+      _objectList(rootJson['cases']).first['expectedScannerPresence'] = true;
+      root.writeAsStringSync(jsonEncode(rootJson));
+      expect(() => L10nMutationManifest.read(root), throwsFormatException);
+    });
+  });
+
   test('freezes the independent l10n mutation-readiness oracle', () {
     final manifest = _readJson(
       'benchmark/accuracy/manifests/l10n-mutation-readiness-v1.json',
@@ -390,4 +667,53 @@ List<Map<String, Object?>> _objectList(Object? value) {
 
 List<String> _stringList(Object? value) {
   return (value as List<Object?>).cast<String>();
+}
+
+Map<String, Object?> _manifestClone() => _objectMap(
+  jsonDecode(
+    jsonEncode(
+      _readJson('benchmark/accuracy/manifests/l10n-mutation-readiness-v1.json'),
+    ),
+  ),
+);
+
+void _expectRejected(
+  void Function(Map<String, Object?> json) mutate, {
+  String? reason,
+}) {
+  final json = _manifestClone();
+  mutate(json);
+  expect(
+    () => L10nMutationManifest.fromJson(json),
+    throwsFormatException,
+    reason: reason,
+  );
+}
+
+Map<String, Object?> _family(Map<String, Object?> json, String project) {
+  return _objectList(
+    json['families'],
+  ).singleWhere((family) => family['project'] == project);
+}
+
+Map<String, Object?> _positiveCase(Map<String, Object?> json) {
+  return _objectList(
+    json['cases'],
+  ).firstWhere((entry) => entry['truthLabel'] == 'mutation-positive');
+}
+
+Map<String, Object?> _negativeCase(Map<String, Object?> json) {
+  return _objectList(
+    json['cases'],
+  ).firstWhere((entry) => entry['truthLabel'] == 'mutation-negative');
+}
+
+Map<String, Object?> _policyCommand(
+  Map<String, Object?> json,
+  String project,
+  int index,
+) {
+  return _objectMap(
+    (_family(json, project)['verificationPolicy']! as List<Object?>)[index],
+  );
 }
