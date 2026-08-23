@@ -6,6 +6,7 @@ import 'dart:typed_data';
 import 'package:crypto/crypto.dart';
 import 'package:path/path.dart' as p;
 import 'package:pub_semver/pub_semver.dart';
+import 'package:yaml/yaml.dart';
 
 import '../../../core/process/managed_process_runner.dart';
 import 'arb_document.dart';
@@ -39,6 +40,14 @@ const _sandboxWhichBytes = <int>[
   0x0a,
 ];
 const _sandboxEnvironmentPolicyVersion = 'l10n-probe-sandbox-v1';
+const _darwinSandboxExecPath = '/usr/bin/sandbox-exec';
+const _darwinProbeProfile =
+    '(version 1)(allow default)(deny network*)'
+    '(deny file-write*)'
+    '(allow file-write* (subpath (param "SANDBOX_ROOT")))';
+const _darwinGenerationProfile =
+    '$_darwinProbeProfile'
+    '(allow file-write* (subpath (param "WRITE_ROOT")))';
 const _sandboxDirectoryRoles = <String, String>{
   'HOME': 'home',
   'XDG_CONFIG_HOME': 'xdg-config',
@@ -125,6 +134,368 @@ final class FlutterMachineIdentity {
   final String dartSdkVersion;
 }
 
+/// Frozen OS-enforced process-confinement authority.
+final class L10nProcessConfinementAuthority {
+  /// Creates immutable confinement authority evidence.
+  const L10nProcessConfinementAuthority({
+    required this.backendIdentity,
+    required this.requestedExecutable,
+    required this.requestedExecutableType,
+    required this.canonicalExecutable,
+    required this.executableSha256,
+    required this.executableByteLength,
+    required this.executablePosixMode,
+    required this.policyIdentity,
+  });
+
+  /// Versioned backend and command grammar identity.
+  final String backendIdentity;
+
+  /// Exact host path requested for the kernel boundary launcher.
+  final String requestedExecutable;
+
+  /// Unfollowed type of [requestedExecutable].
+  final FileSystemEntityType requestedExecutableType;
+
+  /// Canonical regular executable target.
+  final String canonicalExecutable;
+
+  /// SHA-256 of the exact executable bytes.
+  final String executableSha256;
+
+  /// Exact executable byte length.
+  final int executableByteLength;
+
+  /// Exact requested executable target POSIX mode.
+  final int executablePosixMode;
+
+  /// Length-framed identity of every static profile and parameter grammar.
+  final String policyIdentity;
+}
+
+/// Shell-free physical command produced by an OS confinement backend.
+final class L10nConfinedCommand {
+  /// Creates an immutable physical command.
+  L10nConfinedCommand({
+    required this.executable,
+    required List<String> arguments,
+  }) : arguments = List<String>.unmodifiable(arguments);
+
+  /// Exact confinement executable.
+  final String executable;
+
+  /// Exact argv passed without shell interpretation.
+  final List<String> arguments;
+}
+
+/// Stable confinement setup/revalidation failure.
+final class L10nProcessConfinementException implements Exception {
+  /// Creates a failure with a non-secret [detailCode].
+  const L10nProcessConfinementException(this.detailCode);
+
+  /// Stable machine-readable detail.
+  final String detailCode;
+}
+
+/// OS boundary used for every direct Flutter-tools snapshot process.
+abstract interface class L10nProcessConfinementBackend {
+  /// Captures exact immutable launcher and static-policy authority.
+  L10nProcessConfinementAuthority captureAuthority();
+
+  /// Wraps [executable] and [arguments] in an enforcing physical command.
+  ///
+  /// A null [writableRoot] is the probe policy. Generation supplies its
+  /// canonical stage root as the sole additional writable subtree.
+  L10nConfinedCommand confine({
+    required L10nProcessConfinementAuthority expectedAuthority,
+    required String sandboxRoot,
+    required String? writableRoot,
+    required String executable,
+    required List<String> arguments,
+  });
+}
+
+/// Marker for a test-only process runner paired with an injected fake guard.
+///
+/// Implementations are trusted in-process test infrastructure. Production
+/// composition never accepts an injected confinement backend.
+abstract interface class L10nTestProcessRunner
+    implements ProcessExecutionRunner {}
+
+/// Production confinement: Darwin sandbox-exec, fail-closed elsewhere.
+final class DefaultL10nProcessConfinementBackend
+    implements L10nProcessConfinementBackend {
+  /// Creates the production confinement backend.
+  const DefaultL10nProcessConfinementBackend();
+
+  @override
+  L10nProcessConfinementAuthority captureAuthority() {
+    if (!Platform.isMacOS) {
+      throw const L10nProcessConfinementException('os-confinement-unsupported');
+    }
+    try {
+      final executable = _captureHostExecutable(_darwinSandboxExecPath);
+      return L10nProcessConfinementAuthority(
+        backendIdentity: 'darwin-sandbox-exec-v1',
+        requestedExecutable: executable.requestedPath,
+        requestedExecutableType: executable.requestedPathType,
+        canonicalExecutable: executable.canonicalPath,
+        executableSha256: executable.sha256,
+        executableByteLength: executable.byteLength,
+        executablePosixMode: executable.posixMode,
+        policyIdentity: _darwinConfinementPolicyIdentity(),
+      );
+    } on _ResolutionSignal {
+      throw const L10nProcessConfinementException(
+        'host-confinement-authority-invalid',
+      );
+    }
+  }
+
+  @override
+  L10nConfinedCommand confine({
+    required L10nProcessConfinementAuthority expectedAuthority,
+    required String sandboxRoot,
+    required String? writableRoot,
+    required String executable,
+    required List<String> arguments,
+  }) {
+    final current = captureAuthority();
+    if (!_sameConfinementAuthority(current, expectedAuthority)) {
+      throw const L10nProcessConfinementException(
+        'host-confinement-authority-drift',
+      );
+    }
+    final canonicalSandbox = _canonicalConfinementRoot(sandboxRoot);
+    final canonicalWritable = writableRoot == null
+        ? null
+        : _canonicalConfinementRoot(writableRoot);
+    if (!p.isAbsolute(executable) || executable.contains('\u0000')) {
+      throw const L10nProcessConfinementException(
+        'confinement-command-invalid',
+      );
+    }
+    final profile = canonicalWritable == null
+        ? _darwinProbeProfile
+        : _darwinGenerationProfile;
+    return L10nConfinedCommand(
+      executable: current.requestedExecutable,
+      arguments: [
+        '-D',
+        'SANDBOX_ROOT=$canonicalSandbox',
+        if (canonicalWritable != null) ...[
+          '-D',
+          'WRITE_ROOT=$canonicalWritable',
+        ],
+        '-p',
+        profile,
+        executable,
+        ...List<String>.of(arguments),
+      ],
+    );
+  }
+}
+
+/// Single-use owned root lease created by the frozen toolchain boundary.
+///
+/// Task 9 materializes fresh copied bytes only beneath [directory], then calls
+/// [seal] before Task 10 can request generation.
+///
+/// A concurrently hostile same-UID process can still mutate pathname state
+/// between scans; callers must not expose the lease to such an actor. The OS
+/// boundary closes child-process network and cross-root writes, not that
+/// trusted in-process/concurrent-host threat boundary.
+final class L10nGenerationRootLease {
+  L10nGenerationRootLease._({
+    required this.directory,
+    required _CanonicalSdk sdk,
+    required _HostPathIdentity rootIdentity,
+  }) : _sdk = sdk,
+       _rootIdentity = rootIdentity;
+
+  /// Unique canonical 0700 system-temporary root owned by this lease.
+  final Directory directory;
+
+  final _CanonicalSdk _sdk;
+  final _HostPathIdentity _rootIdentity;
+  bool _sealed = false;
+  bool _unsafeToDelete = false;
+  bool _cleanupConsumed = false;
+
+  /// Whether later cleanup may still remove the owned root.
+  bool get safeToDelete => !_unsafeToDelete;
+
+  /// Marks the root diagnostic residue after process/identity uncertainty.
+  void markUnsafeToDelete() {
+    _unsafeToDelete = true;
+  }
+
+  /// Deletes this exact owned root once, after identity and tree validation.
+  void cleanup() {
+    if (_cleanupConsumed) {
+      throw const L10nToolchainLaunchException(
+        'generation-working-root-cleanup-consumed',
+      );
+    }
+    _cleanupConsumed = true;
+    if (_unsafeToDelete) {
+      throw const L10nToolchainLaunchException(
+        'generation-working-root-cleanup-unconfirmed',
+      );
+    }
+    try {
+      _captureGenerationTree(
+        directory.path,
+        statAuthority: _sdk.statAuthority,
+        expectedRootIdentity: _rootIdentity,
+        requireExactRootMode: true,
+      );
+      directory.deleteSync(recursive: true);
+      if (FileSystemEntity.typeSync(directory.path, followLinks: false) !=
+          FileSystemEntityType.notFound) {
+        throw const _GenerationRootSignal(
+          'generation-working-root-cleanup-unconfirmed',
+        );
+      }
+    } on _GenerationRootSignal {
+      _unsafeToDelete = true;
+      throw const L10nToolchainLaunchException(
+        'generation-working-root-cleanup-unconfirmed',
+      );
+    } on _ResolutionSignal {
+      _unsafeToDelete = true;
+      throw const L10nToolchainLaunchException(
+        'generation-working-root-cleanup-unconfirmed',
+      );
+    } on FileSystemException {
+      _unsafeToDelete = true;
+      throw const L10nToolchainLaunchException(
+        'generation-working-root-cleanup-unconfirmed',
+      );
+    } catch (_) {
+      _unsafeToDelete = true;
+      throw const L10nToolchainLaunchException(
+        'generation-working-root-cleanup-unconfirmed',
+      );
+    }
+  }
+
+  /// Freezes exact pre-generation inventory and proves no hard links exist.
+  L10nGenerationWorkingRoot seal() {
+    if (_sealed) {
+      throw const L10nToolchainLaunchException(
+        'generation-working-root-lease-consumed',
+      );
+    }
+    _sealed = true;
+    try {
+      final snapshot = _captureGenerationTree(
+        directory.path,
+        statAuthority: _sdk.statAuthority,
+        expectedRootIdentity: _rootIdentity,
+        requireExactRootMode: true,
+      );
+      return L10nGenerationWorkingRoot._(lease: this, frozenSnapshot: snapshot);
+    } on _GenerationRootSignal catch (signal) {
+      _unsafeToDelete = true;
+      throw L10nToolchainLaunchException(signal.detailCode);
+    } on _ResolutionSignal {
+      _unsafeToDelete = true;
+      throw const L10nToolchainLaunchException(
+        'generation-working-root-inventory-unavailable',
+      );
+    } on FileSystemException {
+      _unsafeToDelete = true;
+      throw const L10nToolchainLaunchException(
+        'generation-working-root-inventory-unavailable',
+      );
+    } catch (_) {
+      _unsafeToDelete = true;
+      throw const L10nToolchainLaunchException(
+        'generation-working-root-inventory-unavailable',
+      );
+    }
+  }
+}
+
+/// Sealed single-use generation capability accepted by
+/// [L10nToolchainLaunch.runGeneration].
+final class L10nGenerationWorkingRoot {
+  L10nGenerationWorkingRoot._({
+    required L10nGenerationRootLease lease,
+    required _GenerationTreeSnapshot frozenSnapshot,
+  }) : _lease = lease,
+       _frozenSnapshot = frozenSnapshot;
+
+  final L10nGenerationRootLease _lease;
+  final _GenerationTreeSnapshot _frozenSnapshot;
+  bool _consumed = false;
+
+  /// Canonical owned directory exposed for inventory consumers.
+  Directory get directory => _lease.directory;
+
+  /// Whether Task 9 cleanup may remove this root.
+  bool get safeToDelete => _lease.safeToDelete;
+
+  void _consumeAndValidate(_CanonicalSdk sdk) {
+    if (_consumed) {
+      throw const _ResolutionSignal(
+        code: L10nEvidenceRejectionCode.toolchainUnavailable,
+        detailCode: 'generation-working-root-capability-consumed',
+      );
+    }
+    _consumed = true;
+    if (!identical(_lease._sdk, sdk) &&
+        !_sameCanonicalSdkAuthority(_lease._sdk, sdk)) {
+      throw const _ResolutionSignal(
+        code: L10nEvidenceRejectionCode.toolchainUnavailable,
+        detailCode: 'generation-working-root-authority-drift',
+      );
+    }
+    late final _GenerationTreeSnapshot current;
+    try {
+      current = _captureGenerationTree(
+        directory.path,
+        statAuthority: sdk.statAuthority,
+        expectedRootIdentity: _lease._rootIdentity,
+        requireExactRootMode: true,
+      );
+    } on _GenerationRootSignal catch (signal) {
+      _lease.markUnsafeToDelete();
+      throw _ResolutionSignal(
+        code: L10nEvidenceRejectionCode.toolchainUnavailable,
+        detailCode: signal.detailCode,
+      );
+    }
+    if (!_sameGenerationTreeSnapshot(current, _frozenSnapshot)) {
+      _lease.markUnsafeToDelete();
+      throw const _ResolutionSignal(
+        code: L10nEvidenceRejectionCode.toolchainUnavailable,
+        detailCode: 'generation-working-root-inventory-drift',
+      );
+    }
+  }
+
+  void _validatePostRun(_CanonicalSdk sdk) {
+    try {
+      _captureGenerationTree(
+        directory.path,
+        statAuthority: sdk.statAuthority,
+        expectedRootIdentity: _lease._rootIdentity,
+        requireExactRootMode: true,
+      );
+    } catch (_) {
+      _lease.markUnsafeToDelete();
+      throw const _ResolutionSignal(
+        code: L10nEvidenceRejectionCode.toolchainUnavailable,
+        detailCode: 'generation-working-root-postcondition-failed',
+      );
+    }
+  }
+
+  void _markUnsafeToDelete() => _lease.markUnsafeToDelete();
+}
+
 /// Frozen direct Dart launcher for the bound Flutter-tools snapshot.
 final class L10nToolchainLaunch {
   /// Creates unbound physical fields for immutable result reconstruction.
@@ -135,42 +506,71 @@ final class L10nToolchainLaunch {
     required this.canonicalDartExecutable,
     required this.canonicalFlutterToolsPackageConfig,
     required this.canonicalFlutterToolsSnapshot,
-  }) : _frozenSdk = null;
+  }) : canonicalOriginalProjectRoot = null,
+       _frozenSdk = null;
 
   L10nToolchainLaunch._bound({
     required this.canonicalDartExecutable,
     required this.canonicalFlutterToolsPackageConfig,
     required this.canonicalFlutterToolsSnapshot,
+    required this.canonicalOriginalProjectRoot,
     required _CanonicalSdk frozenSdk,
   }) : _frozenSdk = frozenSdk;
 
   /// Canonical bundled Dart executable invoked for every toolchain process.
   final String canonicalDartExecutable;
 
-  /// Canonical Flutter-tools package configuration passed to Dart.
+  /// Canonical Flutter-tools package configuration frozen as cache provenance.
+  ///
+  /// The precompiled snapshot is launched without `--packages`; external
+  /// package roots and pubspecs are path/content provenance controls, not
+  /// runtime source-execution authority.
   final String canonicalFlutterToolsPackageConfig;
 
   /// Canonical Flutter-tools snapshot passed to Dart.
   final String canonicalFlutterToolsSnapshot;
 
+  /// Canonical frozen original project root for generation separation.
+  final String? canonicalOriginalProjectRoot;
+
   final _CanonicalSdk? _frozenSdk;
+
+  /// Creates the only root lease accepted by [runGeneration].
+  L10nGenerationRootLease createGenerationRootLease() {
+    final sdk = _frozenSdk;
+    if (sdk == null) {
+      throw const L10nToolchainLaunchException('frozen-launch-drift');
+    }
+    try {
+      return _createGenerationRootLease(sdk);
+    } on _GenerationRootSignal catch (signal) {
+      throw L10nToolchainLaunchException(signal.detailCode);
+    } on _ResolutionSignal {
+      throw const L10nToolchainLaunchException(
+        'generation-working-root-unavailable',
+      );
+    } catch (_) {
+      throw const L10nToolchainLaunchException(
+        'generation-working-root-unavailable',
+      );
+    }
+  }
 
   List<String> _physicalArgumentsFor(Iterable<String> logicalArguments) =>
       List<String>.unmodifiable([
-        '--packages=$canonicalFlutterToolsPackageConfig',
         canonicalFlutterToolsSnapshot,
         ...List<String>.of(logicalArguments),
       ]);
 
   /// Runs generation through the same isolated, revalidated snapshot seam.
   Future<ManagedProcessResult> runGeneration({
-    required ProcessExecutionRunner processRunner,
-    required Directory workingDirectory,
+    required L10nGenerationWorkingRoot workingRoot,
     required L10nToolchainResolved expected,
     required List<String> logicalArguments,
     required Duration timeout,
     required int maxOutputBytesPerStream,
   }) async {
+    var processAttempted = false;
     try {
       if (timeout <= Duration.zero || maxOutputBytesPerStream < 0) {
         throw const _ResolutionSignal(
@@ -189,8 +589,31 @@ final class L10nToolchainLaunch {
           detailCode: 'frozen-command-drift',
         );
       }
-      final canonicalWorkingDirectory = _validatedProjectRoot(workingDirectory);
-      final sdk = _canonicalSdkFor(expected.canonicalFlutterExecutable);
+      final frozenSdk = _frozenSdk;
+      if (frozenSdk == null) {
+        throw const _ResolutionSignal(
+          code: L10nEvidenceRejectionCode.toolchainUnavailable,
+          detailCode: 'frozen-launch-drift',
+        );
+      }
+      final sdk = _canonicalSdkFor(
+        expected.canonicalFlutterExecutable,
+        processConfinement: frozenSdk.processConfinement,
+        executionRunner: frozenSdk.executionRunner,
+        testExecutionRunner: frozenSdk.testExecutionRunner,
+        canonicalOriginalProjectRoot: frozenSdk.originalProjectRoot,
+      );
+      final canonicalWorkingDirectory = _canonicalSandboxProtectedDirectory(
+        workingRoot.directory.path,
+        role: 'generation-run',
+      );
+      if (_rootsOverlap(canonicalWorkingDirectory, sdk.originalProjectRoot) ||
+          _rootsOverlap(canonicalWorkingDirectory, sdk.root)) {
+        throw const _ResolutionSignal(
+          code: L10nEvidenceRejectionCode.toolchainUnavailable,
+          detailCode: 'generation-working-root-unsupported',
+        );
+      }
       if (sdk.root != expected.canonicalSdkRoot ||
           !_sameLaunch(sdk.launch, this) ||
           !_sameStringMap(
@@ -214,27 +637,41 @@ final class L10nToolchainLaunch {
         sdk,
         detailCode: 'generation-toolchain-drift',
       );
-      final result = await _runSnapshotProcess(
-        processRunner: processRunner,
-        launch: this,
-        logicalArguments: frozenLogicalArguments,
-        workingDirectory: canonicalWorkingDirectory,
-        environmentOverrides: expected.environmentOverrides,
-        sdk: sdk,
-        role: 'generation-run',
-        sdkDriftDetailCode: 'generation-toolchain-drift',
-        timeout: timeout,
-        maxOutputBytesPerStream: maxOutputBytesPerStream,
-      );
-      _requireSdkStillMatches(
-        expected.canonicalFlutterExecutable,
-        sdk,
-        detailCode: 'generation-toolchain-drift',
-      );
-      return result;
+      workingRoot._consumeAndValidate(sdk);
+      processAttempted = true;
+      var terminationUnconfirmed = false;
+      try {
+        final result = await _runSnapshotProcess(
+          processRunner: frozenSdk.executionRunner,
+          launch: this,
+          logicalArguments: frozenLogicalArguments,
+          workingDirectory: canonicalWorkingDirectory,
+          environmentOverrides: expected.environmentOverrides,
+          sdk: sdk,
+          role: 'generation-run',
+          sdkDriftDetailCode: 'generation-toolchain-drift',
+          timeout: timeout,
+          maxOutputBytesPerStream: maxOutputBytesPerStream,
+        );
+        _requireSdkStillMatches(
+          expected.canonicalFlutterExecutable,
+          sdk,
+          detailCode: 'generation-toolchain-drift',
+        );
+        return result;
+      } on _ResolutionSignal catch (signal) {
+        if (signal.detailCode == 'generation-run-termination-unconfirmed') {
+          terminationUnconfirmed = true;
+          workingRoot._markUnsafeToDelete();
+        }
+        rethrow;
+      } finally {
+        if (!terminationUnconfirmed) workingRoot._validatePostRun(sdk);
+      }
     } on _ResolutionSignal catch (signal) {
       throw L10nToolchainLaunchException(signal.detailCode);
     } catch (_) {
+      if (processAttempted) workingRoot._markUnsafeToDelete();
       throw const L10nToolchainLaunchException(
         'generation-run-unexpected-failure',
       );
@@ -362,14 +799,40 @@ abstract interface class L10nToolchainResolver {
   });
 }
 
-/// Default fail-closed toolchain resolver backed by a managed process runner.
+/// Default fail-closed resolver with a frozen production managed runner.
+///
+/// The Dart process is an in-process trust boundary: production offers no
+/// runner or confinement injection, while the explicit test-only constructor
+/// freezes an exact marker runner that only composes guarded argv.
 final class DefaultL10nToolchainResolver implements L10nToolchainResolver {
-  /// Creates a resolver using [processRunner] for argv-only machine probes.
-  const DefaultL10nToolchainResolver({
-    required ProcessExecutionRunner processRunner,
-  }) : _processRunner = processRunner;
+  /// Creates the production resolver with its non-injectable managed runner.
+  const DefaultL10nToolchainResolver()
+    : _processRunner = const ManagedProcessRunner(),
+      _processConfinement = const DefaultL10nProcessConfinementBackend(),
+      _testExecutionRunner = null;
+
+  /// Creates a resolver for unit tests that only compose guarded argv.
+  ///
+  /// A launch resolved here is frozen to the identical marker runner and
+  /// cannot later execute through a production managed runner.
+  DefaultL10nToolchainResolver.testing({
+    required L10nTestProcessRunner processRunner,
+    required L10nProcessConfinementBackend processConfinement,
+  }) : _processRunner = processRunner,
+       _processConfinement = processConfinement,
+       _testExecutionRunner = processRunner {
+    if (processRunner is ManagedProcessRunner) {
+      throw ArgumentError.value(
+        processRunner,
+        'processRunner',
+        'must not be a production managed runner',
+      );
+    }
+  }
 
   final ProcessExecutionRunner _processRunner;
+  final L10nProcessConfinementBackend _processConfinement;
+  final L10nTestProcessRunner? _testExecutionRunner;
 
   @override
   Future<L10nToolchainResolution> resolve({
@@ -377,20 +840,13 @@ final class DefaultL10nToolchainResolver implements L10nToolchainResolver {
     required L10nSdkRegistry sdkRegistry,
     required L10nToolchainSelection selection,
   }) async {
-    if (Platform.isWindows) {
-      return const L10nToolchainRejected(
-        L10nEvidenceFailure(
-          code: L10nEvidenceRejectionCode.unsupportedConfiguration,
-          stage: _resolutionStage,
-          detailCode: 'windows-command-model-unsupported',
-        ),
-      );
-    }
     try {
+      _requireProductionConfinementAvailable();
       final workingDirectory = _validatedProjectRoot(originalProjectRoot);
+      final canonicalProject = Directory(workingDirectory);
       final selected = switch (selection) {
         ProjectSelectorSelection() => _projectSelection(
-          originalProjectRoot,
+          canonicalProject,
           sdkRegistry,
         ),
         RetainedEvidenceSelection() => _retainedSelection(
@@ -398,7 +854,13 @@ final class DefaultL10nToolchainResolver implements L10nToolchainResolver {
           sdkRegistry,
         ),
       };
-      final sdk = _canonicalSdkFor(selected.registeredExecutable);
+      final sdk = _canonicalSdkFor(
+        selected.registeredExecutable,
+        processConfinement: _processConfinement,
+        executionRunner: _processRunner,
+        testExecutionRunner: _testExecutionRunner,
+        canonicalOriginalProjectRoot: workingDirectory,
+      );
       final environmentOverrides = _frozenEnvironmentOverrides(sdk.root);
       final controlIdentity = _validatedSdkMachineIdentity(
         sdk,
@@ -434,7 +896,7 @@ final class DefaultL10nToolchainResolver implements L10nToolchainResolver {
 
       if (selection is ProjectSelectorSelection) {
         _requireSelectorsStillMatch(
-          originalProjectRoot,
+          canonicalProject,
           version: selected.version,
           hashes: selected.selectorHashes,
           detailCode: 'selector-changed-during-probe',
@@ -499,14 +961,17 @@ final class DefaultL10nToolchainResolver implements L10nToolchainResolver {
     required Directory originalProjectRoot,
     required L10nToolchainResolved expected,
   }) async {
-    if (Platform.isWindows) {
-      return _changed('windows-command-model-unsupported');
+    try {
+      _requireProductionConfinementAvailable();
+    } on _ResolutionSignal catch (signal) {
+      return _changed(signal.detailCode);
     }
     if (!_validFrozenCommands(expected)) {
       return _changed('frozen-command-drift');
     }
     try {
       final workingDirectory = _validatedProjectRoot(originalProjectRoot);
+      final canonicalProject = Directory(workingDirectory);
       final expectedVersion = expected.machineIdentity.frameworkVersion;
       if (!_isSupportedVersion(expectedVersion) ||
           !_isCompleteIdentity(expected.machineIdentity)) {
@@ -515,7 +980,7 @@ final class DefaultL10nToolchainResolver implements L10nToolchainResolver {
 
       late final Map<String, String> selectorHashes;
       if (expected.selection is ProjectSelectorSelection) {
-        final selector = _readProjectSelectors(originalProjectRoot);
+        final selector = _readProjectSelectors(canonicalProject);
         if (!_sameStringSet(
           selector.hashes.keys,
           expected.selectorHashesByRelativePath.keys,
@@ -549,16 +1014,22 @@ final class DefaultL10nToolchainResolver implements L10nToolchainResolver {
 
       late final _CanonicalSdk sdk;
       try {
-        sdk = _canonicalSdkFor(expected.canonicalFlutterExecutable);
+        sdk = _canonicalSdkFor(
+          expected.canonicalFlutterExecutable,
+          processConfinement: _processConfinement,
+          executionRunner: _processRunner,
+          testExecutionRunner: _testExecutionRunner,
+          canonicalOriginalProjectRoot: workingDirectory,
+        );
       } on _ResolutionSignal catch (signal) {
         if (_isGitIdentityDetail(signal.detailCode)) {
           return _changed(signal.detailCode, relativePath: signal.relativePath);
         }
-        return _changed(
-          signal.detailCode == 'registry-executable-unavailable'
-              ? 'canonical-executable-drift'
-              : 'canonical-sdk-drift',
-        );
+        return _changed(switch (signal.detailCode) {
+          'registry-executable-unavailable' => 'canonical-executable-drift',
+          'os-confinement-unsupported' => signal.detailCode,
+          _ => 'canonical-sdk-drift',
+        });
       }
       if (sdk.executable != expected.canonicalFlutterExecutable) {
         return _changed('canonical-executable-drift');
@@ -605,7 +1076,7 @@ final class DefaultL10nToolchainResolver implements L10nToolchainResolver {
 
       if (expected.selection is ProjectSelectorSelection) {
         _requireSelectorsStillMatch(
-          originalProjectRoot,
+          canonicalProject,
           version: expectedVersion,
           hashes: selectorHashes,
           detailCode: 'selector-changed-during-probe',
@@ -647,6 +1118,20 @@ final class DefaultL10nToolchainResolver implements L10nToolchainResolver {
       return _changed(signal.detailCode, relativePath: signal.relativePath);
     } catch (_) {
       return _changed('unexpected-revalidation-failure');
+    }
+  }
+
+  void _requireProductionConfinementAvailable() {
+    if (_testExecutionRunner != null) return;
+    try {
+      _processConfinement.captureAuthority();
+    } on L10nProcessConfinementException catch (error) {
+      throw _ResolutionSignal(
+        code: error.detailCode == 'os-confinement-unsupported'
+            ? L10nEvidenceRejectionCode.unsupportedConfiguration
+            : L10nEvidenceRejectionCode.toolchainUnavailable,
+        detailCode: error.detailCode,
+      );
     }
   }
 
@@ -799,15 +1284,32 @@ Future<ManagedProcessResult> _runSnapshotProcess({
       sdk,
       detailCode: sdkDriftDetailCode,
     );
+    final confined = sdk.processConfinement.confine(
+      expectedAuthority: sdk.confinementAuthority,
+      sandboxRoot: sandbox.root.path,
+      writableRoot: role == 'generation-run' ? canonicalWorkingDirectory : null,
+      executable: launch.canonicalDartExecutable,
+      arguments: launch._physicalArgumentsFor(logicalArguments),
+    );
     final result = await processRunner.run(
-      launch.canonicalDartExecutable,
-      launch._physicalArgumentsFor(logicalArguments),
+      confined.executable,
+      confined.arguments,
       workingDirectory: workingDirectory,
       timeout: timeout,
       maxOutputBytesPerStream: maxOutputBytesPerStream,
       environmentOverrides: sandbox.environmentOverrides,
       includeParentEnvironment: false,
     );
+    if (!_sameConfinementAuthority(
+      sdk.processConfinement.captureAuthority(),
+      sdk.confinementAuthority,
+    )) {
+      retainSandbox = true;
+      throw _ResolutionSignal(
+        code: L10nEvidenceRejectionCode.toolchainUnavailable,
+        detailCode: '$role-confinement-drift',
+      );
+    }
     _requireSdkStillMatches(
       sdk.executable,
       sdk,
@@ -822,6 +1324,18 @@ Future<ManagedProcessResult> _runSnapshotProcess({
     );
   } on _ResolutionSignal {
     rethrow;
+  } on L10nProcessConfinementException catch (error) {
+    if (error.detailCode == 'host-confinement-authority-drift') {
+      retainSandbox = true;
+    }
+    throw _ResolutionSignal(
+      code: error.detailCode == 'os-confinement-unsupported'
+          ? L10nEvidenceRejectionCode.unsupportedConfiguration
+          : L10nEvidenceRejectionCode.toolchainUnavailable,
+      detailCode: error.detailCode == 'host-confinement-authority-drift'
+          ? '$role-confinement-drift'
+          : error.detailCode,
+    );
   } catch (_) {
     throw _ResolutionSignal(
       code: L10nEvidenceRejectionCode.toolchainUnavailable,
@@ -842,17 +1356,22 @@ _ProbeSandbox _createProbeSandbox({
 }) {
   _requireHostExecutableStillMatches(sdk.chmodAuthority);
   _requireHostExecutableStillMatches(sdk.shellAuthority);
+  _requireHostExecutableStillMatches(sdk.statAuthority);
   Directory? root;
+  _HostPathIdentity? createdIdentity;
   try {
     final systemTemp = Directory.systemTemp.absolute;
     final canonicalSystemTemp = p.normalize(
       systemTemp.resolveSymbolicLinksSync(),
     );
+    final pubCache =
+        sdk.launchManifest.packageResolutionAuthority.canonicalPubCache;
     if (_sandboxLocationConflicts(
           canonicalSystemTemp,
           canonicalWorkingDirectory,
         ) ||
-        _sandboxLocationConflicts(canonicalSystemTemp, sdk.root)) {
+        _sandboxLocationConflicts(canonicalSystemTemp, sdk.root) ||
+        _sandboxLocationConflicts(canonicalSystemTemp, pubCache)) {
       throw _ResolutionSignal(
         code: L10nEvidenceRejectionCode.toolchainUnavailable,
         detailCode: '$role-sandbox-location-unsupported',
@@ -868,13 +1387,18 @@ _ProbeSandbox _createProbeSandbox({
       throw const FormatException();
     }
     if (_sandboxLocationConflicts(canonicalRoot, canonicalWorkingDirectory) ||
-        _sandboxLocationConflicts(canonicalRoot, sdk.root)) {
+        _sandboxLocationConflicts(canonicalRoot, sdk.root) ||
+        _sandboxLocationConflicts(canonicalRoot, pubCache)) {
       throw _ResolutionSignal(
         code: L10nEvidenceRejectionCode.toolchainUnavailable,
         detailCode: '$role-sandbox-location-unsupported',
       );
     }
     root = Directory(canonicalRoot);
+    createdIdentity = _captureHostPathIdentity(
+      canonicalRoot,
+      statAuthority: sdk.statAuthority,
+    );
     final environment = <String, String>{...fixedEnvironmentOverrides};
     for (final entry in _sandboxDirectoryRoles.entries) {
       final directory = Directory(p.join(canonicalRoot, entry.value))
@@ -905,34 +1429,74 @@ _ProbeSandbox _createProbeSandbox({
       stderrEncoding: utf8,
     );
     if (chmodResult.exitCode != 0) throw const FormatException();
+    final rootIdentity = _captureHostPathIdentity(
+      canonicalRoot,
+      statAuthority: sdk.statAuthority,
+    );
+    final whichIdentity = _captureHostPathIdentity(
+      which.path,
+      statAuthority: sdk.statAuthority,
+    );
+    if (rootIdentity.entityType != _HostPathEntityType.directory ||
+        rootIdentity.posixMode != 0x1c0 ||
+        whichIdentity.entityType != _HostPathEntityType.regularFile ||
+        whichIdentity.posixMode != 0x1c0 ||
+        whichIdentity.linkCount != 1 ||
+        whichIdentity.device != rootIdentity.device) {
+      throw const FormatException();
+    }
     final sandbox = _ProbeSandbox(
       root: Directory(canonicalRoot),
       environmentOverrides: environment,
       whichCanonicalPath: p.normalize(which.resolveSymbolicLinksSync()),
       rootState: Directory(canonicalRoot).statSync(),
       whichState: which.statSync(),
+      rootIdentity: rootIdentity,
+      whichIdentity: whichIdentity,
+      statAuthority: sdk.statAuthority,
     );
     _validateProbeSandbox(sandbox);
     _requireHostExecutableStillMatches(sdk.chmodAuthority);
     _requireHostExecutableStillMatches(sdk.shellAuthority);
+    _requireHostExecutableStillMatches(sdk.statAuthority);
     return sandbox;
   } on _ResolutionSignal {
-    _cleanupUnlaunchedProbeSandbox(root, role: role);
+    _cleanupUnlaunchedProbeSandbox(
+      root,
+      role: role,
+      expectedIdentity: createdIdentity,
+      statAuthority: sdk.statAuthority,
+    );
     rethrow;
   } on FileSystemException {
-    _cleanupUnlaunchedProbeSandbox(root, role: role);
+    _cleanupUnlaunchedProbeSandbox(
+      root,
+      role: role,
+      expectedIdentity: createdIdentity,
+      statAuthority: sdk.statAuthority,
+    );
     throw _ResolutionSignal(
       code: L10nEvidenceRejectionCode.toolchainUnavailable,
       detailCode: '$role-sandbox-unavailable',
     );
   } on ProcessException {
-    _cleanupUnlaunchedProbeSandbox(root, role: role);
+    _cleanupUnlaunchedProbeSandbox(
+      root,
+      role: role,
+      expectedIdentity: createdIdentity,
+      statAuthority: sdk.statAuthority,
+    );
     throw _ResolutionSignal(
       code: L10nEvidenceRejectionCode.toolchainUnavailable,
       detailCode: '$role-sandbox-unavailable',
     );
   } on FormatException {
-    _cleanupUnlaunchedProbeSandbox(root, role: role);
+    _cleanupUnlaunchedProbeSandbox(
+      root,
+      role: role,
+      expectedIdentity: createdIdentity,
+      statAuthority: sdk.statAuthority,
+    );
     throw _ResolutionSignal(
       code: L10nEvidenceRejectionCode.toolchainUnavailable,
       detailCode: '$role-sandbox-unavailable',
@@ -966,6 +1530,163 @@ String _canonicalSandboxProtectedDirectory(
 bool _sandboxLocationConflicts(String candidate, String protectedRoot) =>
     candidate == protectedRoot || p.isWithin(protectedRoot, candidate);
 
+bool _rootsOverlap(String left, String right) =>
+    left == right || p.isWithin(left, right) || p.isWithin(right, left);
+
+L10nGenerationRootLease _createGenerationRootLease(_CanonicalSdk sdk) {
+  _requireHostExecutableStillMatches(sdk.chmodAuthority);
+  _requireHostExecutableStillMatches(sdk.statAuthority);
+  Directory? root;
+  String? canonicalSystemTemp;
+  _HostPathIdentity? createdIdentity;
+  var returnedLease = false;
+  try {
+    canonicalSystemTemp = p.normalize(
+      Directory.systemTemp.absolute.resolveSymbolicLinksSync(),
+    );
+    final pubCache =
+        sdk.launchManifest.packageResolutionAuthority.canonicalPubCache;
+    if (_sandboxLocationConflicts(
+          canonicalSystemTemp,
+          sdk.originalProjectRoot,
+        ) ||
+        _sandboxLocationConflicts(canonicalSystemTemp, sdk.root) ||
+        _sandboxLocationConflicts(canonicalSystemTemp, pubCache)) {
+      throw const _GenerationRootSignal(
+        'generation-working-root-location-unsupported',
+      );
+    }
+    root = Directory(
+      canonicalSystemTemp,
+    ).createTempSync('flutter-pruner-l10n-generation-');
+    final canonicalRoot = p.normalize(root.resolveSymbolicLinksSync());
+    if (!p.isWithin(canonicalSystemTemp, canonicalRoot) ||
+        _rootsOverlap(canonicalRoot, sdk.originalProjectRoot) ||
+        _rootsOverlap(canonicalRoot, sdk.root) ||
+        _rootsOverlap(canonicalRoot, pubCache)) {
+      throw const _GenerationRootSignal(
+        'generation-working-root-location-unsupported',
+      );
+    }
+    root = Directory(canonicalRoot);
+    createdIdentity = _captureHostPathIdentity(
+      canonicalRoot,
+      statAuthority: sdk.statAuthority,
+    );
+    final chmod = Process.runSync(
+      sdk.chmodAuthority.canonicalPath,
+      ['700', canonicalRoot],
+      workingDirectory: canonicalSystemTemp,
+      environment: const {'LANG': 'C', 'LC_ALL': 'C'},
+      includeParentEnvironment: false,
+      stdoutEncoding: utf8,
+      stderrEncoding: utf8,
+    );
+    if (chmod.exitCode != 0) {
+      throw const _GenerationRootSignal('generation-working-root-unavailable');
+    }
+    _requireHostExecutableStillMatches(sdk.chmodAuthority);
+    _requireHostExecutableStillMatches(sdk.statAuthority);
+    final identity = _captureHostPathIdentity(
+      canonicalRoot,
+      statAuthority: sdk.statAuthority,
+    );
+    if (identity.entityType != _HostPathEntityType.directory ||
+        identity.posixMode != 0x1c0) {
+      throw const _GenerationRootSignal('generation-working-root-unavailable');
+    }
+    final lease = L10nGenerationRootLease._(
+      directory: Directory(canonicalRoot),
+      sdk: sdk,
+      rootIdentity: identity,
+    );
+    returnedLease = true;
+    return lease;
+  } on _GenerationRootSignal {
+    rethrow;
+  } on FileSystemException {
+    throw const _GenerationRootSignal('generation-working-root-unavailable');
+  } on ProcessException {
+    throw const _GenerationRootSignal('generation-working-root-unavailable');
+  } finally {
+    if (!returnedLease && root != null && canonicalSystemTemp != null) {
+      try {
+        if (createdIdentity == null) {
+          throw const _GenerationRootSignal(
+            'generation-working-root-creation-cleanup-unconfirmed',
+          );
+        }
+        final canonicalRoot = p.normalize(root.resolveSymbolicLinksSync());
+        final currentIdentity = _captureHostPathIdentity(
+          canonicalRoot,
+          statAuthority: sdk.statAuthority,
+        );
+        if (!p.isWithin(canonicalSystemTemp, canonicalRoot) ||
+            !_sameGenerationRootIdentity(currentIdentity, createdIdentity)) {
+          throw const _GenerationRootSignal(
+            'generation-working-root-creation-cleanup-unconfirmed',
+          );
+        }
+        Directory(canonicalRoot).deleteSync(recursive: true);
+        if (FileSystemEntity.typeSync(canonicalRoot, followLinks: false) !=
+            FileSystemEntityType.notFound) {
+          throw const _GenerationRootSignal(
+            'generation-working-root-creation-cleanup-unconfirmed',
+          );
+        }
+      } catch (_) {
+        throw const _GenerationRootSignal(
+          'generation-working-root-creation-cleanup-unconfirmed',
+        );
+      }
+    }
+  }
+}
+
+String _darwinConfinementPolicyIdentity() {
+  final hasher = _FramedIdentityHasher();
+  hasher.addText('schema', 'darwin-sandbox-exec-policy-v1');
+  hasher.addText('probeProfile', _darwinProbeProfile);
+  hasher.addText('generationProfile', _darwinGenerationProfile);
+  hasher.addText('sandboxParameter', 'SANDBOX_ROOT');
+  hasher.addText('generationParameter', 'WRITE_ROOT');
+  return hasher.digest();
+}
+
+String _canonicalConfinementRoot(String path) {
+  try {
+    final normalized = p.normalize(path);
+    if (!p.isAbsolute(normalized) ||
+        path.contains('\u0000') ||
+        FileSystemEntity.typeSync(normalized, followLinks: false) !=
+            FileSystemEntityType.directory) {
+      throw const FormatException();
+    }
+    final canonical = p.normalize(
+      Directory(normalized).resolveSymbolicLinksSync(),
+    );
+    if (canonical != normalized) throw const FormatException();
+    return canonical;
+  } on FileSystemException {
+    throw const L10nProcessConfinementException('confinement-root-invalid');
+  } on FormatException {
+    throw const L10nProcessConfinementException('confinement-root-invalid');
+  }
+}
+
+bool _sameConfinementAuthority(
+  L10nProcessConfinementAuthority left,
+  L10nProcessConfinementAuthority right,
+) =>
+    left.backendIdentity == right.backendIdentity &&
+    left.requestedExecutable == right.requestedExecutable &&
+    left.requestedExecutableType == right.requestedExecutableType &&
+    left.canonicalExecutable == right.canonicalExecutable &&
+    left.executableSha256 == right.executableSha256 &&
+    left.executableByteLength == right.executableByteLength &&
+    left.executablePosixMode == right.executablePosixMode &&
+    left.policyIdentity == right.policyIdentity;
+
 void _validateAndCleanupProbeSandbox(
   _ProbeSandbox sandbox, {
   required String role,
@@ -987,16 +1708,26 @@ void _validateAndCleanupProbeSandbox(
       code: L10nEvidenceRejectionCode.toolchainUnavailable,
       detailCode: '$role-sandbox-cleanup-unconfirmed',
     );
+  } on _ResolutionSignal {
+    throw _ResolutionSignal(
+      code: L10nEvidenceRejectionCode.toolchainUnavailable,
+      detailCode: '$role-sandbox-cleanup-unconfirmed',
+    );
   }
 }
 
 void _validateProbeSandbox(_ProbeSandbox sandbox) {
   final rootPath = p.normalize(sandbox.root.absolute.path);
   final rootBefore = sandbox.root.statSync();
+  final rootIdentityBefore = _captureHostPathIdentity(
+    rootPath,
+    statAuthority: sandbox.statAuthority,
+  );
   if (FileSystemEntity.typeSync(rootPath, followLinks: false) !=
           FileSystemEntityType.directory ||
       p.normalize(sandbox.root.resolveSymbolicLinksSync()) != rootPath ||
       rootBefore.mode & 0xfff != 0x1c0 ||
+      !_sameHostPathIdentity(rootIdentityBefore, sandbox.rootIdentity) ||
       !_sameArtifactFileState(rootBefore, sandbox.rootState)) {
     throw const FormatException();
   }
@@ -1013,28 +1744,49 @@ void _validateProbeSandbox(_ProbeSandbox sandbox) {
   }
   final which = File(p.join(sandbox.environmentOverrides['PATH']!, 'which'));
   final before = which.statSync();
+  final whichIdentityBefore = _captureHostPathIdentity(
+    which.path,
+    statAuthority: sandbox.statAuthority,
+  );
   if (FileSystemEntity.typeSync(which.path, followLinks: false) !=
           FileSystemEntityType.file ||
       p.normalize(which.resolveSymbolicLinksSync()) !=
           sandbox.whichCanonicalPath ||
       before.mode & 0xfff != 0x1c0 ||
+      !_sameHostPathIdentity(whichIdentityBefore, sandbox.whichIdentity) ||
       !_sameArtifactFileState(before, sandbox.whichState) ||
       !_sameBytes(which.readAsBytesSync(), _sandboxWhichBytes)) {
     throw const FormatException();
   }
   final after = which.statSync();
   final rootAfter = sandbox.root.statSync();
+  final whichIdentityAfter = _captureHostPathIdentity(
+    which.path,
+    statAuthority: sandbox.statAuthority,
+  );
+  final rootIdentityAfter = _captureHostPathIdentity(
+    rootPath,
+    statAuthority: sandbox.statAuthority,
+  );
   if (!_sameArtifactFileState(before, after) ||
       !_sameArtifactFileState(after, sandbox.whichState) ||
+      !_sameHostPathIdentity(whichIdentityAfter, sandbox.whichIdentity) ||
       !_sameArtifactFileState(rootBefore, rootAfter) ||
-      !_sameArtifactFileState(rootAfter, sandbox.rootState)) {
+      !_sameArtifactFileState(rootAfter, sandbox.rootState) ||
+      !_sameHostPathIdentity(rootIdentityAfter, sandbox.rootIdentity)) {
     throw const FormatException();
   }
 }
 
-void _cleanupUnlaunchedProbeSandbox(Directory? root, {required String role}) {
+void _cleanupUnlaunchedProbeSandbox(
+  Directory? root, {
+  required String role,
+  required _HostPathIdentity? expectedIdentity,
+  required _HostExecutableAuthority statAuthority,
+}) {
   if (root == null) return;
   try {
+    if (expectedIdentity == null) throw const FormatException();
     final canonicalSystemTemp = p.normalize(
       Directory.systemTemp.absolute.resolveSymbolicLinksSync(),
     );
@@ -1044,6 +1796,13 @@ void _cleanupUnlaunchedProbeSandbox(Directory? root, {required String role}) {
     }
     final canonicalRoot = p.normalize(root.resolveSymbolicLinksSync());
     if (!p.isWithin(canonicalSystemTemp, canonicalRoot)) {
+      throw const FormatException();
+    }
+    final currentIdentity = _captureHostPathIdentity(
+      canonicalRoot,
+      statAuthority: statAuthority,
+    );
+    if (!_sameGenerationRootIdentity(currentIdentity, expectedIdentity)) {
       throw const FormatException();
     }
     Directory(canonicalRoot).deleteSync(recursive: true);
@@ -1057,6 +1816,11 @@ void _cleanupUnlaunchedProbeSandbox(Directory? root, {required String role}) {
       detailCode: '$role-sandbox-cleanup-unconfirmed',
     );
   } on FormatException {
+    throw _ResolutionSignal(
+      code: L10nEvidenceRejectionCode.toolchainUnavailable,
+      detailCode: '$role-sandbox-cleanup-unconfirmed',
+    );
+  } on _ResolutionSignal {
     throw _ResolutionSignal(
       code: L10nEvidenceRejectionCode.toolchainUnavailable,
       detailCode: '$role-sandbox-cleanup-unconfirmed',
@@ -1229,7 +1993,13 @@ void _requireSdkStillMatches(
 }) {
   late final _CanonicalSdk current;
   try {
-    current = _canonicalSdkFor(registeredExecutable);
+    current = _canonicalSdkFor(
+      registeredExecutable,
+      processConfinement: expected.processConfinement,
+      executionRunner: expected.executionRunner,
+      testExecutionRunner: expected.testExecutionRunner,
+      canonicalOriginalProjectRoot: expected.originalProjectRoot,
+    );
   } on _ResolutionSignal {
     throw _ResolutionSignal(
       code: L10nEvidenceRejectionCode.toolchainUnavailable,
@@ -1247,24 +2017,42 @@ void _requireSdkStillMatches(
 bool _sameCanonicalSdkAuthority(_CanonicalSdk left, _CanonicalSdk right) =>
     left.executable == right.executable &&
     left.root == right.root &&
+    left.originalProjectRoot == right.originalProjectRoot &&
+    identical(left.executionRunner, right.executionRunner) &&
+    identical(left.testExecutionRunner, right.testExecutionRunner) &&
     _sameCanonicalGitHead(left.gitHead, right.gitHead) &&
     _samePosixLaunchManifest(left.launchManifest, right.launchManifest) &&
     _sameHostExecutableAuthority(left.shellAuthority, right.shellAuthority) &&
-    _sameHostExecutableAuthority(left.chmodAuthority, right.chmodAuthority);
+    _sameHostExecutableAuthority(left.chmodAuthority, right.chmodAuthority) &&
+    _sameHostExecutableAuthority(left.statAuthority, right.statAuthority) &&
+    _sameConfinementAuthority(
+      left.confinementAuthority,
+      right.confinementAuthority,
+    );
 
 String _validatedProjectRoot(Directory originalProjectRoot) {
-  final absolute = p.normalize(originalProjectRoot.absolute.path);
-  if (FileSystemEntity.typeSync(absolute, followLinks: true) !=
-      FileSystemEntityType.directory) {
+  try {
+    final absolute = p.normalize(originalProjectRoot.absolute.path);
+    if (FileSystemEntity.typeSync(absolute, followLinks: true) !=
+        FileSystemEntityType.directory) {
+      throw const FileSystemException();
+    }
+    return p.normalize(Directory(absolute).resolveSymbolicLinksSync());
+  } on FileSystemException {
     throw const _ResolutionSignal(
       code: L10nEvidenceRejectionCode.toolchainUnavailable,
       detailCode: 'project-root-unavailable',
     );
   }
-  return absolute;
 }
 
-_CanonicalSdk _canonicalSdkFor(String registeredExecutable) {
+_CanonicalSdk _canonicalSdkFor(
+  String registeredExecutable, {
+  required L10nProcessConfinementBackend processConfinement,
+  required ProcessExecutionRunner executionRunner,
+  required L10nTestProcessRunner? testExecutionRunner,
+  required String canonicalOriginalProjectRoot,
+}) {
   try {
     final requested = File(
       p.normalize(File(registeredExecutable).absolute.path),
@@ -1307,8 +2095,19 @@ _CanonicalSdk _canonicalSdkFor(String registeredExecutable) {
 
     final gitHead = _captureCanonicalGitHead(root);
     final launchManifest = _capturePosixLaunchManifest(root);
+    final pubCache =
+        launchManifest.packageResolutionAuthority.canonicalPubCache;
+    if (_rootsOverlap(pubCache, root) ||
+        _rootsOverlap(pubCache, canonicalOriginalProjectRoot)) {
+      throw const _ResolutionSignal(
+        code: L10nEvidenceRejectionCode.toolchainUnavailable,
+        detailCode: 'registry-sdk-package-config-invalid',
+      );
+    }
     final shellAuthority = _captureHostExecutable('/bin/sh');
     final chmodAuthority = _captureHostExecutable('/bin/chmod');
+    final statAuthority = _captureHostExecutable('/usr/bin/stat');
+    final confinementAuthority = processConfinement.captureAuthority();
     final canonicalFlutter = launchManifest
         .entriesByRelativePath[p.join('bin', _flutterExecutableName)];
     if (canonicalFlutter == null ||
@@ -1318,10 +2117,23 @@ _CanonicalSdk _canonicalSdkFor(String registeredExecutable) {
     return _CanonicalSdk(
       executable: executable,
       root: root,
+      originalProjectRoot: canonicalOriginalProjectRoot,
       gitHead: gitHead,
       launchManifest: launchManifest,
       shellAuthority: shellAuthority,
       chmodAuthority: chmodAuthority,
+      statAuthority: statAuthority,
+      processConfinement: processConfinement,
+      confinementAuthority: confinementAuthority,
+      executionRunner: executionRunner,
+      testExecutionRunner: testExecutionRunner,
+    );
+  } on L10nProcessConfinementException catch (error) {
+    throw _ResolutionSignal(
+      code: error.detailCode == 'os-confinement-unsupported'
+          ? L10nEvidenceRejectionCode.unsupportedConfiguration
+          : L10nEvidenceRejectionCode.toolchainUnavailable,
+      detailCode: error.detailCode,
     );
   } on FileSystemException {
     throw const _ResolutionSignal(
@@ -1928,8 +2740,13 @@ _PosixLaunchManifest _capturePosixLaunchManifest(String root) {
         detailCode: 'registry-sdk-package-config-invalid',
       );
     }
-    _validateFlutterToolsPackageConfig(entries);
-    return _PosixLaunchManifest(entriesByRelativePath: entries);
+    final packageResolutionAuthority = _validateFlutterToolsPackageConfig(
+      entries,
+    );
+    return _PosixLaunchManifest(
+      entriesByRelativePath: entries,
+      packageResolutionAuthority: packageResolutionAuthority,
+    );
   } on _ResolutionSignal {
     rethrow;
   } on FileSystemException {
@@ -2125,10 +2942,19 @@ FlutterMachineIdentity _validatedSdkMachineIdentity(
     identity,
     engineContentHash: engineContentHash,
   );
-  _validateFlutterToolsPackageConfig(
+  final currentPackageResolution = _validateFlutterToolsPackageConfig(
     sdk.launchManifest.entriesByRelativePath,
     expectedDartVersion: dartSdkVersion,
   );
+  if (!_samePackageResolutionAuthority(
+    currentPackageResolution,
+    sdk.launchManifest.packageResolutionAuthority,
+  )) {
+    throw const _ResolutionSignal(
+      code: L10nEvidenceRejectionCode.toolchainUnavailable,
+      detailCode: 'registry-sdk-package-config-invalid',
+    );
+  }
   return identity;
 }
 
@@ -2279,13 +3105,23 @@ Map<String, Object?> _exactJsonObject(
   });
 }
 
-void _validateFlutterToolsPackageConfig(
+_PackageResolutionAuthority _validateFlutterToolsPackageConfig(
   Map<String, _LaunchManifestEntry> entries, {
   String? expectedDartVersion,
 }) {
-  final parsed = ArbDocument.parse(
-    _manifestFileContent(entries, _flutterToolsPackageConfigPath),
+  const invalid = _ResolutionSignal(
+    code: L10nEvidenceRejectionCode.toolchainUnavailable,
+    detailCode: 'registry-sdk-package-config-invalid',
   );
+  final packageConfigEntry = _manifestFileEntry(
+    entries,
+    _flutterToolsPackageConfigPath,
+  );
+  final packageConfigBytes = _manifestFileContent(
+    entries,
+    _flutterToolsPackageConfigPath,
+  );
+  final parsed = ArbDocument.parse(packageConfigBytes);
   const expectedKeys = {
     'configVersion',
     'packages',
@@ -2299,51 +3135,360 @@ void _validateFlutterToolsPackageConfig(
         parsed.document.members.map((member) => member.decodedKey),
         expectedKeys,
       )) {
-    throw const _ResolutionSignal(
-      code: L10nEvidenceRejectionCode.toolchainUnavailable,
-      detailCode: 'registry-sdk-package-config-invalid',
-    );
+    throw invalid;
   }
   final values = {
     for (final member in parsed.document.members)
       member.decodedKey: member.decodedValue,
   };
-  final packages = values['packages'];
+  final configVersion = values['configVersion'];
+  final packagesMember = parsed.document.members.singleWhere(
+    (member) => member.decodedKey == 'packages',
+  );
   final generatorVersion = values['generatorVersion'];
-  if (values['configVersion'] != 2 ||
-      packages is! List<Object?> ||
-      packages.isEmpty ||
+  final pubCacheValue = values['pubCache'];
+  if (configVersion is! int ||
+      configVersion != 2 ||
       values['generator'] != 'pub' ||
       generatorVersion is! String ||
-      generatorVersion.isEmpty ||
-      values['pubCache'] is! String ||
-      (values['pubCache']! as String).isEmpty ||
+      !_isExactDartVersion(generatorVersion) ||
+      pubCacheValue is! String ||
       (expectedDartVersion != null &&
           generatorVersion != expectedDartVersion)) {
+    throw invalid;
+  }
+  final dartLanguage = _majorMinor(generatorVersion);
+  final packageConfigPath = packageConfigEntry.canonicalPath;
+  final flutterToolsRoot = p.normalize(p.dirname(p.dirname(packageConfigPath)));
+  final sdkRoot = p.normalize(p.dirname(p.dirname(flutterToolsRoot)));
+  final pubCache = _canonicalLocalFileUriDirectory(pubCacheValue);
+  _requireCanonicalAuthorityDirectoryTree(pubCache, boundary: pubCache);
+  final pubCacheMode = Directory(pubCache).statSync().mode & 0xfff;
+  final rawRecords = _rawJsonArrayElements(
+    packageConfigBytes.sublist(
+      packagesMember.valueSpan.start,
+      packagesMember.valueSpan.endExclusive,
+    ),
+  );
+  if (rawRecords.isEmpty) throw invalid;
+  final names = <String>{};
+  var flutterToolsCount = 0;
+  final externalRoots = <_PackageRootAuthority>[];
+  for (final rawRecord in rawRecords) {
+    final record = ArbDocument.parse(rawRecord);
+    const recordKeys = {'name', 'rootUri', 'packageUri', 'languageVersion'};
+    if (record is! ArbParseSuccess ||
+        record.document.members.length != recordKeys.length ||
+        !_sameStringSet(
+          record.document.members.map((member) => member.decodedKey),
+          recordKeys,
+        )) {
+      throw invalid;
+    }
+    final package = {
+      for (final member in record.document.members)
+        member.decodedKey: member.decodedValue,
+    };
+    final name = package['name'];
+    final rootUri = package['rootUri'];
+    final packageUri = package['packageUri'];
+    final languageVersion = package['languageVersion'];
+    if (name is! String ||
+        !RegExp(r'^[a-z_][a-z0-9_]*$').hasMatch(name) ||
+        !names.add(name) ||
+        rootUri is! String ||
+        packageUri != 'lib/' ||
+        languageVersion is! String ||
+        !_validLanguageVersion(languageVersion, dartLanguage)) {
+      throw invalid;
+    }
+    if (name == 'flutter_tools') {
+      flutterToolsCount++;
+      if (rootUri != '../' ||
+          p.normalize(
+                Uri.file(packageConfigPath).resolve(rootUri).toFilePath(),
+              ) !=
+              flutterToolsRoot) {
+        throw invalid;
+      }
+      _requireCanonicalAuthorityDirectoryTree(
+        flutterToolsRoot,
+        boundary: sdkRoot,
+      );
+      _requirePackageLib(flutterToolsRoot, boundary: sdkRoot);
+      continue;
+    }
+    final canonicalRoot = _canonicalLocalFileUriDirectory(rootUri);
+    if (!p.isWithin(pubCache, canonicalRoot)) throw invalid;
+    _requireCanonicalAuthorityDirectoryTree(canonicalRoot, boundary: pubCache);
+    final rootMode = Directory(canonicalRoot).statSync().mode & 0xfff;
+    final lib = _capturePackageLib(canonicalRoot, boundary: pubCache);
+    final pubspec = _capturePackagePubspec(
+      canonicalRoot,
+      expectedPackageName: name,
+    );
+    externalRoots.add(
+      _PackageRootAuthority(
+        packageName: name,
+        canonicalRoot: canonicalRoot,
+        rootMode: rootMode,
+        canonicalLib: lib.$1,
+        libMode: lib.$2,
+        pubspec: pubspec,
+      ),
+    );
+  }
+  if (flutterToolsCount != 1) throw invalid;
+  externalRoots.sort((left, right) {
+    final byName = left.packageName.compareTo(right.packageName);
+    return byName != 0
+        ? byName
+        : left.canonicalRoot.compareTo(right.canonicalRoot);
+  });
+  return _PackageResolutionAuthority(
+    canonicalPubCache: pubCache,
+    pubCacheMode: pubCacheMode,
+    externalRoots: externalRoots,
+  );
+}
+
+bool _isExactDartVersion(String value) {
+  try {
+    return Version.parse(value).toString() == value;
+  } on FormatException {
+    return false;
+  }
+}
+
+(int, int) _majorMinor(String value) {
+  final version = Version.parse(value);
+  return (version.major, version.minor);
+}
+
+bool _validLanguageVersion(String value, (int, int) maximum) {
+  final match = RegExp(r'^(2|[3-9][0-9]*)\.(0|[1-9][0-9]*)$').firstMatch(value);
+  if (match == null) return false;
+  final candidate = (int.parse(match.group(1)!), int.parse(match.group(2)!));
+  return candidate.$1 < maximum.$1 ||
+      (candidate.$1 == maximum.$1 && candidate.$2 <= maximum.$2);
+}
+
+List<List<int>> _rawJsonArrayElements(List<int> bytes) {
+  var start = 0;
+  var end = bytes.length;
+  while (start < end && _isJsonWhitespace(bytes[start])) {
+    start++;
+  }
+  while (end > start && _isJsonWhitespace(bytes[end - 1])) {
+    end--;
+  }
+  if (end - start < 2 || bytes[start] != 0x5b || bytes[end - 1] != 0x5d) {
     throw const _ResolutionSignal(
       code: L10nEvidenceRejectionCode.toolchainUnavailable,
       detailCode: 'registry-sdk-package-config-invalid',
     );
   }
-  final names = <String>{};
-  Map<Object?, Object?>? flutterTools;
-  for (final package in packages) {
-    if (package is! Map<Object?, Object?> ||
-        package['name'] is! String ||
-        package['rootUri'] is! String ||
-        package['packageUri'] is! String ||
-        package['languageVersion'] is! String ||
-        !names.add(package['name']! as String)) {
+  final result = <List<int>>[];
+  var elementStart = start + 1;
+  var objectDepth = 0;
+  var arrayDepth = 0;
+  var inString = false;
+  var escaped = false;
+  for (var index = start + 1; index < end - 1; index++) {
+    final byte = bytes[index];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (byte == 0x5c) {
+        escaped = true;
+      } else if (byte == 0x22) {
+        inString = false;
+      }
+      continue;
+    }
+    if (byte == 0x22) {
+      inString = true;
+    } else if (byte == 0x7b) {
+      objectDepth++;
+    } else if (byte == 0x7d) {
+      objectDepth--;
+    } else if (byte == 0x5b) {
+      arrayDepth++;
+    } else if (byte == 0x5d) {
+      arrayDepth--;
+    } else if (byte == 0x2c && objectDepth == 0 && arrayDepth == 0) {
+      result.add(_trimJsonBytes(bytes, elementStart, index));
+      elementStart = index + 1;
+    }
+    if (objectDepth < 0 || arrayDepth < 0) {
       throw const _ResolutionSignal(
         code: L10nEvidenceRejectionCode.toolchainUnavailable,
         detailCode: 'registry-sdk-package-config-invalid',
       );
     }
-    if (package['name'] == 'flutter_tools') flutterTools = package;
   }
-  if (flutterTools == null ||
-      flutterTools['rootUri'] != '../' ||
-      flutterTools['packageUri'] != 'lib/') {
+  final last = _trimJsonBytes(bytes, elementStart, end - 1);
+  if (last.isNotEmpty) result.add(last);
+  if (inString || objectDepth != 0 || arrayDepth != 0) {
+    throw const _ResolutionSignal(
+      code: L10nEvidenceRejectionCode.toolchainUnavailable,
+      detailCode: 'registry-sdk-package-config-invalid',
+    );
+  }
+  return result;
+}
+
+List<int> _trimJsonBytes(List<int> bytes, int start, int end) {
+  while (start < end && _isJsonWhitespace(bytes[start])) {
+    start++;
+  }
+  while (end > start && _isJsonWhitespace(bytes[end - 1])) {
+    end--;
+  }
+  return bytes.sublist(start, end);
+}
+
+bool _isJsonWhitespace(int byte) =>
+    byte == 0x20 || byte == 0x09 || byte == 0x0a || byte == 0x0d;
+
+String _canonicalLocalFileUriDirectory(String raw) {
+  try {
+    final uri = Uri.parse(raw);
+    if (raw.isEmpty ||
+        uri.scheme != 'file' ||
+        uri.host.isNotEmpty ||
+        uri.userInfo.isNotEmpty ||
+        uri.hasPort ||
+        uri.hasQuery ||
+        uri.hasFragment) {
+      throw const FormatException();
+    }
+    final path = p.normalize(uri.toFilePath());
+    if (!p.isAbsolute(path) ||
+        FileSystemEntity.typeSync(path, followLinks: false) !=
+            FileSystemEntityType.directory ||
+        Uri.file(path).toString() != raw) {
+      throw const FormatException();
+    }
+    final canonical = p.normalize(Directory(path).resolveSymbolicLinksSync());
+    if (canonical != path) throw const FormatException();
+    return canonical;
+  } on FileSystemException {
+    throw const _ResolutionSignal(
+      code: L10nEvidenceRejectionCode.toolchainUnavailable,
+      detailCode: 'registry-sdk-package-config-invalid',
+    );
+  } on FormatException {
+    throw const _ResolutionSignal(
+      code: L10nEvidenceRejectionCode.toolchainUnavailable,
+      detailCode: 'registry-sdk-package-config-invalid',
+    );
+  }
+}
+
+void _requireCanonicalAuthorityDirectoryTree(
+  String path, {
+  required String boundary,
+}) {
+  try {
+    if (path != boundary && !p.isWithin(boundary, path)) {
+      throw const FormatException();
+    }
+    var current = boundary;
+    _requireCanonicalPackageDirectory(current);
+    for (final component in p.split(p.relative(path, from: boundary))) {
+      if (component == '.') continue;
+      current = p.join(current, component);
+      _requireCanonicalPackageDirectory(current);
+    }
+  } on FileSystemException {
+    throw const _ResolutionSignal(
+      code: L10nEvidenceRejectionCode.toolchainUnavailable,
+      detailCode: 'registry-sdk-package-config-invalid',
+    );
+  } on FormatException {
+    throw const _ResolutionSignal(
+      code: L10nEvidenceRejectionCode.toolchainUnavailable,
+      detailCode: 'registry-sdk-package-config-invalid',
+    );
+  }
+}
+
+void _requireCanonicalPackageDirectory(String path) {
+  if (FileSystemEntity.typeSync(path, followLinks: false) !=
+      FileSystemEntityType.directory) {
+    throw const FormatException();
+  }
+  final directory = Directory(path);
+  final before = directory.statSync();
+  final canonical = p.normalize(directory.resolveSymbolicLinksSync());
+  final after = directory.statSync();
+  if (canonical != p.normalize(path) ||
+      before.type != FileSystemEntityType.directory ||
+      before.mode & 0x12 != 0 ||
+      !_sameArtifactFileState(before, after)) {
+    throw const FormatException();
+  }
+}
+
+String _requirePackageLib(String root, {required String boundary}) {
+  final captured = _capturePackageLib(root, boundary: boundary);
+  if (captured.$2 == null) throw const FormatException();
+  return captured.$1;
+}
+
+(String, int?) _capturePackageLib(String root, {required String boundary}) {
+  final lib = p.join(root, 'lib');
+  if (!p.isWithin(root, lib)) throw const FormatException();
+  final type = FileSystemEntity.typeSync(lib, followLinks: false);
+  if (type == FileSystemEntityType.notFound) return (lib, null);
+  if (type != FileSystemEntityType.directory) throw const FormatException();
+  _requireCanonicalAuthorityDirectoryTree(lib, boundary: boundary);
+  return (lib, Directory(lib).statSync().mode & 0xfff);
+}
+
+_PackagePubspecAuthority _capturePackagePubspec(
+  String root, {
+  required String expectedPackageName,
+}) {
+  try {
+    final path = p.join(root, 'pubspec.yaml');
+    if (!p.isWithin(root, path) ||
+        FileSystemEntity.typeSync(path, followLinks: false) !=
+            FileSystemEntityType.file) {
+      throw const FormatException();
+    }
+    final file = File(path);
+    final canonical = p.normalize(file.resolveSymbolicLinksSync());
+    final before = file.statSync();
+    final mode = before.mode & 0xfff;
+    if (canonical != path ||
+        before.type != FileSystemEntityType.file ||
+        mode & 0x12 != 0) {
+      throw const FormatException();
+    }
+    final bytes = file.readAsBytesSync();
+    final decoded = loadYaml(utf8.decode(bytes));
+    if (decoded is! YamlMap || decoded['name'] != expectedPackageName) {
+      throw const FormatException();
+    }
+    final after = file.statSync();
+    if (!_sameArtifactFileState(before, after) ||
+        p.normalize(file.resolveSymbolicLinksSync()) != canonical) {
+      throw const FormatException();
+    }
+    return _PackagePubspecAuthority(
+      canonicalPath: canonical,
+      sha256: sha256.convert(bytes).toString(),
+      byteLength: bytes.length,
+      posixMode: mode,
+    );
+  } on FileSystemException {
+    throw const _ResolutionSignal(
+      code: L10nEvidenceRejectionCode.toolchainUnavailable,
+      detailCode: 'registry-sdk-package-config-invalid',
+    );
+  } on FormatException {
     throw const _ResolutionSignal(
       code: L10nEvidenceRejectionCode.toolchainUnavailable,
       detailCode: 'registry-sdk-package-config-invalid',
@@ -2453,6 +3598,8 @@ List<_LaunchFileSpec> get _fixedLaunchFileSpecs => [
 
 const _flutterToolsPackageConfigPath =
     'packages/flutter_tools/.dart_tool/package_config.json';
+const _flutterToolsPubspecPath = 'packages/flutter_tools/pubspec.yaml';
+const _flutterToolsPubspecLockPath = 'packages/flutter_tools/pubspec.lock';
 const _flutterVersionKeys = <String>{
   'frameworkVersion',
   'channel',
@@ -2489,6 +3636,8 @@ const _semanticControlContentPaths = <String>{
   _engineStampStampPath,
   _dartSdkVersionPath,
   _flutterToolsPackageConfigPath,
+  _flutterToolsPubspecPath,
+  _flutterToolsPubspecLockPath,
 };
 const _controlInputPaths = <String>[
   _flutterToolsStampPath,
@@ -2497,6 +3646,8 @@ const _controlInputPaths = <String>[
   _engineDartSdkStampPath,
   _engineVersionPath,
   _flutterToolsPackageConfigPath,
+  _flutterToolsPubspecPath,
+  _flutterToolsPubspecLockPath,
   _flutterVersionPath,
   _engineStampJsonPath,
   _engineStampStampPath,
@@ -2644,7 +3795,8 @@ bool _sameLaunchPaths(L10nToolchainLaunch left, L10nToolchainLaunch right) =>
     left.canonicalDartExecutable == right.canonicalDartExecutable &&
     left.canonicalFlutterToolsPackageConfig ==
         right.canonicalFlutterToolsPackageConfig &&
-    left.canonicalFlutterToolsSnapshot == right.canonicalFlutterToolsSnapshot;
+    left.canonicalFlutterToolsSnapshot == right.canonicalFlutterToolsSnapshot &&
+    left.canonicalOriginalProjectRoot == right.canonicalOriginalProjectRoot;
 
 bool _sameStringList(List<String> left, List<String> right) {
   if (left.length != right.length) return false;
@@ -2689,6 +3841,10 @@ String _projectSelectionEvidenceSha256({
   hasher.addText('selectedVersion', selectedVersion.toString());
   hasher.addText('canonicalFlutterExecutable', sdk.executable);
   hasher.addText('canonicalSdkRoot', sdk.root);
+  hasher.addText(
+    'executionDomain',
+    sdk.testExecutionRunner == null ? 'production' : 'test-only',
+  );
   for (final entry in SplayTreeMap<String, String>.of(selectorHashes).entries) {
     hasher.addText('selectorPath', entry.key);
     hasher.addText('selectorSha256', entry.value);
@@ -2712,9 +3868,16 @@ String _toolchainIdentitySha256({
   hasher.addText('schema', 'l10n-toolchain-v1');
   hasher.addText('canonicalFlutterExecutable', sdk.executable);
   hasher.addText('canonicalSdkRoot', sdk.root);
+  hasher.addText(
+    'executionDomain',
+    sdk.testExecutionRunner == null ? 'production' : 'test-only',
+  );
   _addLaunch(hasher, sdk.launch);
   _addHostAuthority(hasher, 'shellAuthority', sdk.shellAuthority);
   _addHostAuthority(hasher, 'chmodAuthority', sdk.chmodAuthority);
+  _addHostAuthority(hasher, 'statAuthority', sdk.statAuthority);
+  hasher.addText('statDialect', _hostStatDialectIdentity);
+  _addConfinementAuthority(hasher, sdk.confinementAuthority);
   hasher.addText('gitHead.canonicalGitPath', sdk.gitHead.canonicalGitPath);
   hasher.addText('gitHead.resolutionSource', sdk.gitHead.resolutionSource.name);
   hasher.addText('gitHead.finalObjectId', sdk.gitHead.finalObjectId);
@@ -2771,6 +3934,10 @@ String _toolchainIdentitySha256({
       entry.value.posixMode.toRadixString(8),
     );
   }
+  _addPackageResolutionAuthority(
+    hasher,
+    sdk.launchManifest.packageResolutionAuthority,
+  );
   for (final entry in SplayTreeMap<String, String>.of(selectorHashes).entries) {
     hasher.addText('selectorPath', entry.key);
     hasher.addText('selectorSha256', entry.value);
@@ -2824,6 +3991,45 @@ void _addLaunch(_FramedIdentityHasher hasher, L10nToolchainLaunch launch) {
     'launch.canonicalFlutterToolsSnapshot',
     launch.canonicalFlutterToolsSnapshot,
   );
+  hasher.addText(
+    'launch.canonicalOriginalProjectRoot',
+    launch.canonicalOriginalProjectRoot ?? 'unbound',
+  );
+}
+
+void _addPackageResolutionAuthority(
+  _FramedIdentityHasher hasher,
+  _PackageResolutionAuthority authority,
+) {
+  hasher.addText('packageConfig.pubCache', authority.canonicalPubCache);
+  hasher.addText(
+    'packageConfig.pubCacheMode',
+    authority.pubCacheMode.toRadixString(8),
+  );
+  hasher.addText(
+    'packageConfig.externalRootCount',
+    authority.externalRoots.length.toString(),
+  );
+  for (final root in authority.externalRoots) {
+    hasher.addText('packageConfig.packageName', root.packageName);
+    hasher.addText('packageConfig.canonicalRoot', root.canonicalRoot);
+    hasher.addText('packageConfig.rootMode', root.rootMode.toRadixString(8));
+    hasher.addText('packageConfig.canonicalLib', root.canonicalLib);
+    hasher.addText(
+      'packageConfig.libMode',
+      root.libMode?.toRadixString(8) ?? 'absent',
+    );
+    hasher.addText('packageConfig.pubspecPath', root.pubspec.canonicalPath);
+    hasher.addText('packageConfig.pubspecSha256', root.pubspec.sha256);
+    hasher.addText(
+      'packageConfig.pubspecByteLength',
+      root.pubspec.byteLength.toString(),
+    );
+    hasher.addText(
+      'packageConfig.pubspecMode',
+      root.pubspec.posixMode.toRadixString(8),
+    );
+  }
 }
 
 void _addHostAuthority(
@@ -2843,6 +4049,37 @@ void _addHostAuthority(
   hasher.addText('$prefix.byteLength', authority.byteLength.toString());
   hasher.addText('$prefix.executable', authority.executable.toString());
   hasher.addText('$prefix.posixMode', authority.posixMode.toRadixString(8));
+}
+
+void _addConfinementAuthority(
+  _FramedIdentityHasher hasher,
+  L10nProcessConfinementAuthority authority,
+) {
+  hasher.addText('confinement.backendIdentity', authority.backendIdentity);
+  hasher.addText(
+    'confinement.requestedExecutable',
+    authority.requestedExecutable,
+  );
+  hasher.addText(
+    'confinement.requestedExecutableType',
+    authority.requestedExecutableType == FileSystemEntityType.file
+        ? 'regular-file'
+        : 'symbolic-link',
+  );
+  hasher.addText(
+    'confinement.canonicalExecutable',
+    authority.canonicalExecutable,
+  );
+  hasher.addText('confinement.executableSha256', authority.executableSha256);
+  hasher.addText(
+    'confinement.executableByteLength',
+    authority.executableByteLength.toString(),
+  );
+  hasher.addText(
+    'confinement.executablePosixMode',
+    authority.executablePosixMode.toRadixString(8),
+  );
+  hasher.addText('confinement.policyIdentity', authority.policyIdentity);
 }
 
 void _addProbe(
@@ -2947,6 +4184,9 @@ final class _ProbeSandbox {
     required this.whichCanonicalPath,
     required this.rootState,
     required this.whichState,
+    required this.rootIdentity,
+    required this.whichIdentity,
+    required this.statAuthority,
   }) : environmentOverrides = _sortedUnmodifiableMap(environmentOverrides);
 
   final Directory root;
@@ -2954,6 +4194,9 @@ final class _ProbeSandbox {
   final String whichCanonicalPath;
   final FileStat rootState;
   final FileStat whichState;
+  final _HostPathIdentity rootIdentity;
+  final _HostPathIdentity whichIdentity;
+  final _HostExecutableAuthority statAuthority;
 }
 
 enum _GitHeadResolutionSource { detached, looseRef, packedRef }
@@ -3038,18 +4281,30 @@ final class _CanonicalSdk {
   _CanonicalSdk({
     required this.executable,
     required this.root,
+    required this.originalProjectRoot,
     required this.gitHead,
     required this.launchManifest,
     required this.shellAuthority,
     required this.chmodAuthority,
+    required this.statAuthority,
+    required this.processConfinement,
+    required this.confinementAuthority,
+    required this.executionRunner,
+    required this.testExecutionRunner,
   });
 
   final String executable;
   final String root;
+  final String originalProjectRoot;
   final _CanonicalGitHead gitHead;
   final _PosixLaunchManifest launchManifest;
   final _HostExecutableAuthority shellAuthority;
   final _HostExecutableAuthority chmodAuthority;
+  final _HostExecutableAuthority statAuthority;
+  final L10nProcessConfinementBackend processConfinement;
+  final L10nProcessConfinementAuthority confinementAuthority;
+  final ProcessExecutionRunner executionRunner;
+  final L10nTestProcessRunner? testExecutionRunner;
 
   L10nToolchainLaunch get launch => L10nToolchainLaunch._bound(
     canonicalDartExecutable: _manifestFileEntry(
@@ -3064,6 +4319,7 @@ final class _CanonicalSdk {
       launchManifest.entriesByRelativePath,
       _flutterToolsSnapshotPath,
     ).canonicalPath,
+    canonicalOriginalProjectRoot: originalProjectRoot,
     frozenSdk: this,
   );
 }
@@ -3103,11 +4359,84 @@ bool _sameHostExecutableAuthority(
 final class _PosixLaunchManifest {
   _PosixLaunchManifest({
     required Map<String, _LaunchManifestEntry> entriesByRelativePath,
+    required this.packageResolutionAuthority,
   }) : entriesByRelativePath = Map<String, _LaunchManifestEntry>.unmodifiable(
          SplayTreeMap<String, _LaunchManifestEntry>.of(entriesByRelativePath),
        );
 
   final Map<String, _LaunchManifestEntry> entriesByRelativePath;
+  final _PackageResolutionAuthority packageResolutionAuthority;
+}
+
+final class _PackageResolutionAuthority {
+  _PackageResolutionAuthority({
+    required this.canonicalPubCache,
+    required this.pubCacheMode,
+    required List<_PackageRootAuthority> externalRoots,
+  }) : externalRoots = List.unmodifiable(externalRoots);
+
+  final String canonicalPubCache;
+  final int pubCacheMode;
+  final List<_PackageRootAuthority> externalRoots;
+}
+
+final class _PackageRootAuthority {
+  const _PackageRootAuthority({
+    required this.packageName,
+    required this.canonicalRoot,
+    required this.rootMode,
+    required this.canonicalLib,
+    required this.libMode,
+    required this.pubspec,
+  });
+
+  final String packageName;
+  final String canonicalRoot;
+  final int rootMode;
+  final String canonicalLib;
+  final int? libMode;
+  final _PackagePubspecAuthority pubspec;
+}
+
+final class _PackagePubspecAuthority {
+  const _PackagePubspecAuthority({
+    required this.canonicalPath,
+    required this.sha256,
+    required this.byteLength,
+    required this.posixMode,
+  });
+
+  final String canonicalPath;
+  final String sha256;
+  final int byteLength;
+  final int posixMode;
+}
+
+bool _samePackageResolutionAuthority(
+  _PackageResolutionAuthority left,
+  _PackageResolutionAuthority right,
+) {
+  if (left.canonicalPubCache != right.canonicalPubCache ||
+      left.pubCacheMode != right.pubCacheMode ||
+      left.externalRoots.length != right.externalRoots.length) {
+    return false;
+  }
+  for (var index = 0; index < left.externalRoots.length; index++) {
+    final a = left.externalRoots[index];
+    final b = right.externalRoots[index];
+    if (a.packageName != b.packageName ||
+        a.canonicalRoot != b.canonicalRoot ||
+        a.rootMode != b.rootMode ||
+        a.canonicalLib != b.canonicalLib ||
+        a.libMode != b.libMode ||
+        a.pubspec.canonicalPath != b.pubspec.canonicalPath ||
+        a.pubspec.sha256 != b.pubspec.sha256 ||
+        a.pubspec.byteLength != b.pubspec.byteLength ||
+        a.pubspec.posixMode != b.pubspec.posixMode) {
+      return false;
+    }
+  }
+  return true;
 }
 
 final class _LaunchFileSpec {
@@ -3152,7 +4481,11 @@ bool _samePosixLaunchManifest(
   _PosixLaunchManifest left,
   _PosixLaunchManifest right,
 ) {
-  if (left.entriesByRelativePath.length != right.entriesByRelativePath.length) {
+  if (!_samePackageResolutionAuthority(
+        left.packageResolutionAuthority,
+        right.packageResolutionAuthority,
+      ) ||
+      left.entriesByRelativePath.length != right.entriesByRelativePath.length) {
     return false;
   }
   for (final entry in left.entriesByRelativePath.entries) {
@@ -3187,6 +4520,267 @@ final class _ProbeEvidence {
   final Uint8List stdout;
   final Uint8List stderr;
   final FlutterMachineIdentity identity;
+}
+
+enum _HostPathEntityType { regularFile, directory }
+
+final class _HostPathIdentity {
+  const _HostPathIdentity({
+    required this.entityType,
+    required this.device,
+    required this.inode,
+    required this.linkCount,
+    required this.posixMode,
+    required this.byteLength,
+  });
+
+  final _HostPathEntityType entityType;
+  final int device;
+  final int inode;
+  final int linkCount;
+  final int posixMode;
+  final int byteLength;
+}
+
+final class _GenerationTreeSnapshot {
+  _GenerationTreeSnapshot({
+    required this.rootIdentity,
+    required Map<String, _GenerationTreeEntry> entriesByRelativePath,
+  }) : entriesByRelativePath = Map.unmodifiable(
+         SplayTreeMap<String, _GenerationTreeEntry>.of(entriesByRelativePath),
+       );
+
+  final _HostPathIdentity rootIdentity;
+  final Map<String, _GenerationTreeEntry> entriesByRelativePath;
+}
+
+final class _GenerationTreeEntry {
+  const _GenerationTreeEntry({required this.identity, required this.sha256});
+
+  final _HostPathIdentity identity;
+  final String? sha256;
+}
+
+_GenerationTreeSnapshot _captureGenerationTree(
+  String rootPath, {
+  required _HostExecutableAuthority statAuthority,
+  required _HostPathIdentity expectedRootIdentity,
+  required bool requireExactRootMode,
+}) {
+  try {
+    _requireHostExecutableStillMatches(statAuthority);
+    final canonicalRoot = p.normalize(
+      Directory(rootPath).resolveSymbolicLinksSync(),
+    );
+    if (canonicalRoot != p.normalize(rootPath) ||
+        FileSystemEntity.typeSync(canonicalRoot, followLinks: false) !=
+            FileSystemEntityType.directory) {
+      throw const _GenerationRootSignal(
+        'generation-working-root-identity-drift',
+      );
+    }
+    final rootIdentity = _captureHostPathIdentity(
+      canonicalRoot,
+      statAuthority: statAuthority,
+    );
+    if (!_sameGenerationRootIdentity(rootIdentity, expectedRootIdentity) ||
+        rootIdentity.entityType != _HostPathEntityType.directory ||
+        (requireExactRootMode && rootIdentity.posixMode != 0x1c0)) {
+      throw const _GenerationRootSignal(
+        'generation-working-root-identity-drift',
+      );
+    }
+    final entities = Directory(canonicalRoot).listSync(
+      recursive: true,
+      followLinks: false,
+    )..sort((left, right) => left.path.compareTo(right.path));
+    final entries = SplayTreeMap<String, _GenerationTreeEntry>();
+    for (final entity in entities) {
+      final normalized = p.normalize(entity.absolute.path);
+      if (!p.isWithin(canonicalRoot, normalized)) {
+        throw const _GenerationRootSignal(
+          'generation-working-root-path-escape',
+        );
+      }
+      final relative = p.relative(normalized, from: canonicalRoot);
+      final type = FileSystemEntity.typeSync(normalized, followLinks: false);
+      if (type != FileSystemEntityType.file &&
+          type != FileSystemEntityType.directory) {
+        throw const _GenerationRootSignal(
+          'generation-working-root-link-unsupported',
+        );
+      }
+      final canonical = p.normalize(entity.resolveSymbolicLinksSync());
+      if (canonical != normalized || !p.isWithin(canonicalRoot, canonical)) {
+        throw const _GenerationRootSignal(
+          'generation-working-root-path-escape',
+        );
+      }
+      final before = entity.statSync();
+      final identityBefore = _captureHostPathIdentity(
+        normalized,
+        statAuthority: statAuthority,
+      );
+      final expectedType = type == FileSystemEntityType.file
+          ? _HostPathEntityType.regularFile
+          : _HostPathEntityType.directory;
+      if (identityBefore.entityType != expectedType ||
+          identityBefore.device != rootIdentity.device ||
+          identityBefore.posixMode & 0x12 != 0) {
+        throw const _GenerationRootSignal(
+          'generation-working-root-mode-unsupported',
+        );
+      }
+      String? contentSha256;
+      if (expectedType == _HostPathEntityType.regularFile) {
+        if (identityBefore.linkCount != 1) {
+          throw const _GenerationRootSignal(
+            'generation-working-root-hardlink-unsupported',
+          );
+        }
+        contentSha256 = sha256
+            .convert(File(normalized).readAsBytesSync())
+            .toString();
+      }
+      final after = entity.statSync();
+      final identityAfter = _captureHostPathIdentity(
+        normalized,
+        statAuthority: statAuthority,
+      );
+      if (!_sameArtifactFileState(before, after) ||
+          !_sameHostPathIdentity(identityBefore, identityAfter)) {
+        throw const _GenerationRootSignal(
+          'generation-working-root-inventory-unstable',
+        );
+      }
+      entries[relative] = _GenerationTreeEntry(
+        identity: identityAfter,
+        sha256: contentSha256,
+      );
+    }
+    _requireHostExecutableStillMatches(statAuthority);
+    final rootAfter = _captureHostPathIdentity(
+      canonicalRoot,
+      statAuthority: statAuthority,
+    );
+    if (!_sameGenerationRootIdentity(rootAfter, expectedRootIdentity)) {
+      throw const _GenerationRootSignal(
+        'generation-working-root-identity-drift',
+      );
+    }
+    return _GenerationTreeSnapshot(
+      rootIdentity: rootAfter,
+      entriesByRelativePath: entries,
+    );
+  } on _GenerationRootSignal {
+    rethrow;
+  } on _ResolutionSignal {
+    throw const _GenerationRootSignal(
+      'generation-working-root-inventory-unavailable',
+    );
+  } on FileSystemException {
+    throw const _GenerationRootSignal(
+      'generation-working-root-inventory-unavailable',
+    );
+  } on ProcessException {
+    throw const _GenerationRootSignal(
+      'generation-working-root-inventory-unavailable',
+    );
+  } on FormatException {
+    throw const _GenerationRootSignal(
+      'generation-working-root-inventory-unavailable',
+    );
+  }
+}
+
+_HostPathIdentity _captureHostPathIdentity(
+  String path, {
+  required _HostExecutableAuthority statAuthority,
+}) {
+  _requireHostExecutableStillMatches(statAuthority);
+  final arguments = switch (_hostStatDialectIdentity) {
+    'darwin-stat-v1' => ['-f', '%HT\t%d\t%i\t%l\t%p\t%z', path],
+    'gnu-linux-stat-v1' => ['--printf=%F\t%d\t%i\t%h\t%a\t%s', '--', path],
+    _ => throw const FormatException(),
+  };
+  final result = Process.runSync(
+    statAuthority.canonicalPath,
+    arguments,
+    workingDirectory: p.dirname(path),
+    environment: const {'LANG': 'C', 'LC_ALL': 'C'},
+    includeParentEnvironment: false,
+    stdoutEncoding: utf8,
+    stderrEncoding: utf8,
+  );
+  _requireHostExecutableStillMatches(statAuthority);
+  if (result.exitCode != 0 || result.stderr != '') {
+    throw const FormatException();
+  }
+  final fields = (result.stdout as String).trim().split('\t');
+  if (fields.length != 6) throw const FormatException();
+  final entityType = switch (fields[0]) {
+    'Regular File' ||
+    'regular file' ||
+    'regular empty file' => _HostPathEntityType.regularFile,
+    'Directory' || 'directory' => _HostPathEntityType.directory,
+    _ => throw const FormatException(),
+  };
+  return _HostPathIdentity(
+    entityType: entityType,
+    device: int.parse(fields[1]),
+    inode: int.parse(fields[2]),
+    linkCount: int.parse(fields[3]),
+    posixMode: int.parse(fields[4], radix: 8) & 0xfff,
+    byteLength: int.parse(fields[5]),
+  );
+}
+
+String get _hostStatDialectIdentity {
+  if (Platform.isMacOS) return 'darwin-stat-v1';
+  if (Platform.isLinux) return 'gnu-linux-stat-v1';
+  return 'unsupported-stat-v1';
+}
+
+bool _sameHostPathIdentity(_HostPathIdentity left, _HostPathIdentity right) =>
+    left.entityType == right.entityType &&
+    left.device == right.device &&
+    left.inode == right.inode &&
+    left.linkCount == right.linkCount &&
+    left.posixMode == right.posixMode &&
+    left.byteLength == right.byteLength;
+
+bool _sameGenerationRootIdentity(
+  _HostPathIdentity left,
+  _HostPathIdentity right,
+) =>
+    left.entityType == right.entityType &&
+    left.device == right.device &&
+    left.inode == right.inode &&
+    left.posixMode == right.posixMode;
+
+bool _sameGenerationTreeSnapshot(
+  _GenerationTreeSnapshot left,
+  _GenerationTreeSnapshot right,
+) {
+  if (!_sameHostPathIdentity(left.rootIdentity, right.rootIdentity) ||
+      left.entriesByRelativePath.length != right.entriesByRelativePath.length) {
+    return false;
+  }
+  for (final entry in left.entriesByRelativePath.entries) {
+    final other = right.entriesByRelativePath[entry.key];
+    if (other == null ||
+        !_sameHostPathIdentity(entry.value.identity, other.identity) ||
+        entry.value.sha256 != other.sha256) {
+      return false;
+    }
+  }
+  return true;
+}
+
+final class _GenerationRootSignal implements Exception {
+  const _GenerationRootSignal(this.detailCode);
+
+  final String detailCode;
 }
 
 final class _ResolutionSignal implements Exception {

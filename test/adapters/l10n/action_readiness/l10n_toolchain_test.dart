@@ -1,6 +1,7 @@
 import 'dart:collection';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
 import 'package:flutter_pruner/src/adapters/l10n/action_readiness/l10n_evidence_failure.dart';
@@ -55,10 +56,20 @@ void main() {
     }
   });
 
+  test('testing resolver rejects a managed production runner subtype', () {
+    expect(
+      () => DefaultL10nToolchainResolver.testing(
+        processRunner: const _ManagedMarkerRunner(),
+        processConfinement: const _TestProcessConfinementBackend(),
+      ),
+      throwsArgumentError,
+    );
+  });
+
   group('project selector resolution', () {
     setUp(_requirePosixResolverHost);
     test(
-      'launches one bundled Dart snapshot probe in an isolated sandbox',
+      'launches every direct snapshot probe through OS confinement',
       () async {
         _installFixture(project, 'fvmrc/.fvmrc', '.fvmrc');
         final machineBytes = _fixtureBytes('machine/flutter_3_38_7.json');
@@ -68,16 +79,24 @@ void main() {
 
         final resolution = await _resolve38(project, flutter38, runner);
 
+        if (resolution case L10nToolchainRejected(:final failure)) {
+          fail('unexpected fixture rejection: ${failure.detailCode}');
+        }
+
         final resolved = resolution as L10nToolchainResolved;
         final sdkRoot = p.dirname(p.dirname(flutter38));
         expect(runner.calls, hasLength(1));
         final call = runner.calls.single;
-        expect(
-          call.executable,
-          p.join(sdkRoot, 'bin', 'cache', 'dart-sdk', 'bin', 'dart'),
-        );
+        expect(call.executable, '/test/sandbox-exec');
+        final sandboxRoot = call.sandboxObservation!.root;
         expect(call.arguments, [
-          '--packages=${p.join(sdkRoot, 'packages', 'flutter_tools', '.dart_tool', 'package_config.json')}',
+          '-D',
+          'SANDBOX_ROOT=$sandboxRoot',
+          '-p',
+          '(version 1)(allow default)(deny network*)'
+              '(deny file-write*)'
+              '(allow file-write* (subpath (param "SANDBOX_ROOT")))',
+          p.join(sdkRoot, 'bin', 'cache', 'dart-sdk', 'bin', 'dart'),
           p.join(sdkRoot, 'bin', 'cache', 'flutter_tools.snapshot'),
           '--version',
           '--machine',
@@ -120,10 +139,21 @@ void main() {
         final resolved =
             (await _resolve38(project, flutter38, runner))
                 as L10nToolchainResolved;
+        final lease = resolved.launch.createGenerationRootLease();
+        final stage = lease.directory;
+        addTearDown(() {
+          if (stage.existsSync()) {
+            if (lease.safeToDelete) {
+              lease.cleanup();
+            } else {
+              stage.deleteSync(recursive: true);
+            }
+          }
+        });
+        final workingRoot = lease.seal();
 
         final result = await resolved.launch.runGeneration(
-          processRunner: runner,
-          workingDirectory: project,
+          workingRoot: workingRoot,
           expected: resolved,
           logicalArguments: resolved.generationArgs,
           timeout: const Duration(minutes: 2),
@@ -137,7 +167,32 @@ void main() {
         expect(generation.timeout, const Duration(minutes: 2));
         expect(generation.maxOutputBytesPerStream, 4242);
         expect(generation.executable, probe.executable);
-        expect(generation.arguments, [...probe.arguments.take(2), 'gen-l10n']);
+        expect(generation.arguments, [
+          '-D',
+          'SANDBOX_ROOT=${generation.sandboxObservation!.root}',
+          '-D',
+          'WRITE_ROOT=${stage.resolveSymbolicLinksSync()}',
+          '-p',
+          '(version 1)(allow default)(deny network*)'
+              '(deny file-write*)'
+              '(allow file-write* (subpath (param "SANDBOX_ROOT")))'
+              '(allow file-write* (subpath (param "WRITE_ROOT")))',
+          p.join(
+            p.dirname(p.dirname(flutter38)),
+            'bin',
+            'cache',
+            'dart-sdk',
+            'bin',
+            'dart',
+          ),
+          p.join(
+            p.dirname(p.dirname(flutter38)),
+            'bin',
+            'cache',
+            'flutter_tools.snapshot',
+          ),
+          'gen-l10n',
+        ]);
         expect(generation.includeParentEnvironment, isFalse);
         expect(generation.sandboxObservation, isNotNull);
         expect(
@@ -148,8 +203,424 @@ void main() {
           Directory(generation.sandboxObservation!.root).existsSync(),
           isFalse,
         );
+        lease.cleanup();
       },
     );
+
+    test(
+      'generation lease is outside the original project and canonical SDK',
+      () async {
+        _installFixture(project, 'fvmrc/.fvmrc', '.fvmrc');
+        final runner = _FakeProcessRunner([
+          _ProcessReply.result(
+            _successfulProbe(_fixtureBytes('machine/flutter_3_38_7.json')),
+          ),
+        ]);
+        final resolved =
+            (await _resolve38(project, flutter38, runner))
+                as L10nToolchainResolved;
+
+        final lease = resolved.launch.createGenerationRootLease();
+        addTearDown(() {
+          if (lease.directory.existsSync()) {
+            if (lease.safeToDelete) {
+              lease.cleanup();
+            } else {
+              lease.directory.deleteSync(recursive: true);
+            }
+          }
+        });
+        final root = lease.directory.resolveSymbolicLinksSync();
+        final projectRoot = project.resolveSymbolicLinksSync();
+        final sdkRoot = Directory(
+          p.dirname(p.dirname(flutter38)),
+        ).resolveSymbolicLinksSync();
+        expect(root, isNot(projectRoot));
+        expect(p.isWithin(projectRoot, root), isFalse);
+        expect(p.isWithin(root, projectRoot), isFalse);
+        expect(root, isNot(sdkRoot));
+        expect(p.isWithin(sdkRoot, root), isFalse);
+        expect(p.isWithin(root, sdkRoot), isFalse);
+      },
+    );
+
+    test(
+      'generation rejects a pre-existing hardlink in an issued stage',
+      () async {
+        _installFixture(project, 'fvmrc/.fvmrc', '.fvmrc');
+        final runner = _FakeProcessRunner([
+          _ProcessReply.result(
+            _successfulProbe(_fixtureBytes('machine/flutter_3_38_7.json')),
+          ),
+        ]);
+        final resolved =
+            (await _resolve38(project, flutter38, runner))
+                as L10nToolchainResolved;
+        final lease = resolved.launch.createGenerationRootLease();
+        final stage = lease.directory;
+        final outside = File(p.join(scratch.path, 'outside-authority.txt'))
+          ..writeAsStringSync('outside\n');
+        final linked = p.join(stage.path, 'linked.txt');
+        final linkResult = Process.runSync(
+          '/bin/ln',
+          [outside.path, linked],
+          environment: const {'LANG': 'C', 'LC_ALL': 'C'},
+          includeParentEnvironment: false,
+        );
+        expect(linkResult.exitCode, 0);
+
+        expect(
+          lease.seal,
+          throwsA(
+            isA<L10nToolchainLaunchException>().having(
+              (error) => error.detailCode,
+              'detailCode',
+              'generation-working-root-hardlink-unsupported',
+            ),
+          ),
+        );
+        expect(runner.calls, hasLength(1));
+        expect(lease.safeToDelete, isFalse);
+        expect(
+          lease.cleanup,
+          throwsA(
+            isA<L10nToolchainLaunchException>().having(
+              (error) => error.detailCode,
+              'detailCode',
+              'generation-working-root-cleanup-unconfirmed',
+            ),
+          ),
+        );
+        if (stage.existsSync()) stage.deleteSync(recursive: true);
+      },
+    );
+
+    test('lease cleanup preserves a replacement at the issued path', () async {
+      _installFixture(project, 'fvmrc/.fvmrc', '.fvmrc');
+      final runner = _FakeProcessRunner([
+        _ProcessReply.result(
+          _successfulProbe(_fixtureBytes('machine/flutter_3_38_7.json')),
+        ),
+      ]);
+      final resolved =
+          (await _resolve38(project, flutter38, runner))
+              as L10nToolchainResolved;
+      final lease = resolved.launch.createGenerationRootLease();
+      final issuedPath = lease.directory.path;
+      final moved = Directory('$issuedPath-moved');
+      lease.directory.renameSync(moved.path);
+      final replacement = Directory(issuedPath)..createSync();
+      File(p.join(replacement.path, 'foreign.txt')).writeAsStringSync('keep\n');
+      addTearDown(() {
+        if (replacement.existsSync()) replacement.deleteSync(recursive: true);
+        if (moved.existsSync()) moved.deleteSync(recursive: true);
+      });
+
+      expect(
+        lease.cleanup,
+        throwsA(
+          isA<L10nToolchainLaunchException>().having(
+            (error) => error.detailCode,
+            'detailCode',
+            'generation-working-root-cleanup-unconfirmed',
+          ),
+        ),
+      );
+      expect(lease.safeToDelete, isFalse);
+      expect(replacement.existsSync(), isTrue);
+      expect(
+        File(p.join(replacement.path, 'foreign.txt')).readAsStringSync(),
+        'keep\n',
+      );
+      expect(moved.existsSync(), isTrue);
+    });
+
+    test(
+      'generation rejects a hardlink injected after seal before launch',
+      () async {
+        _installFixture(project, 'fvmrc/.fvmrc', '.fvmrc');
+        final runner = _FakeProcessRunner([
+          _ProcessReply.result(
+            _successfulProbe(_fixtureBytes('machine/flutter_3_38_7.json')),
+          ),
+        ]);
+        final resolved =
+            (await _resolve38(project, flutter38, runner))
+                as L10nToolchainResolved;
+        final workingRoot = _emptyGenerationRoot(resolved);
+        final outside = File(p.join(scratch.path, 'outside-after-seal.txt'))
+          ..writeAsStringSync('outside\n');
+        expect(
+          Process.runSync('/bin/ln', [
+            outside.path,
+            p.join(workingRoot.directory.path, 'linked.txt'),
+          ]).exitCode,
+          0,
+        );
+
+        await expectLater(
+          resolved.launch.runGeneration(
+            workingRoot: workingRoot,
+            expected: resolved,
+            logicalArguments: resolved.generationArgs,
+            timeout: const Duration(minutes: 2),
+            maxOutputBytesPerStream: 4242,
+          ),
+          throwsA(
+            isA<L10nToolchainLaunchException>().having(
+              (error) => error.detailCode,
+              'detailCode',
+              'generation-working-root-hardlink-unsupported',
+            ),
+          ),
+        );
+        expect(runner.calls, hasLength(1));
+      },
+    );
+
+    test('generation marks a child-created postrun link unsafe', () async {
+      _installFixture(project, 'fvmrc/.fvmrc', '.fvmrc');
+      late L10nGenerationWorkingRoot workingRoot;
+      final outside = Directory(p.join(scratch.path, 'outside-postrun'))
+        ..createSync();
+      final runner = _FakeProcessRunner([
+        _ProcessReply.result(
+          _successfulProbe(_fixtureBytes('machine/flutter_3_38_7.json')),
+        ),
+        _ProcessReply.result(
+          _successfulProbe(const []),
+          beforeReturn: () {
+            Link(
+              p.join(workingRoot.directory.path, 'postrun-link'),
+            ).createSync(outside.path);
+          },
+        ),
+      ]);
+      final resolved =
+          (await _resolve38(project, flutter38, runner))
+              as L10nToolchainResolved;
+      workingRoot = _emptyGenerationRoot(resolved);
+
+      await expectLater(
+        resolved.launch.runGeneration(
+          workingRoot: workingRoot,
+          expected: resolved,
+          logicalArguments: resolved.generationArgs,
+          timeout: const Duration(minutes: 2),
+          maxOutputBytesPerStream: 4242,
+        ),
+        throwsA(
+          isA<L10nToolchainLaunchException>().having(
+            (error) => error.detailCode,
+            'detailCode',
+            'generation-working-root-postcondition-failed',
+          ),
+        ),
+      );
+      expect(workingRoot.safeToDelete, isFalse);
+      expect(runner.calls, hasLength(2));
+    });
+
+    for (final outcome in [
+      ('nonzero exit', _successfulProbe(const [], exitCode: 7)),
+      ('timeout', _successfulProbe(const [], timedOut: true)),
+      ('truncated output', _successfulProbe(const [], stdoutOmittedBytes: 1)),
+    ]) {
+      test(
+        'generation postscans a hostile stage after ${outcome.$1}',
+        () async {
+          _installFixture(project, 'fvmrc/.fvmrc', '.fvmrc');
+          late L10nGenerationWorkingRoot workingRoot;
+          final outside = Directory(
+            p.join(scratch.path, 'outside-${outcome.$1}'),
+          )..createSync();
+          final runner = _FakeProcessRunner([
+            _ProcessReply.result(
+              _successfulProbe(_fixtureBytes('machine/flutter_3_38_7.json')),
+            ),
+            _ProcessReply.result(
+              outcome.$2,
+              beforeReturn: () {
+                Link(
+                  p.join(workingRoot.directory.path, 'postrun-link'),
+                ).createSync(outside.path);
+              },
+            ),
+          ]);
+          final resolved =
+              (await _resolve38(project, flutter38, runner))
+                  as L10nToolchainResolved;
+          final lease = resolved.launch.createGenerationRootLease();
+          addTearDown(() {
+            if (lease.directory.existsSync()) {
+              lease.directory.deleteSync(recursive: true);
+            }
+          });
+          workingRoot = lease.seal();
+
+          await expectLater(
+            resolved.launch.runGeneration(
+              workingRoot: workingRoot,
+              expected: resolved,
+              logicalArguments: resolved.generationArgs,
+              timeout: const Duration(minutes: 2),
+              maxOutputBytesPerStream: 4242,
+            ),
+            throwsA(
+              isA<L10nToolchainLaunchException>().having(
+                (error) => error.detailCode,
+                'detailCode',
+                'generation-working-root-postcondition-failed',
+              ),
+            ),
+          );
+          expect(workingRoot.safeToDelete, isFalse);
+          expect(
+            lease.cleanup,
+            throwsA(
+              isA<L10nToolchainLaunchException>().having(
+                (error) => error.detailCode,
+                'detailCode',
+                'generation-working-root-cleanup-unconfirmed',
+              ),
+            ),
+          );
+          expect(runner.calls, hasLength(2));
+        },
+      );
+    }
+
+    test('generation working root capability is single use', () async {
+      _installFixture(project, 'fvmrc/.fvmrc', '.fvmrc');
+      final runner = _FakeProcessRunner([
+        _ProcessReply.result(
+          _successfulProbe(_fixtureBytes('machine/flutter_3_38_7.json')),
+        ),
+        _ProcessReply.result(_successfulProbe(const [])),
+      ]);
+      final resolved =
+          (await _resolve38(project, flutter38, runner))
+              as L10nToolchainResolved;
+      final workingRoot = _emptyGenerationRoot(resolved);
+      await resolved.launch.runGeneration(
+        workingRoot: workingRoot,
+        expected: resolved,
+        logicalArguments: resolved.generationArgs,
+        timeout: const Duration(minutes: 2),
+        maxOutputBytesPerStream: 4242,
+      );
+
+      await expectLater(
+        resolved.launch.runGeneration(
+          workingRoot: workingRoot,
+          expected: resolved,
+          logicalArguments: resolved.generationArgs,
+          timeout: const Duration(minutes: 2),
+          maxOutputBytesPerStream: 4242,
+        ),
+        throwsA(
+          isA<L10nToolchainLaunchException>().having(
+            (error) => error.detailCode,
+            'detailCode',
+            'generation-working-root-capability-consumed',
+          ),
+        ),
+      );
+      expect(runner.calls, hasLength(2));
+    });
+
+    test(
+      'generation rejects confinement authority drift after launch',
+      () async {
+        _installFixture(project, 'fvmrc/.fvmrc', '.fvmrc');
+        final backend = _DriftingTestProcessConfinementBackend();
+        final runner = _FakeProcessRunner([
+          _ProcessReply.result(
+            _successfulProbe(_fixtureBytes('machine/flutter_3_38_7.json')),
+          ),
+          _ProcessReply.result(
+            _successfulProbe(const []),
+            beforeReturn: () => backend.drifted = true,
+          ),
+        ]);
+        final resolved =
+            (await _resolve38(
+                  project,
+                  flutter38,
+                  runner,
+                  resolver: _testResolver(runner, confinement: backend),
+                ))
+                as L10nToolchainResolved;
+        final workingRoot = _emptyGenerationRoot(resolved);
+
+        await expectLater(
+          resolved.launch.runGeneration(
+            workingRoot: workingRoot,
+            expected: resolved,
+            logicalArguments: resolved.generationArgs,
+            timeout: const Duration(minutes: 2),
+            maxOutputBytesPerStream: 4242,
+          ),
+          throwsA(
+            isA<L10nToolchainLaunchException>().having(
+              (error) => error.detailCode,
+              'detailCode',
+              'generation-run-confinement-drift',
+            ),
+          ),
+        );
+        expect(runner.calls, hasLength(2));
+      },
+    );
+
+    test('postrun hostile link wins over simultaneous SDK drift', () async {
+      _installFixture(project, 'fvmrc/.fvmrc', '.fvmrc');
+      late L10nGenerationWorkingRoot workingRoot;
+      final outside = Directory(p.join(scratch.path, 'combined-drift'))
+        ..createSync();
+      final runner = _FakeProcessRunner([
+        _ProcessReply.result(
+          _successfulProbe(_fixtureBytes('machine/flutter_3_38_7.json')),
+        ),
+        _ProcessReply.result(
+          _successfulProbe(const []),
+          beforeReturn: () {
+            Link(
+              p.join(workingRoot.directory.path, 'hostile-link'),
+            ).createSync(outside.path);
+            File(
+              p.join(
+                p.dirname(p.dirname(flutter38)),
+                'bin/cache/flutter_tools.snapshot',
+              ),
+            ).writeAsStringSync('drifted snapshot\n');
+          },
+        ),
+      ]);
+      final resolved =
+          (await _resolve38(project, flutter38, runner))
+              as L10nToolchainResolved;
+      workingRoot = _emptyGenerationRoot(resolved);
+
+      await expectLater(
+        resolved.launch.runGeneration(
+          workingRoot: workingRoot,
+          expected: resolved,
+          logicalArguments: resolved.generationArgs,
+          timeout: const Duration(minutes: 2),
+          maxOutputBytesPerStream: 4242,
+        ),
+        throwsA(
+          isA<L10nToolchainLaunchException>().having(
+            (error) => error.detailCode,
+            'detailCode',
+            'generation-working-root-postcondition-failed',
+          ),
+        ),
+      );
+      expect(workingRoot.safeToDelete, isFalse);
+      expect(runner.calls, hasLength(2));
+    });
 
     test(
       'generation seam rejects logical argv outside frozen evidence',
@@ -165,8 +636,7 @@ void main() {
 
         await expectLater(
           resolved.launch.runGeneration(
-            processRunner: runner,
-            workingDirectory: project,
+            workingRoot: _emptyGenerationRoot(resolved),
             expected: resolved,
             logicalArguments: const ['gen-l10n', '--forged'],
             timeout: const Duration(minutes: 2),
@@ -196,8 +666,7 @@ void main() {
 
       await expectLater(
         resolved.launch.runGeneration(
-          processRunner: runner,
-          workingDirectory: project,
+          workingRoot: _emptyGenerationRoot(resolved),
           expected: resolved,
           logicalArguments: _ThrowingStringList(),
           timeout: const Duration(minutes: 2),
@@ -230,8 +699,7 @@ void main() {
 
         await expectLater(
           resolved.launch.runGeneration(
-            processRunner: runner,
-            workingDirectory: project,
+            workingRoot: _emptyGenerationRoot(resolved),
             expected: resolved,
             logicalArguments: resolved.generationArgs,
             timeout: policy.$1,
@@ -296,8 +764,7 @@ void main() {
 
         await expectLater(
           resolved.launch.runGeneration(
-            processRunner: runner,
-            workingDirectory: project,
+            workingRoot: _emptyGenerationRoot(resolved),
             expected: resolved,
             logicalArguments: resolved.generationArgs,
             timeout: const Duration(minutes: 2),
@@ -354,7 +821,7 @@ void main() {
       final runner = _FakeProcessRunner([
         _ProcessReply.result(_successfulProbe(machineBytes)),
       ]);
-      final resolver = DefaultL10nToolchainResolver(processRunner: runner);
+      final resolver = _testResolver(runner);
 
       final resolution = await resolver.resolve(
         originalProjectRoot: project,
@@ -409,12 +876,11 @@ void main() {
         _ProcessReply.result(_successfulProbe(machineBytes)),
       ]);
 
-      final resolution =
-          await DefaultL10nToolchainResolver(processRunner: runner).resolve(
-            originalProjectRoot: project,
-            sdkRegistry: L10nSdkRegistry({Version(3, 41, 5): flutter41}),
-            selection: const ProjectSelectorSelection(),
-          );
+      final resolution = await _testResolver(runner).resolve(
+        originalProjectRoot: project,
+        sdkRegistry: L10nSdkRegistry({Version(3, 41, 5): flutter41}),
+        selection: const ProjectSelectorSelection(),
+      );
 
       final resolved = resolution as L10nToolchainResolved;
       expect(resolved.machineIdentity.frameworkVersion, Version(3, 41, 5));
@@ -433,12 +899,11 @@ void main() {
         _ProcessReply.result(_successfulProbe(machineBytes)),
       ]);
 
-      final resolution =
-          await DefaultL10nToolchainResolver(processRunner: runner).resolve(
-            originalProjectRoot: project,
-            sdkRegistry: L10nSdkRegistry({Version(3, 44, 1): flutter44}),
-            selection: const ProjectSelectorSelection(),
-          );
+      final resolution = await _testResolver(runner).resolve(
+        originalProjectRoot: project,
+        sdkRegistry: L10nSdkRegistry({Version(3, 44, 1): flutter44}),
+        selection: const ProjectSelectorSelection(),
+      );
 
       final resolved = resolution as L10nToolchainResolved;
       expect(resolved.machineIdentity.frameworkVersion, Version(3, 44, 1));
@@ -460,12 +925,11 @@ void main() {
         _ProcessReply.result(_successfulProbe(machineBytes)),
       ]);
 
-      final resolution =
-          await DefaultL10nToolchainResolver(processRunner: runner).resolve(
-            originalProjectRoot: project,
-            sdkRegistry: L10nSdkRegistry({Version(3, 41, 5): flutter41}),
-            selection: const ProjectSelectorSelection(),
-          );
+      final resolution = await _testResolver(runner).resolve(
+        originalProjectRoot: project,
+        sdkRegistry: L10nSdkRegistry({Version(3, 41, 5): flutter41}),
+        selection: const ProjectSelectorSelection(),
+      );
 
       expect(
         (resolution as L10nToolchainResolved).selectorHashesByRelativePath.keys,
@@ -484,15 +948,14 @@ void main() {
         );
         final runner = _FakeProcessRunner(const []);
 
-        final resolution =
-            await DefaultL10nToolchainResolver(processRunner: runner).resolve(
-              originalProjectRoot: project,
-              sdkRegistry: L10nSdkRegistry({
-                Version(3, 38, 7): flutter38,
-                Version(3, 41, 5): _createFlutterSdk(scratch, 'sdk-3.41.5'),
-              }),
-              selection: const ProjectSelectorSelection(),
-            );
+        final resolution = await _testResolver(runner).resolve(
+          originalProjectRoot: project,
+          sdkRegistry: L10nSdkRegistry({
+            Version(3, 38, 7): flutter38,
+            Version(3, 41, 5): _createFlutterSdk(scratch, 'sdk-3.41.5'),
+          }),
+          selection: const ProjectSelectorSelection(),
+        );
 
         _expectRejected(
           resolution,
@@ -507,12 +970,11 @@ void main() {
       _installFixture(project, 'selectors/unknown_fvmrc.json', '.fvmrc');
       final runner = _FakeProcessRunner(const []);
 
-      final resolution =
-          await DefaultL10nToolchainResolver(processRunner: runner).resolve(
-            originalProjectRoot: project,
-            sdkRegistry: L10nSdkRegistry({Version(3, 38, 7): flutter38}),
-            selection: const ProjectSelectorSelection(),
-          );
+      final resolution = await _testResolver(runner).resolve(
+        originalProjectRoot: project,
+        sdkRegistry: L10nSdkRegistry({Version(3, 38, 7): flutter38}),
+        selection: const ProjectSelectorSelection(),
+      );
 
       _expectRejected(
         resolution,
@@ -533,15 +995,14 @@ void main() {
         _installFixture(project, selectorCase.$1, selectorCase.$2);
         final runner = _FakeProcessRunner(const []);
 
-        final resolution =
-            await DefaultL10nToolchainResolver(processRunner: runner).resolve(
-              originalProjectRoot: project,
-              sdkRegistry: L10nSdkRegistry({
-                Version(3, 38, 7): flutter38,
-                Version(3, 41, 5): _createFlutterSdk(scratch, 'sdk-3.41.5'),
-              }),
-              selection: const ProjectSelectorSelection(),
-            );
+        final resolution = await _testResolver(runner).resolve(
+          originalProjectRoot: project,
+          sdkRegistry: L10nSdkRegistry({
+            Version(3, 38, 7): flutter38,
+            Version(3, 41, 5): _createFlutterSdk(scratch, 'sdk-3.41.5'),
+          }),
+          selection: const ProjectSelectorSelection(),
+        );
 
         _expectRejected(
           resolution,
@@ -579,12 +1040,11 @@ void main() {
       Link(p.join(project.path, '.fvm')).createSync(externalFvm.path);
       final runner = _FakeProcessRunner(const []);
 
-      final resolution =
-          await DefaultL10nToolchainResolver(processRunner: runner).resolve(
-            originalProjectRoot: project,
-            sdkRegistry: L10nSdkRegistry({Version(3, 41, 5): flutter38}),
-            selection: const ProjectSelectorSelection(),
-          );
+      final resolution = await _testResolver(runner).resolve(
+        originalProjectRoot: project,
+        sdkRegistry: L10nSdkRegistry({Version(3, 41, 5): flutter38}),
+        selection: const ProjectSelectorSelection(),
+      );
 
       _expectRejected(
         resolution,
@@ -602,12 +1062,11 @@ void main() {
         ).writeAsStringSync('{"flutter":"$unsupported"}');
         final runner = _FakeProcessRunner(const []);
 
-        final resolution =
-            await DefaultL10nToolchainResolver(processRunner: runner).resolve(
-              originalProjectRoot: project,
-              sdkRegistry: L10nSdkRegistry({Version(3, 38, 7): flutter38}),
-              selection: const ProjectSelectorSelection(),
-            );
+        final resolution = await _testResolver(runner).resolve(
+          originalProjectRoot: project,
+          sdkRegistry: L10nSdkRegistry({Version(3, 38, 7): flutter38}),
+          selection: const ProjectSelectorSelection(),
+        );
 
         _expectRejected(
           resolution,
@@ -623,12 +1082,11 @@ void main() {
       _installFixture(project, 'fvmrc/.fvmrc', '.fvmrc');
       final runner = _FakeProcessRunner(const []);
 
-      final resolution =
-          await DefaultL10nToolchainResolver(processRunner: runner).resolve(
-            originalProjectRoot: project,
-            sdkRegistry: L10nSdkRegistry(const {}),
-            selection: const ProjectSelectorSelection(),
-          );
+      final resolution = await _testResolver(runner).resolve(
+        originalProjectRoot: project,
+        sdkRegistry: L10nSdkRegistry(const {}),
+        selection: const ProjectSelectorSelection(),
+      );
 
       _expectRejected(
         resolution,
@@ -646,12 +1104,11 @@ void main() {
         link.createSync(p.dirname(p.dirname(flutter38)));
         final runner = _FakeProcessRunner(const []);
 
-        final resolution =
-            await DefaultL10nToolchainResolver(processRunner: runner).resolve(
-              originalProjectRoot: project,
-              sdkRegistry: L10nSdkRegistry({Version(3, 38, 7): flutter38}),
-              selection: const ProjectSelectorSelection(),
-            );
+        final resolution = await _testResolver(runner).resolve(
+          originalProjectRoot: project,
+          sdkRegistry: L10nSdkRegistry({Version(3, 38, 7): flutter38}),
+          selection: const ProjectSelectorSelection(),
+        );
 
         _expectRejected(
           resolution,
@@ -680,12 +1137,11 @@ void main() {
           ),
         ]);
 
-        final resolution =
-            await DefaultL10nToolchainResolver(processRunner: runner).resolve(
-              originalProjectRoot: project,
-              sdkRegistry: L10nSdkRegistry({Version(3, 38, 7): flutter38}),
-              selection: const ProjectSelectorSelection(),
-            );
+        final resolution = await _testResolver(runner).resolve(
+          originalProjectRoot: project,
+          sdkRegistry: L10nSdkRegistry({Version(3, 38, 7): flutter38}),
+          selection: const ProjectSelectorSelection(),
+        );
 
         _expectRejected(
           resolution,
@@ -904,7 +1360,12 @@ void main() {
       expect(Directory(sandboxRoot).existsSync(), isTrue);
     });
 
-    for (final boundary in const ['project', 'SDK']) {
+    for (final boundary in const [
+      'project',
+      'project alias',
+      'SDK',
+      'pub cache',
+    ]) {
       test(
         'rejects parent TMPDIR inside the $boundary before materialization',
         () async {
@@ -938,8 +1399,14 @@ void main() {
           }
 
           _installFixture(project, 'fvmrc/.fvmrc', '.fvmrc');
-          final tempRoot = boundary == 'project'
+          final tempRoot = boundary.startsWith('project')
               ? project
+              : boundary == 'pub cache'
+              ? Directory(
+                  Uri.parse(
+                    _readPackageConfig(flutter38)['pubCache']! as String,
+                  ).toFilePath(),
+                )
               : (Directory(
                   p.join(
                     p.dirname(p.dirname(flutter38)),
@@ -948,6 +1415,11 @@ void main() {
                 )..createSync());
           final testName =
               'rejects parent TMPDIR inside the $boundary before materialization';
+          final projectInput = boundary == 'project alias'
+              ? (Link(
+                  p.join(scratch.path, 'project-alias'),
+                )..createSync(project.path)).path
+              : project.path;
           final result = Process.runSync(
             Platform.resolvedExecutable,
             [
@@ -961,7 +1433,7 @@ void main() {
               ...Platform.environment,
               'TMPDIR': tempRoot.path,
               _tmpdirBoundaryChild: 'true',
-              _tmpdirBoundaryProject: project.path,
+              _tmpdirBoundaryProject: projectInput,
               _tmpdirBoundaryFlutter: flutter38,
             },
             includeParentEnvironment: false,
@@ -1220,16 +1692,15 @@ void main() {
         const probeSha =
             'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
 
-        final resolution =
-            await DefaultL10nToolchainResolver(processRunner: runner).resolve(
-              originalProjectRoot: project,
-              sdkRegistry: L10nSdkRegistry({Version(3, 41, 5): flutter41}),
-              selection: RetainedEvidenceSelection(
-                expectedIdentity: _identity41,
-                evidenceSha256: evidenceSha,
-                probeOutputSha256: probeSha,
-              ),
-            );
+        final resolution = await _testResolver(runner).resolve(
+          originalProjectRoot: project,
+          sdkRegistry: L10nSdkRegistry({Version(3, 41, 5): flutter41}),
+          selection: RetainedEvidenceSelection(
+            expectedIdentity: _identity41,
+            evidenceSha256: evidenceSha,
+            probeOutputSha256: probeSha,
+          ),
+        );
 
         final resolved = resolution as L10nToolchainResolved;
         expect(resolved.selection, isA<RetainedEvidenceSelection>());
@@ -1257,18 +1728,17 @@ void main() {
       ).writeAsStringSync('$_otherFrameworkRevision\n');
       final runner = _FakeProcessRunner(const []);
 
-      final resolution =
-          await DefaultL10nToolchainResolver(processRunner: runner).resolve(
-            originalProjectRoot: project,
-            sdkRegistry: L10nSdkRegistry({Version(3, 41, 5): flutter41}),
-            selection: RetainedEvidenceSelection(
-              expectedIdentity: _identity41,
-              evidenceSha256:
-                  'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-              probeOutputSha256:
-                  'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
-            ),
-          );
+      final resolution = await _testResolver(runner).resolve(
+        originalProjectRoot: project,
+        sdkRegistry: L10nSdkRegistry({Version(3, 41, 5): flutter41}),
+        selection: RetainedEvidenceSelection(
+          expectedIdentity: _identity41,
+          evidenceSha256:
+              'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+          probeOutputSha256:
+              'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+        ),
+      );
 
       _expectRejected(
         resolution,
@@ -1295,16 +1765,15 @@ void main() {
       test('rejects invalid retained evidence hashes ${hashes.$1}', () async {
         final runner = _FakeProcessRunner(const []);
 
-        final resolution =
-            await DefaultL10nToolchainResolver(processRunner: runner).resolve(
-              originalProjectRoot: project,
-              sdkRegistry: L10nSdkRegistry({Version(3, 41, 5): flutter38}),
-              selection: RetainedEvidenceSelection(
-                expectedIdentity: _identity41,
-                evidenceSha256: hashes.$1,
-                probeOutputSha256: hashes.$2,
-              ),
-            );
+        final resolution = await _testResolver(runner).resolve(
+          originalProjectRoot: project,
+          sdkRegistry: L10nSdkRegistry({Version(3, 41, 5): flutter38}),
+          selection: RetainedEvidenceSelection(
+            expectedIdentity: _identity41,
+            evidenceSha256: hashes.$1,
+            probeOutputSha256: hashes.$2,
+          ),
+        );
 
         _expectRejected(
           resolution,
@@ -1330,18 +1799,17 @@ void main() {
         ),
       ]);
 
-      final resolution =
-          await DefaultL10nToolchainResolver(processRunner: runner).resolve(
-            originalProjectRoot: project,
-            sdkRegistry: L10nSdkRegistry({Version(3, 41, 5): flutter41}),
-            selection: RetainedEvidenceSelection(
-              expectedIdentity: _identity41,
-              evidenceSha256:
-                  'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-              probeOutputSha256:
-                  'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
-            ),
-          );
+      final resolution = await _testResolver(runner).resolve(
+        originalProjectRoot: project,
+        sdkRegistry: L10nSdkRegistry({Version(3, 41, 5): flutter41}),
+        selection: RetainedEvidenceSelection(
+          expectedIdentity: _identity41,
+          evidenceSha256:
+              'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+          probeOutputSha256:
+              'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+        ),
+      );
 
       _expectRejected(
         resolution,
@@ -1358,23 +1826,22 @@ void main() {
       test('classifies retained version $version as unsupported', () async {
         final runner = _FakeProcessRunner(const []);
 
-        final resolution =
-            await DefaultL10nToolchainResolver(processRunner: runner).resolve(
-              originalProjectRoot: project,
-              sdkRegistry: L10nSdkRegistry(const {}),
-              selection: RetainedEvidenceSelection(
-                expectedIdentity: FlutterMachineIdentity(
-                  frameworkVersion: version,
-                  frameworkRevision: _otherFrameworkRevision,
-                  engineRevision: '2222222222222222222222222222222222222222',
-                  dartSdkVersion: 'dart-retained',
-                ),
-                evidenceSha256:
-                    'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-                probeOutputSha256:
-                    'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
-              ),
-            );
+        final resolution = await _testResolver(runner).resolve(
+          originalProjectRoot: project,
+          sdkRegistry: L10nSdkRegistry(const {}),
+          selection: RetainedEvidenceSelection(
+            expectedIdentity: FlutterMachineIdentity(
+              frameworkVersion: version,
+              frameworkRevision: _otherFrameworkRevision,
+              engineRevision: '2222222222222222222222222222222222222222',
+              dartSdkVersion: 'dart-retained',
+            ),
+            evidenceSha256:
+                'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+            probeOutputSha256:
+                'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+          ),
+        );
 
         _expectRejected(
           resolution,
@@ -1396,7 +1863,7 @@ void main() {
         for (var index = 0; index < 2; index++)
           _ProcessReply.result(_successfulProbe(machineBytes)),
       ]);
-      final resolver = DefaultL10nToolchainResolver(processRunner: runner);
+      final resolver = _testResolver(runner);
       final firstInput = <Version, String>{
         Version(3, 41, 5): flutter41,
         Version(3, 38, 7): flutter38,
@@ -1435,12 +1902,11 @@ void main() {
         final registry = L10nSdkRegistry(registryInput);
         registryInput[Version(3, 38, 7)] = p.join(scratch.path, 'changed');
 
-        final resolution =
-            await DefaultL10nToolchainResolver(processRunner: runner).resolve(
-              originalProjectRoot: project,
-              sdkRegistry: registry,
-              selection: const ProjectSelectorSelection(),
-            );
+        final resolution = await _testResolver(runner).resolve(
+          originalProjectRoot: project,
+          sdkRegistry: registry,
+          selection: const ProjectSelectorSelection(),
+        );
 
         final resolved = resolution as L10nToolchainResolved;
         expect(resolved.canonicalFlutterExecutable, flutter38);
@@ -1484,7 +1950,7 @@ void main() {
         _ProcessReply.result(_successfulProbe(pretty)),
         _ProcessReply.result(_successfulProbe(compact)),
       ]);
-      final resolver = DefaultL10nToolchainResolver(processRunner: runner);
+      final resolver = _testResolver(runner);
 
       final first = await _resolve38(
         project,
@@ -1568,7 +2034,7 @@ void main() {
           _ProcessReply.result(_successfulProbe(stable)),
           _ProcessReply.result(_successfulProbe(stable)),
         ]);
-        final resolver = DefaultL10nToolchainResolver(processRunner: runner);
+        final resolver = _testResolver(runner);
         final expected = await _resolved38(project, flutter38, resolver);
         final refs = Directory(
           p.join(_sdkGitDirectory(flutter38).path, 'refs'),
@@ -1637,7 +2103,7 @@ void main() {
           _ProcessReply.result(_successfulProbe(stable)),
           _ProcessReply.result(_successfulProbe(stable)),
         ]);
-        final resolver = DefaultL10nToolchainResolver(processRunner: runner);
+        final resolver = _testResolver(runner);
         final expected = await _resolved38(project, flutter38, resolver);
         final head = _sdkGitFile(flutter38, 'HEAD');
         final chmod = Process.runSync(
@@ -1717,7 +2183,7 @@ void main() {
         final runner = _FakeProcessRunner([
           _ProcessReply.result(_successfulProbe(stable)),
         ]);
-        final resolver = DefaultL10nToolchainResolver(processRunner: runner);
+        final resolver = _testResolver(runner);
         final expected = await _resolved38(project, flutter38, resolver);
         _sdkGitFile(
           flutter38,
@@ -1747,7 +2213,7 @@ void main() {
         for (var index = 0; index < 2; index++)
           _ProcessReply.result(_successfulProbe(stable)),
       ]);
-      final resolver = DefaultL10nToolchainResolver(processRunner: runner);
+      final resolver = _testResolver(runner);
 
       final expected = await _resolved38(project, flutter38, resolver);
       final result = await resolver.revalidate(
@@ -1793,7 +2259,7 @@ void main() {
         for (var index = 0; index < 2; index++)
           _ProcessReply.result(_successfulProbe(stable)),
       ]);
-      final resolver = DefaultL10nToolchainResolver(processRunner: runner);
+      final resolver = _testResolver(runner);
 
       final expected = await _resolved38(project, flutter38, resolver);
       final result = await resolver.revalidate(
@@ -2234,7 +2700,7 @@ void main() {
           _ProcessReply.result(_successfulProbe(stable)),
           _ProcessReply.result(_successfulProbe(stable)),
         ]);
-        final resolver = DefaultL10nToolchainResolver(processRunner: runner);
+        final resolver = _testResolver(runner);
         final expected = await _resolved38(project, flutter38, resolver);
         _sdkGitFile(
           flutter38,
@@ -2585,6 +3051,264 @@ void main() {
       expect(runner.calls, isEmpty);
     });
 
+    test(
+      'rejects a nested duplicate package record key before JSON collapse',
+      () async {
+        final packageConfig = _sdkArtifact(
+          flutter38,
+          'packages/flutter_tools/.dart_tool/package_config.json',
+        );
+        packageConfig.writeAsStringSync(
+          packageConfig.readAsStringSync().replaceFirst(
+            '"name":"flutter_tools"',
+            '"name":"flutter_tools","name":"flutter_tools"',
+          ),
+        );
+        final runner = _FakeProcessRunner([
+          _ProcessReply.result(
+            _successfulProbe(_fixtureBytes('machine/flutter_3_38_7.json')),
+          ),
+        ]);
+
+        final resolution = await _resolve38(project, flutter38, runner);
+
+        _expectRejected(
+          resolution,
+          code: L10nEvidenceRejectionCode.toolchainUnavailable,
+          detailCode: 'registry-sdk-package-config-invalid',
+        );
+        expect(runner.calls, isEmpty);
+      },
+    );
+
+    test('rejects a decoded nested duplicate package key', () async {
+      final packageConfig = _sdkArtifact(
+        flutter38,
+        'packages/flutter_tools/.dart_tool/package_config.json',
+      );
+      packageConfig.writeAsStringSync(
+        packageConfig.readAsStringSync().replaceFirst(
+          '"name":"flutter_tools"',
+          '"name":"flutter_tools","\\u006eame":"flutter_tools"',
+        ),
+      );
+      final runner = _FakeProcessRunner(const []);
+
+      final resolution = await _resolve38(project, flutter38, runner);
+
+      _expectRejected(
+        resolution,
+        code: L10nEvidenceRejectionCode.toolchainUnavailable,
+        detailCode: 'registry-sdk-package-config-invalid',
+      );
+      expect(runner.calls, isEmpty);
+    });
+
+    for (final mutation in const ['double config version', 'top extra key']) {
+      test('rejects package config $mutation', () async {
+        final config = _readPackageConfig(flutter38);
+        if (mutation == 'double config version') {
+          config['configVersion'] = 2.0;
+        } else {
+          config['extra'] = true;
+        }
+        _writePackageConfig(flutter38, config);
+        final runner = _FakeProcessRunner(const []);
+
+        final resolution = await _resolve38(project, flutter38, runner);
+
+        _expectRejected(
+          resolution,
+          code: L10nEvidenceRejectionCode.toolchainUnavailable,
+          detailCode: 'registry-sdk-package-config-invalid',
+        );
+        expect(runner.calls, isEmpty);
+      });
+    }
+
+    for (final invalidRecord in const [
+      ('extra key', 'extra', true),
+      ('invalid name', 'name', 'Invalid-Name'),
+      ('bad package URI', 'packageUri', 'src/'),
+      ('noncanonical package URI', 'packageUri', 'lib'),
+      ('null package URI', 'packageUri', null),
+      ('short language version', 'languageVersion', '3'),
+      ('padded language version', 'languageVersion', '03.0'),
+      ('three-part language version', 'languageVersion', '3.0.0'),
+      ('future language version', 'languageVersion', '999.0'),
+      ('null language version', 'languageVersion', null),
+      ('non-file root URI', 'rootUri', 'https://example.invalid/package'),
+      ('relative external root URI', 'rootUri', '../outside'),
+      ('null root URI', 'rootUri', null),
+    ]) {
+      test('rejects package record ${invalidRecord.$1}', () async {
+        final config = _readPackageConfig(flutter38);
+        final dependency = _dependencyRecord(config);
+        dependency[invalidRecord.$2] = invalidRecord.$3;
+        _writePackageConfig(flutter38, config);
+        final runner = _FakeProcessRunner(const []);
+
+        final resolution = await _resolve38(project, flutter38, runner);
+
+        _expectRejected(
+          resolution,
+          code: L10nEvidenceRejectionCode.toolchainUnavailable,
+          detailCode: 'registry-sdk-package-config-invalid',
+        );
+        expect(runner.calls, isEmpty);
+      });
+    }
+
+    test('rejects duplicate package names', () async {
+      final config = _readPackageConfig(flutter38);
+      final packages = config['packages']! as List<Object?>;
+      packages.add(Map<String, Object?>.from(_dependencyRecord(config)));
+      _writePackageConfig(flutter38, config);
+      final runner = _FakeProcessRunner(const []);
+
+      final resolution = await _resolve38(project, flutter38, runner);
+
+      _expectRejected(
+        resolution,
+        code: L10nEvidenceRejectionCode.toolchainUnavailable,
+        detailCode: 'registry-sdk-package-config-invalid',
+      );
+      expect(runner.calls, isEmpty);
+    });
+
+    test(
+      'rejects external pubspec whose name differs from its record',
+      () async {
+        _dependencyPubspec(flutter38).writeAsStringSync('name: other_name\n');
+        final runner = _FakeProcessRunner(const []);
+
+        final resolution = await _resolve38(project, flutter38, runner);
+
+        _expectRejected(
+          resolution,
+          code: L10nEvidenceRejectionCode.toolchainUnavailable,
+          detailCode: 'registry-sdk-package-config-invalid',
+        );
+        expect(runner.calls, isEmpty);
+      },
+    );
+
+    test('rejects an external root outside the declared pub cache', () async {
+      final outside = Directory(p.join(scratch.path, 'outside-package'))
+        ..createSync();
+      File(
+        p.join(outside.path, 'pubspec.yaml'),
+      ).writeAsStringSync('name: fixture_dependency\n');
+      final config = _readPackageConfig(flutter38);
+      _dependencyRecord(config)['rootUri'] = Uri.file(outside.path).toString();
+      _writePackageConfig(flutter38, config);
+      final runner = _FakeProcessRunner(const []);
+
+      final resolution = await _resolve38(project, flutter38, runner);
+
+      _expectRejected(
+        resolution,
+        code: L10nEvidenceRejectionCode.toolchainUnavailable,
+        detailCode: 'registry-sdk-package-config-invalid',
+      );
+      expect(runner.calls, isEmpty);
+    });
+
+    test('rejects a declared pub cache overlapping the project', () async {
+      final overlappingCache = Directory(p.join(project.path, 'pub-cache'))
+        ..createSync();
+      final dependencyRoot = Directory(
+        p.join(overlappingCache.path, 'fixture_dependency-1.0.0'),
+      )..createSync();
+      Directory(p.join(dependencyRoot.path, 'lib')).createSync();
+      File(
+        p.join(dependencyRoot.path, 'pubspec.yaml'),
+      ).writeAsStringSync('name: fixture_dependency\nversion: 1.0.0\n');
+      final config = _readPackageConfig(flutter38);
+      config['pubCache'] = Uri.file(
+        overlappingCache.resolveSymbolicLinksSync(),
+      ).toString();
+      _dependencyRecord(config)['rootUri'] = Uri.file(
+        dependencyRoot.resolveSymbolicLinksSync(),
+      ).toString();
+      _writePackageConfig(flutter38, config);
+      final runner = _FakeProcessRunner(const []);
+
+      final resolution = await _resolve38(project, flutter38, runner);
+
+      _expectRejected(
+        resolution,
+        code: L10nEvidenceRejectionCode.toolchainUnavailable,
+        detailCode: 'registry-sdk-package-config-invalid',
+      );
+      expect(runner.calls, isEmpty);
+    });
+
+    test('rejects a symlinked external package root', () async {
+      final config = _readPackageConfig(flutter38);
+      final dependency = _dependencyRecord(config);
+      final dependencyRoot = Directory(
+        Uri.parse(dependency['rootUri']! as String).toFilePath(),
+      );
+      final pubCache = Directory(
+        Uri.parse(config['pubCache']! as String).toFilePath(),
+      );
+      final linkedRoot = Link(p.join(pubCache.path, 'linked-root'))
+        ..createSync(dependencyRoot.path);
+      dependency['rootUri'] = Uri.file(linkedRoot.path).toString();
+      _writePackageConfig(flutter38, config);
+      final runner = _FakeProcessRunner(const []);
+
+      final resolution = await _resolve38(project, flutter38, runner);
+
+      _expectRejected(
+        resolution,
+        code: L10nEvidenceRejectionCode.toolchainUnavailable,
+        detailCode: 'registry-sdk-package-config-invalid',
+      );
+      expect(runner.calls, isEmpty);
+    });
+
+    test('rejects a group-writable external package root', () async {
+      final config = _readPackageConfig(flutter38);
+      final root = Uri.parse(
+        _dependencyRecord(config)['rootUri']! as String,
+      ).toFilePath();
+      expect(Process.runSync('/bin/chmod', ['0777', root]).exitCode, 0);
+      final runner = _FakeProcessRunner(const []);
+
+      final resolution = await _resolve38(project, flutter38, runner);
+
+      _expectRejected(
+        resolution,
+        code: L10nEvidenceRejectionCode.toolchainUnavailable,
+        detailCode: 'registry-sdk-package-config-invalid',
+      );
+      expect(runner.calls, isEmpty);
+    });
+
+    test(
+      'rejects external pubspec byte drift during the direct probe',
+      () async {
+        final pubspec = _dependencyPubspec(flutter38);
+        final runner = _FakeProcessRunner([
+          _ProcessReply.result(
+            _successfulProbe(_fixtureBytes('machine/flutter_3_38_7.json')),
+            beforeReturn: () => pubspec.writeAsStringSync('name: drifted\n'),
+          ),
+        ]);
+
+        final resolution = await _resolve38(project, flutter38, runner);
+
+        _expectRejected(
+          resolution,
+          code: L10nEvidenceRejectionCode.toolchainUnavailable,
+          detailCode: 'canonical-sdk-changed-during-probe',
+        );
+        expect(runner.calls, hasLength(1));
+      },
+    );
+
     test('checks retained controls before invoking the registry binary', () async {
       _sdkArtifact(
         flutter38,
@@ -2592,23 +3316,22 @@ void main() {
       ).writeAsStringSync('stale-engine-revision\n');
       final runner = _FakeProcessRunner(const []);
 
-      final resolution =
-          await DefaultL10nToolchainResolver(processRunner: runner).resolve(
-            originalProjectRoot: project,
-            sdkRegistry: L10nSdkRegistry({Version(3, 38, 7): flutter38}),
-            selection: RetainedEvidenceSelection(
-              expectedIdentity: FlutterMachineIdentity(
-                frameworkVersion: Version(3, 38, 7),
-                frameworkRevision: _frameworkRevision38,
-                engineRevision: _engineRevision38,
-                dartSdkVersion: '3.10.7',
-              ),
-              evidenceSha256:
-                  'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-              probeOutputSha256:
-                  'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
-            ),
-          );
+      final resolution = await _testResolver(runner).resolve(
+        originalProjectRoot: project,
+        sdkRegistry: L10nSdkRegistry({Version(3, 38, 7): flutter38}),
+        selection: RetainedEvidenceSelection(
+          expectedIdentity: FlutterMachineIdentity(
+            frameworkVersion: Version(3, 38, 7),
+            frameworkRevision: _frameworkRevision38,
+            engineRevision: _engineRevision38,
+            dartSdkVersion: '3.10.7',
+          ),
+          evidenceSha256:
+              'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+          probeOutputSha256:
+              'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+        ),
+      );
 
       _expectRejected(
         resolution,
@@ -2624,7 +3347,7 @@ void main() {
         _ProcessReply.result(_successfulProbe(stable)),
         _ProcessReply.result(_successfulProbe(stable)),
       ]);
-      final resolver = DefaultL10nToolchainResolver(processRunner: runner);
+      final resolver = _testResolver(runner);
       final expected = await _resolved38(project, flutter38, resolver);
       _sdkArtifact(
         flutter38,
@@ -2651,7 +3374,7 @@ void main() {
           _ProcessReply.result(_successfulProbe(stable)),
           _ProcessReply.result(_successfulProbe(stable)),
         ]);
-        final resolver = DefaultL10nToolchainResolver(processRunner: runner);
+        final resolver = _testResolver(runner);
         final expected = await _resolved38(project, flutter38, resolver);
         final cache = Directory(
           p.join(p.dirname(p.dirname(flutter38)), 'bin', 'cache'),
@@ -2864,7 +3587,7 @@ void main() {
             },
           ),
         ]);
-        final resolver = DefaultL10nToolchainResolver(processRunner: runner);
+        final resolver = _testResolver(runner);
         final expected = await _resolved38(project, flutter38, resolver);
 
         final result = await resolver.revalidate(
@@ -2894,7 +3617,7 @@ void main() {
             },
           ),
         ]);
-        final resolver = DefaultL10nToolchainResolver(processRunner: runner);
+        final resolver = _testResolver(runner);
         final expected = await _resolved38(project, flutter38, resolver);
 
         final result = await resolver.revalidate(
@@ -2924,7 +3647,7 @@ void main() {
             },
           ),
         ]);
-        final resolver = DefaultL10nToolchainResolver(processRunner: runner);
+        final resolver = _testResolver(runner);
         final expected = await _resolved38(project, flutter38, resolver);
 
         final result = await resolver.revalidate(
@@ -2954,7 +3677,7 @@ void main() {
           _ProcessReply.result(_successfulProbe(machineBytes)),
           _ProcessReply.result(_successfulProbe(machineBytes)),
         ]);
-        final resolver = DefaultL10nToolchainResolver(processRunner: runner);
+        final resolver = _testResolver(runner);
         final expected = await _resolved38(project, flutter38, resolver);
 
         final result = await resolver.revalidate(
@@ -2983,7 +3706,7 @@ void main() {
         final runner = _FakeProcessRunner([
           _ProcessReply.result(_successfulProbe(stable)),
         ]);
-        final resolver = DefaultL10nToolchainResolver(processRunner: runner);
+        final resolver = _testResolver(runner);
         final expected = await _resolved38(project, flutter38, resolver);
         final forged = switch (forgery) {
           'generation argv' => _copyResolved(
@@ -3038,7 +3761,7 @@ void main() {
         final runner = _FakeProcessRunner([
           _ProcessReply.result(_successfulProbe(stable)),
         ]);
-        final resolver = DefaultL10nToolchainResolver(processRunner: runner);
+        final resolver = _testResolver(runner);
         final expected = await _resolved38(project, flutter38, resolver);
         final launch = expected.launch;
         final forged = _copyResolved(
@@ -3087,7 +3810,7 @@ void main() {
         _ProcessReply.result(_successfulProbe(stable)),
         _ProcessReply.result(_successfulProbe(stable)),
       ]);
-      final resolver = DefaultL10nToolchainResolver(processRunner: runner);
+      final resolver = _testResolver(runner);
       final resolution = await resolver.resolve(
         originalProjectRoot: project,
         sdkRegistry: L10nSdkRegistry({Version(3, 41, 5): flutter41}),
@@ -3107,20 +3830,8 @@ void main() {
 
       expect(result, isA<L10nToolchainStillMatches>());
       expect(runner.calls, hasLength(2));
-      final sdkRoot = p.dirname(p.dirname(flutter41));
       expect(
-        runner.calls.every(
-          (call) =>
-              call.executable ==
-              p.join(
-                sdkRoot,
-                'bin',
-                'cache',
-                'dart-sdk',
-                'bin',
-                _bundledDartName,
-              ),
-        ),
+        runner.calls.every((call) => call.executable == '/test/sandbox-exec'),
         isTrue,
       );
     });
@@ -3138,7 +3849,7 @@ void main() {
         _ProcessReply.result(_successfulProbe(stable)),
         _ProcessReply.result(_successfulProbe(changed)),
       ]);
-      final resolver = DefaultL10nToolchainResolver(processRunner: runner);
+      final resolver = _testResolver(runner);
       final resolution = await resolver.resolve(
         originalProjectRoot: project,
         sdkRegistry: L10nSdkRegistry({Version(3, 41, 5): flutter41}),
@@ -3165,7 +3876,7 @@ void main() {
         _ProcessReply.result(_successfulProbe(machineBytes)),
         _ProcessReply.result(_successfulProbe(machineBytes)),
       ]);
-      final resolver = DefaultL10nToolchainResolver(processRunner: runner);
+      final resolver = _testResolver(runner);
       final expected = await _resolved38(project, flutter38, resolver);
       File(
         p.join(project.path, '.fvmrc'),
@@ -3186,7 +3897,7 @@ void main() {
         _ProcessReply.result(_successfulProbe(machineBytes)),
         _ProcessReply.result(_successfulProbe(machineBytes)),
       ]);
-      final resolver = DefaultL10nToolchainResolver(processRunner: runner);
+      final resolver = _testResolver(runner);
       final expected = await _resolved38(project, flutter38, resolver);
       File(flutter38).deleteSync();
 
@@ -3210,7 +3921,7 @@ void main() {
         _ProcessReply.result(_successfulProbe(stable)),
         _ProcessReply.result(_successfulProbe(changed)),
       ]);
-      final resolver = DefaultL10nToolchainResolver(processRunner: runner);
+      final resolver = _testResolver(runner);
       final expected = await _resolved38(project, flutter38, resolver);
 
       final result = await resolver.revalidate(
@@ -3236,7 +3947,7 @@ void main() {
           _ProcessReply.result(_successfulProbe(stable)),
           _ProcessReply.result(_successfulProbe(compact)),
         ]);
-        final resolver = DefaultL10nToolchainResolver(processRunner: runner);
+        final resolver = _testResolver(runner);
         final expected = await _resolved38(project, flutter38, resolver);
 
         final result = await resolver.revalidate(
@@ -3256,7 +3967,7 @@ void main() {
           _ProcessReply.result(_successfulProbe(stable)),
           _ProcessReply.error(const FileSystemException('host path')),
         ]);
-        final resolver = DefaultL10nToolchainResolver(processRunner: runner);
+        final resolver = _testResolver(runner);
         final expected = await _resolved38(project, flutter38, resolver);
 
         final result = await resolver.revalidate(
@@ -3270,7 +3981,7 @@ void main() {
   });
 
   group('installed SDK direct integration', () {
-    setUp(_requirePosixResolverHost);
+    setUp(_requireDarwinResolverHost);
 
     for (final sdk in const [
       (
@@ -3306,17 +4017,20 @@ void main() {
           File(
             p.join(project.path, '.fvmrc'),
           ).writeAsStringSync('{"flutter":"${sdk.version}"}\n');
-          final runner = _RecordingProcessRunner(const ManagedProcessRunner());
+          final sdkRoot = Directory(p.dirname(p.dirname(canonicalFlutter)));
+          final sdkSourceBefore = _gitTrackedContentFingerprint(sdkRoot);
+          final sdkAuthorityBefore = _sdkBoundAuthorityFingerprints(sdkRoot);
+          final resolution = await const DefaultL10nToolchainResolver().resolve(
+            originalProjectRoot: project,
+            sdkRegistry: L10nSdkRegistry({
+              Version.parse(sdk.version): canonicalFlutter,
+            }),
+            selection: const ProjectSelectorSelection(),
+          );
 
-          final resolution =
-              await DefaultL10nToolchainResolver(processRunner: runner).resolve(
-                originalProjectRoot: project,
-                sdkRegistry: L10nSdkRegistry({
-                  Version.parse(sdk.version): canonicalFlutter,
-                }),
-                selection: const ProjectSelectorSelection(),
-              );
-
+          if (resolution case L10nToolchainRejected(:final failure)) {
+            fail('installed SDK rejection: ${failure.detailCode}');
+          }
           expect(resolution, isA<L10nToolchainResolved>());
           final resolved = resolution as L10nToolchainResolved;
           expect(
@@ -3324,29 +4038,197 @@ void main() {
             sdk.frameworkRevision,
           );
           expect(resolved.machineIdentity.dartSdkVersion, sdk.dartVersion);
-          expect(runner.calls, hasLength(1));
-          _expectDirectCall(
-            runner.calls.single,
-            canonicalFlutter: canonicalFlutter,
-            logicalArguments: ['--version', '--machine'],
-            project: project,
+          final lease = resolved.launch.createGenerationRootLease();
+          final stage = lease.directory;
+          addTearDown(() {
+            if (stage.existsSync()) {
+              if (lease.safeToDelete) {
+                lease.cleanup();
+              } else {
+                stage.deleteSync(recursive: true);
+              }
+            }
+          });
+          final pubspec = File(p.join(stage.path, 'pubspec.yaml'))
+            ..writeAsStringSync(
+              'name: guarded_l10n_fixture\n'
+              'environment:\n'
+              '  sdk: ">=3.0.0 <4.0.0"\n'
+              'flutter:\n'
+              '  generate: true\n',
+            );
+          final yaml = File(p.join(stage.path, 'l10n.yaml'))
+            ..writeAsStringSync(
+              'arb-dir: lib/l10n\n'
+              'template-arb-file: app_en.arb\n'
+              'output-dir: lib/generated\n'
+              'output-localization-file: exact_output.dart\n'
+              'output-class: ExactLocalizations\n',
+            );
+          final arb = File(p.join(stage.path, 'lib/l10n/app_en.arb'))
+            ..createSync(recursive: true)
+            ..writeAsStringSync('{"hello":"Hello"}\n');
+          final pubspecBefore = pubspec.readAsBytesSync();
+          final yamlBefore = yaml.readAsBytesSync();
+          final arbBefore = arb.readAsBytesSync();
+          final result = await resolved.launch.runGeneration(
+            workingRoot: lease.seal(),
+            expected: resolved,
+            logicalArguments: resolved.generationArgs,
+            timeout: const Duration(minutes: 2),
+            maxOutputBytesPerStream: 1024 * 1024,
           );
           expect(
-            Directory(
-              runner.calls.single.sandboxObservation!.root,
-            ).existsSync(),
+            result.exitCode,
+            0,
+            reason: utf8.decode(result.stderr.capturedPayload),
+          );
+          expect(result.timedOut, isFalse);
+          final generated = File(
+            p.join(stage.path, 'lib/generated/exact_output.dart'),
+          );
+          expect(generated.existsSync(), isTrue);
+          expect(
+            generated.readAsStringSync(),
+            contains('class ExactLocalizations'),
+          );
+          expect(pubspec.readAsBytesSync(), pubspecBefore);
+          expect(yaml.readAsBytesSync(), yamlBefore);
+          expect(arb.readAsBytesSync(), arbBefore);
+          expect(
+            File(p.join(stage.path, 'pubspec.lock')).existsSync(),
             isFalse,
           );
+          expect(
+            Directory(p.join(stage.path, '.dart_tool')).existsSync(),
+            isFalse,
+          );
+          expect(_gitTrackedContentFingerprint(sdkRoot), sdkSourceBefore);
+          expect(_sdkBoundAuthorityFingerprints(sdkRoot), sdkAuthorityBefore);
+          expect(lease.safeToDelete, isTrue);
+          lease.cleanup();
+          expect(stage.existsSync(), isFalse);
         },
       );
     }
   });
 
   test(
-    'Windows host rejects argv-only Flutter evidence and revalidation',
+    'Darwin confinement denies network and writes outside owned roots',
     () async {
-      final runner = _FakeProcessRunner(const []);
-      final resolver = DefaultL10nToolchainResolver(processRunner: runner);
+      final root = Directory.systemTemp.createTempSync(
+        'l10n-confinement-integration-',
+      );
+      final sandbox = Directory(p.join(root.path, 'sandbox'))..createSync();
+      final stage = Directory(p.join(root.path, 'stage'))..createSync();
+      final protected = Directory(p.join(root.path, 'protected'))..createSync();
+      final sdkLike = Directory(p.join(root.path, 'sdk-like'))..createSync();
+      final escaped = Link(p.join(stage.path, 'escaped'))
+        ..createSync(protected.path);
+      final server = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+      var connections = 0;
+      final subscription = server.listen((socket) {
+        connections++;
+        socket.destroy();
+      });
+      try {
+        final backend = const DefaultL10nProcessConfinementBackend();
+        final authority = backend.captureAuthority();
+        final protectedFile = p.join(protected.path, 'sibling.txt');
+        final sdkFile = p.join(sdkLike.path, 'sdk.txt');
+        final sandboxFile = p.join(sandbox.path, 'owned.txt');
+        final stageFile = p.join(stage.path, 'generated.txt');
+        final escapedFile = p.join(escaped.path, 'escaped.txt');
+        final hardLinkSource = File(p.join(protected.path, 'authority.txt'))
+          ..writeAsStringSync('outside authority\n');
+        final hardLinkDestination = p.join(stage.path, 'authority-link.txt');
+        final linkCountBefore = _darwinLinkCount(hardLinkSource.path);
+        final helper = p.join(
+          Directory.current.path,
+          'test',
+          'fixtures',
+          'l10n_action_readiness',
+          'process',
+          'confinement_helper.dart',
+        );
+        final command = backend.confine(
+          expectedAuthority: authority,
+          sandboxRoot: sandbox.resolveSymbolicLinksSync(),
+          writableRoot: stage.resolveSymbolicLinksSync(),
+          executable: Platform.resolvedExecutable,
+          arguments: [
+            helper,
+            protectedFile,
+            sdkFile,
+            sandboxFile,
+            stageFile,
+            escapedFile,
+            server.port.toString(),
+            hardLinkSource.path,
+            hardLinkDestination,
+          ],
+        );
+
+        final result = await Process.run(
+          command.executable,
+          command.arguments,
+          workingDirectory: stage.path,
+          environment: {
+            'HOME': sandbox.path,
+            'TMPDIR': sandbox.path,
+            'LANG': 'C',
+            'LC_ALL': 'C',
+          },
+          includeParentEnvironment: false,
+        );
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+
+        expect(result.exitCode, 0, reason: result.stderr as String?);
+        final observed =
+            jsonDecode(result.stdout as String) as Map<String, Object?>;
+        expect(observed, {
+          'protectedSiblingWrite': false,
+          'sdkLikeWrite': false,
+          'sandboxWrite': true,
+          'stageWrite': true,
+          'symlinkEscapeWrite': false,
+          'loopbackConnect': false,
+          'crossBoundaryHardLink': false,
+        });
+        expect(File(protectedFile).existsSync(), isFalse);
+        expect(File(sdkFile).existsSync(), isFalse);
+        expect(File(sandboxFile).readAsStringSync(), 'guarded write\n');
+        expect(File(stageFile).readAsStringSync(), 'guarded write\n');
+        expect(File(escapedFile).existsSync(), isFalse);
+        expect(File(hardLinkDestination).existsSync(), isFalse);
+        expect(hardLinkSource.readAsStringSync(), 'outside authority\n');
+        expect(_darwinLinkCount(hardLinkSource.path), linkCountBefore);
+        expect(connections, 0);
+      } finally {
+        await subscription.cancel();
+        await server.close();
+        if (root.existsSync()) root.deleteSync(recursive: true);
+      }
+    },
+    skip: Platform.isMacOS ? false : 'Darwin sandbox-exec integration',
+  );
+
+  test(
+    'non-Darwin production fails closed without launching a process',
+    () async {
+      File(
+        p.join(project.path, '.fvmrc'),
+      ).writeAsStringSync('{"flutter":"3.38.7"}');
+      final launchMarker = File(p.join(scratch.path, 'unexpected-launch'));
+      if (!Platform.isWindows) {
+        final bundledDart =
+            _sdkArtifact(flutter38, 'bin/cache/dart-sdk/bin/dart')
+              ..writeAsStringSync(
+                '#!/bin/sh\n/usr/bin/touch ${launchMarker.path}\nexit 99\n',
+              );
+        _makeExecutable(bundledDart);
+      }
+      final resolver = const DefaultL10nToolchainResolver();
       final resolution = await resolver.resolve(
         originalProjectRoot: project,
         sdkRegistry: L10nSdkRegistry({Version(3, 38, 7): flutter38}),
@@ -3356,7 +4238,7 @@ void main() {
       _expectRejected(
         resolution,
         code: L10nEvidenceRejectionCode.unsupportedConfiguration,
-        detailCode: 'windows-command-model-unsupported',
+        detailCode: 'os-confinement-unsupported',
       );
 
       final revalidation = await resolver.revalidate(
@@ -3387,13 +4269,49 @@ void main() {
         ),
       );
 
-      _expectChanged(
-        revalidation,
-        detailCode: 'windows-command-model-unsupported',
-      );
-      expect(runner.calls, isEmpty);
+      _expectChanged(revalidation, detailCode: 'os-confinement-unsupported');
+      expect(launchMarker.existsSync(), isFalse);
     },
-    skip: Platform.isWindows ? false : 'Windows-host assertion',
+    skip: Platform.isMacOS ? 'non-Darwin production assertion' : false,
+  );
+
+  test(
+    'testing generation-root identity supports GNU stat on Linux',
+    () async {
+      final runner = _FakeProcessRunner([
+        _ProcessReply.result(
+          _successfulProbe(_fixtureBytes('machine/flutter_3_38_7.json')),
+        ),
+      ]);
+      final resolution = await _resolve38(
+        project,
+        flutter38,
+        runner,
+        resolver: _testResolver(runner),
+      );
+      if (resolution case L10nToolchainRejected(:final failure)) {
+        fail('unexpected fixture rejection: ${failure.detailCode}');
+      }
+      final lease = (resolution as L10nToolchainResolved).launch
+          .createGenerationRootLease();
+      addTearDown(() {
+        if (lease.directory.existsSync() && lease.safeToDelete) {
+          lease.cleanup();
+        }
+      });
+      File(p.join(lease.directory.path, 'empty.yaml')).createSync();
+      File(
+        p.join(lease.directory.path, 'messages.arb'),
+      ).writeAsStringSync('{}\n');
+
+      final workingRoot = lease.seal();
+
+      expect(workingRoot.directory.path, lease.directory.path);
+      expect(lease.safeToDelete, isTrue);
+      lease.cleanup();
+      expect(lease.directory.existsSync(), isFalse);
+    },
+    skip: Platform.isLinux ? false : 'GNU stat integration',
   );
 }
 
@@ -3406,9 +4324,98 @@ final _identity41 = FlutterMachineIdentity(
 
 final _sha256Pattern = RegExp(r'^[0-9a-f]{64}$');
 
+int _darwinLinkCount(String path) {
+  final result = Process.runSync(
+    '/usr/bin/stat',
+    ['-f', '%l', path],
+    environment: const {'LANG': 'C', 'LC_ALL': 'C'},
+    includeParentEnvironment: false,
+  );
+  expect(result.exitCode, 0, reason: result.stderr as String?);
+  return int.parse((result.stdout as String).trim());
+}
+
+String _gitTrackedContentFingerprint(Directory repository) {
+  final listed = Process.runSync(
+    '/usr/bin/git',
+    ['-C', repository.path, 'ls-files', '-z'],
+    environment: const {'LANG': 'C', 'LC_ALL': 'C'},
+    includeParentEnvironment: false,
+    stdoutEncoding: null,
+    stderrEncoding: utf8,
+  );
+  expect(listed.exitCode, 0, reason: listed.stderr as String?);
+  final paths =
+      utf8
+          .decode(listed.stdout as List<int>)
+          .split('\u0000')
+          .where((path) => path.isNotEmpty)
+          .toList()
+        ..sort();
+  final framed = BytesBuilder(copy: false);
+  for (final relativePath in paths) {
+    final pathBytes = utf8.encode(relativePath);
+    final entity = File(p.join(repository.path, relativePath));
+    final type = FileSystemEntity.typeSync(entity.path, followLinks: false);
+    final content = type == FileSystemEntityType.link
+        ? utf8.encode(Link(entity.path).targetSync())
+        : entity.readAsBytesSync();
+    for (final bytes in [pathBytes, content]) {
+      framed
+        ..add(ascii.encode(bytes.length.toString()))
+        ..addByte(0)
+        ..add(bytes)
+        ..addByte(0);
+    }
+  }
+  return sha256.convert(framed.takeBytes()).toString();
+}
+
+Map<String, String> _sdkBoundAuthorityFingerprints(Directory sdkRoot) {
+  const paths = [
+    'packages/flutter_tools/pubspec.yaml',
+    'packages/flutter_tools/pubspec.lock',
+    'packages/flutter_tools/.dart_tool/package_config.json',
+    'bin/cache/flutter_tools.snapshot',
+    'bin/cache/flutter_tools.stamp',
+    'bin/cache/engine.stamp',
+    'bin/cache/engine.realm',
+    'bin/cache/engine-dart-sdk.stamp',
+    'bin/cache/engine_stamp.json',
+    'bin/cache/engine_stamp.stamp',
+    'bin/cache/dart-sdk/version',
+    'bin/cache/flutter.version.json',
+    'bin/internal/engine.version',
+  ];
+  return Map.unmodifiable({
+    for (final relativePath in paths)
+      relativePath: _fileAuthorityFingerprint(
+        File(p.join(sdkRoot.path, relativePath)),
+      ),
+  });
+}
+
+String _fileAuthorityFingerprint(File file) {
+  final before = file.statSync();
+  final bytes = file.readAsBytesSync();
+  final after = file.statSync();
+  expect(after.type, before.type);
+  expect(after.mode, before.mode);
+  expect(after.size, before.size);
+  expect(after.modified, before.modified);
+  expect(after.changed, before.changed);
+  return '${before.mode & 0xfff}:${bytes.length}:${sha256.convert(bytes)}';
+}
+
 void _requirePosixResolverHost() {
   if (Platform.isWindows) {
     markTestSkipped('POSIX resolver contract');
+  }
+}
+
+void _requireDarwinResolverHost() {
+  if (!Platform.isMacOS) {
+    markTestSkipped('Darwin production confinement contract');
   }
 }
 
@@ -3417,10 +4424,19 @@ Future<L10nToolchainResolution> _resolve38(
   String flutter,
   _FakeProcessRunner runner, {
   DefaultL10nToolchainResolver? resolver,
-}) => (resolver ?? DefaultL10nToolchainResolver(processRunner: runner)).resolve(
+}) => (resolver ?? _testResolver(runner)).resolve(
   originalProjectRoot: project,
   sdkRegistry: L10nSdkRegistry({Version(3, 38, 7): flutter}),
   selection: const ProjectSelectorSelection(),
+);
+
+DefaultL10nToolchainResolver _testResolver(
+  _FakeProcessRunner runner, {
+  L10nProcessConfinementBackend confinement =
+      const _TestProcessConfinementBackend(),
+}) => DefaultL10nToolchainResolver.testing(
+  processRunner: runner,
+  processConfinement: confinement,
 );
 
 Future<L10nToolchainResolved> _resolved38(
@@ -3434,6 +4450,20 @@ Future<L10nToolchainResolved> _resolved38(
     selection: const ProjectSelectorSelection(),
   );
   return result as L10nToolchainResolved;
+}
+
+L10nGenerationWorkingRoot _emptyGenerationRoot(L10nToolchainResolved resolved) {
+  final lease = resolved.launch.createGenerationRootLease();
+  addTearDown(() {
+    if (lease.directory.existsSync()) {
+      if (lease.safeToDelete) {
+        lease.cleanup();
+      } else {
+        lease.directory.deleteSync(recursive: true);
+      }
+    }
+  });
+  return lease.seal();
 }
 
 L10nToolchainResolved _copyResolved(
@@ -3488,16 +4518,20 @@ void _expectDirectCall(
   required Directory project,
 }) {
   final sdkRoot = p.dirname(p.dirname(canonicalFlutter));
-  expect(
-    call.executable,
-    p.join(sdkRoot, 'bin', 'cache', 'dart-sdk', 'bin', _bundledDartName),
-  );
+  expect(call.executable, '/test/sandbox-exec');
+  final sandboxRoot = call.sandboxObservation!.root;
   expect(call.arguments, [
-    '--packages=${p.join(sdkRoot, 'packages', 'flutter_tools', '.dart_tool', 'package_config.json')}',
+    '-D',
+    'SANDBOX_ROOT=$sandboxRoot',
+    '-p',
+    '(version 1)(allow default)(deny network*)'
+        '(deny file-write*)'
+        '(allow file-write* (subpath (param "SANDBOX_ROOT")))',
+    p.join(sdkRoot, 'bin', 'cache', 'dart-sdk', 'bin', _bundledDartName),
     p.join(sdkRoot, 'bin', 'cache', 'flutter_tools.snapshot'),
     ...logicalArguments,
   ]);
-  expect(call.workingDirectory, project.absolute.path);
+  expect(call.workingDirectory, project.resolveSymbolicLinksSync());
   expect(call.timeout, const Duration(seconds: 30));
   expect(call.maxOutputBytesPerStream, 1024 * 1024);
   expect(call.includeParentEnvironment, isFalse);
@@ -3515,6 +4549,15 @@ void _expectDirectCall(
 
 String _createFlutterSdk(Directory scratch, String name) {
   final sdk = Directory(p.join(scratch.path, name))..createSync();
+  final pubCache = Directory(p.join(scratch.path, '$name-pub-cache'))
+    ..createSync();
+  final dependencyRoot = Directory(
+    p.join(pubCache.path, 'hosted', 'pub.dev', 'fixture_dependency-1.0.0'),
+  )..createSync(recursive: true);
+  Directory(p.join(dependencyRoot.path, 'lib')).createSync();
+  File(
+    p.join(dependencyRoot.path, 'pubspec.yaml'),
+  ).writeAsStringSync('name: fixture_dependency\nversion: 1.0.0\n');
   final frameworkRevision = _fixtureFrameworkRevision(name);
   final engineRevision = _fixtureEngineRevision(name);
   final engineContentHash = _fixtureEngineContentHash(name);
@@ -3565,6 +4608,15 @@ String _createFlutterSdk(Directory scratch, String name) {
       ..createSync(recursive: true)
       ..writeAsStringSync(entry.value);
   }
+  Directory(
+    p.join(sdk.path, 'packages', 'flutter_tools', 'lib'),
+  ).createSync(recursive: true);
+  File(
+    p.join(sdk.path, 'packages', 'flutter_tools', 'pubspec.yaml'),
+  ).writeAsStringSync('name: flutter_tools\nversion: 0.0.0\n');
+  File(
+    p.join(sdk.path, 'packages', 'flutter_tools', 'pubspec.lock'),
+  ).writeAsStringSync('packages: {}\n');
   File(
       p.join(
         sdk.path,
@@ -3577,11 +4629,14 @@ String _createFlutterSdk(Directory scratch, String name) {
     ..createSync(recursive: true)
     ..writeAsStringSync(
       '{"configVersion":2,'
-      '"packages":[{"name":"flutter_tools","rootUri":"../",'
+      '"packages":[{"name":"fixture_dependency",'
+      '"rootUri":"${Uri.file(dependencyRoot.resolveSymbolicLinksSync())}",'
+      '"packageUri":"lib/","languageVersion":"3.0"},'
+      '{"name":"flutter_tools","rootUri":"../",'
       '"packageUri":"lib/","languageVersion":"3.0"}],'
       '"generator":"pub",'
       '"generatorVersion":"${_fixtureDartVersion(name)}",'
-      '"pubCache":"file:///fixture/pub-cache"}\n',
+      '"pubCache":"${Uri.file(pubCache.resolveSymbolicLinksSync())}"}\n',
     );
   _writeLooseGitRef(
     flutter.resolveSymbolicLinksSync(),
@@ -3655,6 +4710,33 @@ String _fixtureEngineContentHash(String sdkName) => switch (sdkName) {
 
 File _sdkArtifact(String canonicalFlutter, String relativePath) =>
     File(p.join(p.dirname(p.dirname(canonicalFlutter)), relativePath));
+
+Map<String, Object?> _readPackageConfig(String canonicalFlutter) =>
+    (jsonDecode(
+          _sdkArtifact(
+            canonicalFlutter,
+            'packages/flutter_tools/.dart_tool/package_config.json',
+          ).readAsStringSync(),
+        )
+        as Map<String, Object?>);
+
+void _writePackageConfig(String canonicalFlutter, Map<String, Object?> config) {
+  _sdkArtifact(
+    canonicalFlutter,
+    'packages/flutter_tools/.dart_tool/package_config.json',
+  ).writeAsStringSync('${jsonEncode(config)}\n');
+}
+
+Map<String, Object?> _dependencyRecord(Map<String, Object?> config) =>
+    ((config['packages']! as List<Object?>).first as Map<String, Object?>);
+
+File _dependencyPubspec(String canonicalFlutter) {
+  final config = _readPackageConfig(canonicalFlutter);
+  final root = Uri.parse(
+    _dependencyRecord(config)['rootUri']! as String,
+  ).toFilePath();
+  return File(p.join(root, 'pubspec.yaml'));
+}
 
 void _replaceEngineRevision(
   String canonicalFlutter, {
@@ -3760,7 +4842,7 @@ ManagedProcessResult _successfulProbe(
   ),
 );
 
-final class _FakeProcessRunner implements ProcessExecutionRunner {
+final class _FakeProcessRunner implements L10nTestProcessRunner {
   _FakeProcessRunner(List<_ProcessReply> replies)
     : _replies = List<_ProcessReply>.of(replies);
 
@@ -3803,44 +4885,102 @@ final class _FakeProcessRunner implements ProcessExecutionRunner {
   }
 }
 
-final class _RecordingProcessRunner implements ProcessExecutionRunner {
-  _RecordingProcessRunner(this._delegate);
+final class _ManagedMarkerRunner extends ManagedProcessRunner
+    implements L10nTestProcessRunner {
+  const _ManagedMarkerRunner();
+}
 
-  final ProcessExecutionRunner _delegate;
-  final List<_ProcessCall> calls = [];
+final class _TestProcessConfinementBackend
+    implements L10nProcessConfinementBackend {
+  const _TestProcessConfinementBackend();
+
+  static const authority = L10nProcessConfinementAuthority(
+    backendIdentity: 'test-confinement-v1',
+    requestedExecutable: '/test/sandbox-exec',
+    requestedExecutableType: FileSystemEntityType.file,
+    canonicalExecutable: '/test/sandbox-exec',
+    executableSha256:
+        'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    executableByteLength: 1,
+    executablePosixMode: 0x1ed,
+    policyIdentity:
+        'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+  );
 
   @override
-  Future<ManagedProcessResult> run(
-    String executable,
-    List<String> arguments, {
-    required String workingDirectory,
-    required Duration timeout,
-    required int maxOutputBytesPerStream,
-    Map<String, String> environmentOverrides = const {},
-    bool includeParentEnvironment = true,
+  L10nProcessConfinementAuthority captureAuthority() => authority;
+
+  @override
+  L10nConfinedCommand confine({
+    required L10nProcessConfinementAuthority expectedAuthority,
+    required String sandboxRoot,
+    required String? writableRoot,
+    required String executable,
+    required List<String> arguments,
   }) {
-    calls.add(
-      _ProcessCall(
-        executable: executable,
-        arguments: List<String>.of(arguments),
-        workingDirectory: workingDirectory,
-        timeout: timeout,
-        maxOutputBytesPerStream: maxOutputBytesPerStream,
-        environmentOverrides: Map<String, String>.of(environmentOverrides),
-        includeParentEnvironment: includeParentEnvironment,
-        sandboxObservation: _SandboxObservation.capture(environmentOverrides),
-      ),
-    );
-    return _delegate.run(
-      executable,
-      arguments,
-      workingDirectory: workingDirectory,
-      timeout: timeout,
-      maxOutputBytesPerStream: maxOutputBytesPerStream,
-      environmentOverrides: environmentOverrides,
-      includeParentEnvironment: includeParentEnvironment,
+    if (expectedAuthority != authority) {
+      throw const L10nProcessConfinementException(
+        'host-confinement-authority-drift',
+      );
+    }
+    final profile = writableRoot == null
+        ? '(version 1)(allow default)(deny network*)'
+              '(deny file-write*)'
+              '(allow file-write* (subpath (param "SANDBOX_ROOT")))'
+        : '(version 1)(allow default)(deny network*)'
+              '(deny file-write*)'
+              '(allow file-write* (subpath (param "SANDBOX_ROOT")))'
+              '(allow file-write* (subpath (param "WRITE_ROOT")))';
+    return L10nConfinedCommand(
+      executable: authority.canonicalExecutable,
+      arguments: [
+        '-D',
+        'SANDBOX_ROOT=$sandboxRoot',
+        if (writableRoot != null) ...['-D', 'WRITE_ROOT=$writableRoot'],
+        '-p',
+        profile,
+        executable,
+        ...arguments,
+      ],
     );
   }
+}
+
+final class _DriftingTestProcessConfinementBackend
+    implements L10nProcessConfinementBackend {
+  bool drifted = false;
+
+  static const _driftedAuthority = L10nProcessConfinementAuthority(
+    backendIdentity: 'test-confinement-v1',
+    requestedExecutable: '/test/sandbox-exec',
+    requestedExecutableType: FileSystemEntityType.file,
+    canonicalExecutable: '/test/sandbox-exec',
+    executableSha256:
+        'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
+    executableByteLength: 1,
+    executablePosixMode: 0x1ed,
+    policyIdentity:
+        'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+  );
+
+  @override
+  L10nProcessConfinementAuthority captureAuthority() =>
+      drifted ? _driftedAuthority : _TestProcessConfinementBackend.authority;
+
+  @override
+  L10nConfinedCommand confine({
+    required L10nProcessConfinementAuthority expectedAuthority,
+    required String sandboxRoot,
+    required String? writableRoot,
+    required String executable,
+    required List<String> arguments,
+  }) => const _TestProcessConfinementBackend().confine(
+    expectedAuthority: expectedAuthority,
+    sandboxRoot: sandboxRoot,
+    writableRoot: writableRoot,
+    executable: executable,
+    arguments: arguments,
+  );
 }
 
 ManagedProcessResult _materializeMachineRoot(
