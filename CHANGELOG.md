@@ -7,6 +7,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-08-24
+
 ### Changed
 
 - Batch each non-empty fixed-point apply round into one verification wave and
