@@ -484,7 +484,9 @@ void selectedFirst() {}
       const deadOriginal = 'library dead;\n';
       dead.writeAsStringSync(deadOriginal);
       final firstOriginalMode = _posixMode(first);
-      final deadOriginalMode = _posixMode(dead);
+      final deadOriginalMode = Platform.isLinux || Platform.isMacOS
+          ? _posixMode(dead)
+          : null;
       File(p.join(tempDir.path, 'lib', 'main.dart')).writeAsStringSync('''
 import 'src/first.dart';
 
@@ -571,7 +573,9 @@ void main() => keepFirst();
       );
       expect(deadBackup, isNotNull);
       expect(deadBackup!.readAsStringSync(), deadOriginal);
-      expect(_posixMode(deadBackup), deadOriginalMode);
+      if (Platform.isLinux || Platform.isMacOS) {
+        expect(_posixMode(deadBackup), deadOriginalMode);
+      }
     },
     timeout: const Timeout(Duration(minutes: 1)),
   );

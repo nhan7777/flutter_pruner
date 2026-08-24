@@ -1202,7 +1202,10 @@ Future<Map<String, Object?>> retainProcessExitEvidence({
     'exitCode': exitCode,
     'stdout': _sanitizedStreamEvidence(stdout, sampleProject),
     'stderr': _sanitizedStreamEvidence(stderr, sampleProject),
-    'evidenceRef': p.join(p.basename(evidenceRoot.path), 'sample-project'),
+    'evidenceRef': p.posix.join(
+      p.basename(evidenceRoot.path),
+      'sample-project',
+    ),
   });
   await File(
     p.join(evidenceRoot.path, 'diagnostic.json'),

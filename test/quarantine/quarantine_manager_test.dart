@@ -62,7 +62,7 @@ void main() {
         file: source,
         operationType: QuarantineOperationType.declaration,
         expectedSha256: _sha256(source),
-        expectedPosixMode: _posixMode(source),
+        expectedPosixMode: _capturedPosixMode(source),
         transactionId: transactionId,
       );
       prepared.candidate.writeAsStringSync(
@@ -180,7 +180,7 @@ void main() {
           file: source,
           operationType: QuarantineOperationType.declaration,
           expectedSha256: _sha256(source),
-          expectedPosixMode: _posixMode(source),
+          expectedPosixMode: _capturedPosixMode(source),
           transactionId: state.transaction,
         );
         prepared.candidate.writeAsStringSync(state.output, flush: true);
@@ -2455,7 +2455,7 @@ _stageSingleVerificationWave(
       file: source,
       operationType: QuarantineOperationType.declaration,
       expectedSha256: _sha256(source),
-      expectedPosixMode: _posixMode(source),
+      expectedPosixMode: _capturedPosixMode(source),
       transactionId: 'tx-r${round.toString().padLeft(3, '0')}-a',
     );
     prepared.candidate.writeAsStringSync('const after = true;\n', flush: true);
@@ -2550,7 +2550,7 @@ _stageTwoVerificationWave(QuarantineManager manager, Directory project) async {
       file: source,
       operationType: QuarantineOperationType.declaration,
       expectedSha256: _sha256(source),
-      expectedPosixMode: _posixMode(source),
+      expectedPosixMode: _capturedPosixMode(source),
       transactionId: transactionId,
     );
     prepared.candidate.writeAsStringSync('H2-$suffix\n', flush: true);
@@ -2735,6 +2735,9 @@ void _chmod(File file, int mode) {
 }
 
 int _posixMode(File file) => file.statSync().mode & 0xfff;
+
+int? _capturedPosixMode(File file) =>
+    Platform.isLinux || Platform.isMacOS ? _posixMode(file) : null;
 
 class _UnconfirmedAfterSuccessfulLink implements ProcessExecutionRunner {
   _UnconfirmedAfterSuccessfulLink({required this.failAt});
