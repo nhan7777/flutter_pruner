@@ -150,6 +150,7 @@ class QuarantineManifest {
     this.entries = const [],
     this.cases = const [],
     this.transactions = const [],
+    this.verificationWaves = const [],
     this.caseJournal = false,
     this.transactionJournal = false,
     this.verificationPolicyHash,
@@ -179,6 +180,9 @@ class QuarantineManifest {
 
   /// Atomic apply transactions and their verification evidence.
   final List<QuarantineTransaction> transactions;
+
+  /// Accepted combined-state verification records, in fixed-point order.
+  final List<QuarantineVerificationWave> verificationWaves;
 
   /// Whether this manifest contains V2-compatible case snapshots.
   final bool caseJournal;
@@ -232,6 +236,8 @@ class QuarantineManifest {
     if (usesCaseJournal) 'cases': cases.map((e) => e.toJson()).toList(),
     if (usesTransactionJournal)
       'transactions': transactions.map((e) => e.toJson()).toList(),
+    if (verificationWaves.isNotEmpty)
+      'verificationWaves': verificationWaves.map((e) => e.toJson()).toList(),
     if (verificationPolicyHash != null)
       'verificationPolicyHash': verificationPolicyHash,
     if (baselineVerification != null)
@@ -255,6 +261,8 @@ class QuarantineManifest {
     final casesJson = json['cases'] as List<dynamic>? ?? const [];
     final version = json['version'] as String? ?? '1.0.0';
     final transactionsJson = json['transactions'] as List<dynamic>? ?? const [];
+    final verificationWavesJson =
+        json['verificationWaves'] as List<dynamic>? ?? const [];
     final selection = switch (json['selection']) {
       null => null,
       final Map<String, dynamic> value => QuarantineSelectionEvidence.fromJson(
@@ -267,6 +275,14 @@ class QuarantineManifest {
         'quarantine selection requires a V3 manifest',
       );
     }
+    final verificationWaves = verificationWavesJson
+        .map(
+          (value) => QuarantineVerificationWave.fromJson(
+            value as Map<String, dynamic>,
+          ),
+        )
+        .toList();
+    _validateVerificationWaveMembership(verificationWaves);
     return QuarantineManifest(
       runId: json['runId'] as String,
       timestamp: DateTime.parse(json['timestamp'] as String),
@@ -280,6 +296,7 @@ class QuarantineManifest {
       transactions: transactionsJson
           .map((e) => QuarantineTransaction.fromJson(e as Map<String, dynamic>))
           .toList(),
+      verificationWaves: verificationWaves,
       caseJournal: version.startsWith('2.') || version.startsWith('3.'),
       transactionJournal: version.startsWith('3.'),
       verificationPolicyHash: json['verificationPolicyHash'] as String?,
@@ -303,6 +320,26 @@ class QuarantineManifest {
         _ => false,
       },
     );
+  }
+}
+
+void _validateVerificationWaveMembership(
+  List<QuarantineVerificationWave> waves,
+) {
+  final waveIds = <String>{};
+  final rounds = <int>{};
+  final transactionIds = <String>{};
+  for (final wave in waves) {
+    if (!waveIds.add(wave.verificationWaveId) || !rounds.add(wave.round)) {
+      throw const FormatException('duplicate verification wave identity');
+    }
+    for (final transactionId in wave.transactionIds) {
+      if (!transactionIds.add(transactionId)) {
+        throw const FormatException(
+          'transaction belongs to multiple verification waves',
+        );
+      }
+    }
   }
 }
 
@@ -431,6 +468,91 @@ enum QuarantineTransactionStatus {
       );
 }
 
+/// Immutable accepted verification authority for one fixed-point wave.
+final class QuarantineVerificationWave {
+  /// Creates a validated accepted-wave record.
+  factory QuarantineVerificationWave({
+    required String verificationWaveId,
+    required int round,
+    required List<String> transactionIds,
+    required String comparisonBaselineSha256,
+    required VerificationBaselineEvidence candidateEvidence,
+  }) {
+    if (round <= 0 ||
+        verificationWaveId != 'wave-r${round.toString().padLeft(3, '0')}') {
+      throw const FormatException('invalid verification wave identity');
+    }
+    if (transactionIds.isEmpty ||
+        transactionIds.toSet().length != transactionIds.length ||
+        transactionIds.any(
+          (transactionId) =>
+              !RegExp(r'^[A-Za-z0-9_-]+$').hasMatch(transactionId),
+        )) {
+      throw const FormatException('invalid verification wave membership');
+    }
+    if (!RegExp(r'^[a-f0-9]{64}$').hasMatch(comparisonBaselineSha256)) {
+      throw const FormatException('invalid verification baseline digest');
+    }
+    if (!candidateEvidence.isComplete) {
+      throw const FormatException('incomplete verification wave evidence');
+    }
+    return QuarantineVerificationWave._(
+      verificationWaveId: verificationWaveId,
+      round: round,
+      transactionIds: List.unmodifiable(transactionIds),
+      comparisonBaselineSha256: comparisonBaselineSha256,
+      candidateEvidence: candidateEvidence,
+    );
+  }
+
+  const QuarantineVerificationWave._({
+    required this.verificationWaveId,
+    required this.round,
+    required this.transactionIds,
+    required this.comparisonBaselineSha256,
+    required this.candidateEvidence,
+  });
+
+  /// Stable deterministic wave identity.
+  final String verificationWaveId;
+
+  /// Positive fixed-point round.
+  final int round;
+
+  /// Exact ordered transaction membership.
+  final List<String> transactionIds;
+
+  /// Digest of the rolling comparison baseline.
+  final String comparisonBaselineSha256;
+
+  /// Complete sanitized accepted candidate evidence.
+  final VerificationBaselineEvidence candidateEvidence;
+
+  /// Converts to JSON.
+  Map<String, dynamic> toJson() => {
+    'verificationWaveId': verificationWaveId,
+    'round': round,
+    'transactionIds': List<String>.of(transactionIds),
+    'comparisonBaselineSha256': comparisonBaselineSha256,
+    'candidateEvidence': candidateEvidence.toJson(),
+  };
+
+  /// Restores a validated accepted-wave record.
+  factory QuarantineVerificationWave.fromJson(Map<String, dynamic> json) =>
+      QuarantineVerificationWave(
+        verificationWaveId: json['verificationWaveId'] as String,
+        round: json['round'] as int,
+        transactionIds: (json['transactionIds'] as List<dynamic>)
+            .cast<String>(),
+        comparisonBaselineSha256: json['comparisonBaselineSha256'] as String,
+        candidateEvidence: VerificationBaselineEvidence.fromJson(
+          Map<String, Object?>.from(
+            json['candidateEvidence'] as Map<Object?, Object?>,
+          ),
+        ),
+      );
+}
+
 /// V3 audit record for one indivisible apply transaction.
 class QuarantineTransaction {
   /// Creates a transaction record.
@@ -441,6 +563,7 @@ class QuarantineTransaction {
     required this.findingIds,
     required this.caseIds,
     required this.status,
+    this.verificationWaveId,
     this.verificationPolicyHash,
     this.requiredStepIds = const [],
     this.observedStepIds = const [],
@@ -465,6 +588,9 @@ class QuarantineTransaction {
 
   /// Current transaction state.
   final QuarantineTransactionStatus status;
+
+  /// Shared accepted-wave identity for wave-mode transactions.
+  final String? verificationWaveId;
 
   /// Verification policy hash used for the decision.
   final String? verificationPolicyHash;
@@ -503,6 +629,7 @@ class QuarantineTransaction {
     observedStepIds: observedStepIds ?? this.observedStepIds,
     rollbackVerified: rollbackVerified ?? this.rollbackVerified,
     failureReason: failureReason,
+    verificationWaveId: verificationWaveId,
   );
 
   /// Converts to JSON.
@@ -513,6 +640,7 @@ class QuarantineTransaction {
     'findingIds': findingIds,
     'caseIds': caseIds,
     'status': status.toJson(),
+    if (verificationWaveId != null) 'verificationWaveId': verificationWaveId,
     if (verificationPolicyHash != null)
       'verificationPolicyHash': verificationPolicyHash,
     'requiredStepIds': requiredStepIds,
@@ -530,6 +658,7 @@ class QuarantineTransaction {
         findingIds: (json['findingIds'] as List<dynamic>).cast<String>(),
         caseIds: (json['caseIds'] as List<dynamic>? ?? const []).cast<String>(),
         status: QuarantineTransactionStatus.fromJson(json['status'] as String),
+        verificationWaveId: json['verificationWaveId'] as String?,
         verificationPolicyHash: json['verificationPolicyHash'] as String?,
         requiredStepIds: (json['requiredStepIds'] as List<dynamic>? ?? const [])
             .cast<String>(),

@@ -7,6 +7,28 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+### Changed
+
+- Batch each non-empty fixed-point apply round into one verification wave and
+  atomically commit its ordered transactions after a single accepted candidate
+  verification. The baseline, verification policy and command order, apply
+  eligibility, rollback boundary, exit codes, and package-mode safety remain
+  unchanged.
+- Extend manifest V3 and JSON report v3 additively with immutable accepted-wave
+  evidence and ordered transaction membership. Legacy manifests remain
+  readable, accepted wave audit records survive rollback, and JSON v2 output
+  remains byte-for-byte frozen.
+
+### Added
+
+- Add isolated `control-1x1`, `fanout-12x1`, and `chain-2plus-rounds` apply
+  fixture generation plus an opt-in A/A and counterbalanced A/B admission
+  harness. The admitted macOS arm64 synthetic study measured median paired
+  changes of -0.43% for the 1x1 control (within noise), +67.52% for 12 units in
+  one round, and +28.97% for four units across two rounds. These results are a
+  fixture-scoped admission claim, not a real-project or combined-optimization
+  claim.
+
 ## [1.5.0] - 2026-08-22
 
 ### Added

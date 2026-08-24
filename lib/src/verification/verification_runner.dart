@@ -337,10 +337,19 @@ class VerificationResult {
       }
     }
 
-    return VerificationComparison(
+    final accepted = infrastructureFailures.isEmpty && newFailures.isEmpty;
+    return VerificationComparison._(
       candidate: this,
       newFailures: newFailures,
       infrastructureFailures: infrastructureFailures,
+      acceptedEvidence: accepted
+          ? AcceptedVerificationEvidence._(
+              comparisonBaselineSha256: verificationBaselineEvidenceSha256(
+                baseline,
+              ),
+              candidateEvidence: toBaselineEvidence(),
+            )
+          : null,
     );
   }
 
@@ -425,7 +434,7 @@ class VerificationResult {
       }
     }
 
-    return VerificationComparison(
+    return VerificationComparison._(
       candidate: this,
       newFailures: newFailures,
       infrastructureFailures: infrastructureFailures,
@@ -466,11 +475,11 @@ bool _sameParserKindLists(
 
 /// Delta between a candidate verification and its accumulated baseline.
 class VerificationComparison {
-  /// Creates a verification comparison.
-  const VerificationComparison({
+  const VerificationComparison._({
     required this.candidate,
     required this.newFailures,
     required this.infrastructureFailures,
+    this.acceptedEvidence,
   });
 
   /// Verification output after applying the current case.
@@ -482,12 +491,35 @@ class VerificationComparison {
   /// Process failures that make verification unavailable.
   final List<String> infrastructureFailures;
 
+  /// Sanitized authority for an accepted stored-baseline comparison.
+  final AcceptedVerificationEvidence? acceptedEvidence;
+
   /// Whether the candidate can safely become the next baseline.
   bool get accepted => infrastructureFailures.isEmpty && newFailures.isEmpty;
 
   /// Whether verification itself failed to execute reliably.
   bool get unavailable => infrastructureFailures.isNotEmpty;
 }
+
+/// Sanitized authority produced only by an accepted stored-baseline
+/// comparison.
+final class AcceptedVerificationEvidence {
+  AcceptedVerificationEvidence._({
+    required this.comparisonBaselineSha256,
+    required this.candidateEvidence,
+  });
+
+  /// Canonical digest of the exact rolling baseline used for comparison.
+  final String comparisonBaselineSha256;
+
+  /// Complete sanitized evidence for the accepted candidate.
+  final VerificationBaselineEvidence candidateEvidence;
+}
+
+/// Returns the canonical SHA-256 digest of sanitized verification evidence.
+String verificationBaselineEvidenceSha256(
+  VerificationBaselineEvidence evidence,
+) => sha256.convert(utf8.encode(jsonEncode(evidence.toJson()))).toString();
 
 /// Sanitized, immutable verification baseline suitable for a quarantine
 /// manifest. It intentionally retains no verifier stdout or stderr.

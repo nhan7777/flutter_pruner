@@ -76,13 +76,51 @@ class VerificationAttemptReport {
     required this.infrastructureFailureCount,
     this.round,
     this.transactionId,
+    this.waveId,
+    List<String> transactionIds = const [],
   }) : requiredStepIds = List.unmodifiable(requiredStepIds),
        observedStepIds = List.unmodifiable(observedStepIds),
-       steps = List.unmodifiable(steps);
+       steps = List.unmodifiable(steps),
+       transactionIds = List.unmodifiable(transactionIds) {
+    final hasValidIds =
+        transactionIds.isNotEmpty &&
+        transactionIds.toSet().length == transactionIds.length;
+    switch (purpose) {
+      case VerificationAttemptPurpose.baseline:
+        if (waveId != null ||
+            transactionId != null ||
+            transactionIds.isNotEmpty) {
+          throw StateError('Baseline verification cannot have wave identity.');
+        }
+      case VerificationAttemptPurpose.candidate:
+        if (waveId == null || !hasValidIds) {
+          throw StateError('Candidate verification requires wave membership.');
+        }
+        if (transactionIds.length == 1) {
+          if (transactionId != transactionIds.single) {
+            throw StateError(
+              'Single-transaction candidate requires matching singular identity.',
+            );
+          }
+        } else if (transactionId != null) {
+          throw StateError(
+            'Multi-transaction candidate cannot have singular identity.',
+          );
+        }
+      case VerificationAttemptPurpose.rollback:
+        if (waveId != null || transactionIds.isNotEmpty) {
+          throw StateError(
+            'Rollback verification cannot have wave membership.',
+          );
+        }
+    }
+  }
 
   final VerificationAttemptPurpose purpose;
   final int? round;
   final String? transactionId;
+  final String? waveId;
+  final List<String> transactionIds;
   final bool complete;
   final bool available;
   final bool accepted;

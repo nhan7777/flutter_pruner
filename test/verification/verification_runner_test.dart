@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:crypto/crypto.dart';
 import 'package:flutter_pruner/src/core/process/managed_process_runner.dart';
 import 'package:flutter_pruner/src/verification/verification_policy.dart';
 import 'package:flutter_pruner/src/verification/verification_runner.dart';
@@ -301,6 +302,44 @@ error • Existing failure • lib/a.dart:10:2 • old_error
       throwsUnsupportedError,
     );
     expect(baseline.compareToBaselineEvidence(restored).accepted, isTrue);
+  });
+
+  test('accepted stored-baseline comparison carries canonical evidence', () {
+    final baseline = _result(passed: true, output: '').toBaselineEvidence();
+    final candidate = _result(passed: true, output: '');
+
+    final comparison = candidate.compareToBaselineEvidence(baseline);
+    final accepted = comparison.acceptedEvidence!;
+
+    expect(comparison.accepted, isTrue);
+    expect(
+      accepted.comparisonBaselineSha256,
+      sha256.convert(utf8.encode(jsonEncode(baseline.toJson()))).toString(),
+    );
+    expect(
+      accepted.candidateEvidence.toJson(),
+      candidate.toBaselineEvidence().toJson(),
+    );
+    expect(
+      verificationBaselineEvidenceSha256(baseline),
+      accepted.comparisonBaselineSha256,
+    );
+  });
+
+  test('rejected stored-baseline comparison carries no accepted evidence', () {
+    final baseline = _result(passed: true, output: '').toBaselineEvidence();
+    final candidate = _result(
+      passed: false,
+      output: '''
+error • New failure • lib/a.dart:10:2 • new_error
+1 issue found.
+''',
+    );
+
+    final comparison = candidate.compareToBaselineEvidence(baseline);
+
+    expect(comparison.accepted, isFalse);
+    expect(comparison.acceptedEvidence, isNull);
   });
 
   test('accepts fewer completed baseline-red diagnostics from evidence', () {

@@ -22,8 +22,19 @@ Schema v3 records `analysisMode`, `internalBoundaryComplete`,
 `externalConsumersCovered`, per-finding `manualRiskCodes`/`applyEligible`, and
 apply authorization (`acceptedRiskCodes` plus `interactive`, `yesFlag`, or
 `notRequired`). Apply reports also include an additive `apply.selection`
-record. This optional v3 field keeps existing schema-v3 readers backward
-compatible; no schema bump is required. JSON v2 remains unchanged.
+record and wave identity on candidate verification attempts. These optional v3
+fields keep existing schema-v3 readers backward compatible; no schema bump is
+required. JSON v2 remains byte-for-byte unchanged.
+
+Candidate verification attempts always identify the fixed-point wave they
+checked. `waveId` has the form `wave-rNNN`; `transactionIds` preserves planner
+order. A one-transaction candidate also mirrors that ID in `transactionId` for
+compatibility. A multi-transaction candidate omits the singular field.
+Baseline attempts have neither wave nor transaction membership. Rollback
+attempts have no wave membership and may retain the existing singular
+`transactionId` that identifies their recovery scope.
+Terminal and HTML reports show one timeline row per candidate wave, including
+its round, transaction count/list, result, and sanitized step timings.
 
 The canonical quarantine manifest records a completed full restore as
 `fullRollback.status: restored`, its UTC timestamp, and `verified: true` only
@@ -98,6 +109,7 @@ offline and provides:
   links and expandable evidence for every finding;
 - per-finding apply dispositions, transaction and rollback-verification facts;
 - verification attempts with step-level availability, exit and duration facts;
+- verification-wave identity and ordered transaction membership for candidates;
 - diagnostics, adapter, blocker, exclusion and typed-measurement views; and
 - copyable safe CLI guidance, theme, JSON download and print controls.
 
@@ -182,7 +194,9 @@ unit:
   must end in exactly one of `committed`, `rolledBackVerified`,
   `recoveryRequired`, or `nonTerminal`.
 - `verificationAttempts` counts whole verifier invocations; each contains its
-  configured step records.
+  configured step records. Mutating apply captures one baseline, then one
+  candidate per non-empty fixed-point round. Rollback verification remains a
+  separate recovery attempt when needed.
 
 Normal terminal runs have `transactions.nonTerminal == 0`. Auxiliary actions
 never increment logical finding counters.
@@ -222,7 +236,7 @@ transaction identity. Status values are:
 
 | Status | Meaning |
 |---|---|
-| `committed` | The owning transaction passed verification and was committed |
+| `committed` | The owning transaction belonged to an accepted verification wave and was committed |
 | `rejectedRecovered` | The attempted transaction was restored and rollback-verified |
 | `blocked` | The dependency-closed planner would not start the finding |
 | `skippedDependency` | A retained or rejected dependency prevented the attempt |

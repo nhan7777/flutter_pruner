@@ -66,6 +66,10 @@ the fail-closed safety model and are covered by regression tests.
   external report destinations. These observations record scanner output,
   toolchain/config/package-config identities, and before/after fingerprints;
   they are not an independent accuracy denominator or natural mutation test.
+- Apply verification waves: each non-empty fixed-point round verifies and
+  commits its ordered atomic units as one recoverable wave. A controlled v2
+  A/A--A/B synthetic study admitted the default-on orchestration independently
+  of analyzer-rescan work; details and scope follow below.
 
 The measured Small fixture contains 200 Dart files, 30,000 LOC, 100 asset
 files, and 5,000 graph-reference seeds. Three post-warmup samples measured
@@ -77,6 +81,40 @@ Only synthetic-fixture timing measurements are committed as performance
 baselines. The V2 accuracy baseline contains classifications, corpus pins and
 hashes but no real-project source, absolute path or timing threshold. See
 `profiling.md` for the comparison and redaction protocol for local timing work.
+
+### Apply verification-wave admission
+
+The v2 admission study compared detached source materializations from
+`df09c2c6e3dcdce978e30383af3b250df5829df7`: A included the analyzer auxiliary-
+test boundary correction required by both sides, and B added only the apply
+verification-wave patch. Flutter dependency hydration and AOT compilation were
+outside the measured interval. Every measured sample used a fresh copy of the
+same hydrated fixture, and each profile ran six counterbalanced `AB`, `BA`,
+`AB`, `BA`, `AB`, `BA` pairs with three repetitions per block.
+
+| Synthetic profile | Shape | Frozen A/A noise | Median paired change | Faster pairs | Admission |
+|---|---:|---:|---:|---:|---:|
+| `control-1x1` | 1 unit / 1 round | 4.91% | -0.43% | 3/6 | pass: regression within noise |
+| `fanout-12x1` | 12 units / 1 round | 4.80% | +67.52% | 6/6 | pass |
+| `chain-2plus-rounds` | 4 units / 2 rounds | 1.57% | +28.97% | 6/6 | pass |
+
+The aggregate artifact is
+`benchmark/baselines/apply-verification-wave-v2-attempt12-admission-macos-arm64-dart-3.13.1.json`
+(SHA-256
+`52acface5c420500d3a6a59bd1716efd25c6c2054cc6cec88d2c2bd9c07b5ce1`).
+It binds the raw artifacts, A/B programs, harness, generator, boundary patch,
+verification-wave patch, SDKs, apply arguments, and verification policy by
+SHA-256. All correctness contracts, final source hashes, transaction sets,
+round counts, and verifier invocation counts matched exactly. The structural
+change is `1 + U` verifier invocations to `1 + R`, where `U` is the atomic-unit
+count and `R` is the non-empty fixed-point-round count.
+
+This admits the optimization for the three synthetic fixtures only. Runtime
+benefit on a real project depends on verifier cost and units per round; no
+universal percentage or memory claim is made. Analyzer-rescan performance is a
+separate optimization and was not present in either side of this comparison,
+so its measurements must not be added to these percentages. There is no
+combined-candidate performance claim.
 
 A local diagnostic, non-threshold GSY replay attributed the hash-lookup change
 independently. The baseline was the clean tool commit

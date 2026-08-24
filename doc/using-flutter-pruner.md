@@ -151,8 +151,9 @@ A mutating run:
 3. captures the verification baseline;
 4. builds a dependency-closed plan;
 5. quarantines originals before editing;
-6. rescans and verifies the project;
-7. keeps the result only after the whole run completes.
+6. stages each non-empty fixed-point round and verifies its combined state once;
+7. commits the accepted wave, then rescans for the next round;
+8. keeps the result only after the whole run completes.
 
 The command is all-or-nothing at the run level. If a later mutation, rescan,
 verification, convergence check, or canonical report fails, Flutter Pruner

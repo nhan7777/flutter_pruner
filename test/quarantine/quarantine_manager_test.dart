@@ -24,6 +24,576 @@ void main() {
     if (project.existsSync()) project.deleteSync(recursive: true);
   });
 
+  test('commits an applied transaction wave in one journal revision', () async {
+    final baseline = _managerVerificationBaseline(project);
+    final quarantine = await manager.createCaseQuarantine(
+      runId: 'wave-batch',
+      verificationPolicyHash: 'policy',
+      baselineVerification: QuarantineVerificationEvidence(
+        policyHash: 'policy',
+        requiredStepIds: const ['analyze'],
+        observedStepIds: const ['analyze'],
+        workingDirectory: p.normalize(p.absolute(project.path)),
+        toolchainIdentity: 'test-toolchain',
+        available: true,
+        passed: true,
+        comparisonBaseline: baseline,
+      ),
+    );
+    final transactionIds = <String>[];
+    for (final id in const ['a', 'b']) {
+      final transactionId = 'tx-r001-$id';
+      final caseId = 'case-r001-$id';
+      final source = _source(project, '$id.dart', 'const before$id = true;\n');
+      transactionIds.add(transactionId);
+      await manager.beginTransaction(
+        quarantineDir: quarantine,
+        transactionId: transactionId,
+        round: 1,
+        componentId: 'unit:$id',
+        findingIds: ['finding-$id'],
+        caseIds: [caseId],
+        verificationWaveId: 'wave-r001',
+      );
+      await manager.beginCase(
+        quarantineDir: quarantine,
+        caseId: caseId,
+        findingId: 'finding-$id',
+        file: source,
+        operationType: QuarantineOperationType.declaration,
+        transactionId: transactionId,
+      );
+      source.writeAsStringSync('const after$id = true;\n', flush: true);
+      await manager.recordCaseApplied(
+        quarantineDir: quarantine,
+        caseId: caseId,
+      );
+      await manager.recordTransactionApplied(
+        quarantineDir: quarantine,
+        transactionId: transactionId,
+        caseIds: [caseId],
+      );
+    }
+    final before =
+        jsonDecode(
+              File(p.join(quarantine.path, 'manifest.json')).readAsStringSync(),
+            )
+            as Map<String, dynamic>;
+    final candidate = VerificationResult(
+      passed: true,
+      failedStep: null,
+      steps: const [
+        VerificationStep(
+          name: 'analyze',
+          parserKind: VerificationOutputParserKind.humanAnalyzer,
+          passed: true,
+          exitCode: 0,
+          stdout: '',
+          stderr: '',
+          duration: Duration.zero,
+        ),
+      ],
+      policyHash: 'policy',
+      requiredStepIds: const ['analyze'],
+      requiredParserKinds: const [VerificationOutputParserKind.humanAnalyzer],
+      workingDirectory: p.normalize(p.absolute(project.path)),
+      toolchainIdentity: 'test-toolchain',
+    );
+    final accepted = candidate
+        .compareToBaselineEvidence(baseline)
+        .acceptedEvidence!;
+
+    final committed = await manager.commitVerifiedTransactionWave(
+      quarantineDir: quarantine,
+      verificationWaveId: 'wave-r001',
+      round: 1,
+      transactionIds: transactionIds,
+      acceptedVerification: accepted,
+    );
+
+    final after =
+        jsonDecode(
+              File(p.join(quarantine.path, 'manifest.json')).readAsStringSync(),
+            )
+            as Map<String, dynamic>;
+    expect(
+      committed.map((item) => item.status),
+      everyElement(QuarantineTransactionStatus.committed),
+    );
+    final beforeJournal = before['_journal'] as Map<String, dynamic>;
+    final afterJournal = after['_journal'] as Map<String, dynamic>;
+    expect(afterJournal['revision'], (beforeJournal['revision'] as int) + 1);
+    final manifest = await manager.readManifest(quarantine);
+    expect(manifest.verificationWaves.single.transactionIds, transactionIds);
+    expect(
+      manifest.cases.map((item) => item.status),
+      everyElement(QuarantineCaseStatus.kept),
+    );
+    expect(
+      await manager.readRunLifecycleState(quarantine),
+      QuarantineRunLifecycleState.active,
+    );
+  });
+
+  test(
+    'commits same-path H1 to H2 to H3 using the wave final writer',
+    () async {
+      final baseline = _managerVerificationBaseline(project);
+      final quarantine = await manager.createCaseQuarantine(
+        runId: 'same-path-wave',
+        verificationPolicyHash: 'policy',
+        baselineVerification: QuarantineVerificationEvidence(
+          policyHash: 'policy',
+          requiredStepIds: const ['analyze'],
+          observedStepIds: const ['analyze'],
+          workingDirectory: p.normalize(p.absolute(project.path)),
+          toolchainIdentity: 'test-toolchain',
+          available: true,
+          passed: true,
+          comparisonBaseline: baseline,
+        ),
+      );
+      final source = _source(project, 'same.dart', 'H1\n');
+      if (Platform.isLinux || Platform.isMacOS) _chmod(source, 0x1ed);
+      for (final state in const [
+        (transaction: 'tx-r001-a', caseId: 'case-a', output: 'H2\n'),
+        (transaction: 'tx-r001-b', caseId: 'case-b', output: 'H3\n'),
+      ]) {
+        await manager.beginTransaction(
+          quarantineDir: quarantine,
+          transactionId: state.transaction,
+          round: 1,
+          componentId: state.transaction,
+          findingIds: ['finding-${state.caseId}'],
+          caseIds: [state.caseId],
+          verificationWaveId: 'wave-r001',
+        );
+        await manager.beginCase(
+          quarantineDir: quarantine,
+          caseId: state.caseId,
+          findingId: 'finding-${state.caseId}',
+          file: source,
+          operationType: QuarantineOperationType.declaration,
+          transactionId: state.transaction,
+        );
+        source.writeAsStringSync(state.output, flush: true);
+        await manager.recordCaseApplied(
+          quarantineDir: quarantine,
+          caseId: state.caseId,
+        );
+        await manager.recordTransactionApplied(
+          quarantineDir: quarantine,
+          transactionId: state.transaction,
+          caseIds: [state.caseId],
+        );
+      }
+      final candidate = _passingVerificationResult(project);
+
+      await manager.commitVerifiedTransactionWave(
+        quarantineDir: quarantine,
+        verificationWaveId: 'wave-r001',
+        round: 1,
+        transactionIds: const ['tx-r001-a', 'tx-r001-b'],
+        acceptedVerification: candidate
+            .compareToBaselineEvidence(baseline)
+            .acceptedEvidence!,
+      );
+
+      expect(source.readAsStringSync(), 'H3\n');
+      final acceptedWave = (await manager.readManifest(
+        quarantine,
+      )).verificationWaves.single.toJson();
+      expect(
+        (await manager.readManifest(
+          quarantine,
+        )).transactions.map((transaction) => transaction.status),
+        everyElement(QuarantineTransactionStatus.committed),
+      );
+      await manager.markRunRecoveryRequired(
+        quarantineDir: quarantine,
+        reason: 'injected whole-run recovery',
+      );
+      final recoveryRequired = await manager.readManifest(quarantine);
+      expect(
+        recoveryRequired.transactions.map((transaction) => transaction.status),
+        everyElement(QuarantineTransactionStatus.recoveryRequired),
+      );
+      expect(
+        await manager.readRunLifecycleState(quarantine),
+        QuarantineRunLifecycleState.recoveryRequired,
+      );
+      expect(recoveryRequired.verificationWaves.single.toJson(), acceptedWave);
+      await manager.restoreRunBytes(quarantineDir: quarantine);
+      await manager.verifyRunOriginalBytes(quarantineDir: quarantine);
+      await manager.completeVerifiedFullRollback(
+        quarantineDir: quarantine,
+        reason: 'verified test rollback',
+        verificationEvidence: QuarantineVerificationEvidence(
+          policyHash: 'policy',
+          requiredStepIds: const ['analyze'],
+          observedStepIds: const ['analyze'],
+          workingDirectory: p.normalize(p.absolute(project.path)),
+          toolchainIdentity: 'test-toolchain',
+          available: true,
+          passed: true,
+          comparisonBaseline: baseline,
+        ),
+        baselineEquivalent: true,
+      );
+      expect(source.readAsStringSync(), 'H1\n');
+      if (Platform.isLinux || Platform.isMacOS) {
+        expect(_posixMode(source), 0x1ed);
+      }
+      final rolledBack = await manager.readManifest(quarantine);
+      expect(rolledBack.verificationWaves.single.toJson(), acceptedWave);
+      expect(
+        rolledBack.transactions.map((transaction) => transaction.status),
+        everyElement(QuarantineTransactionStatus.rolledBackVerified),
+      );
+      expect(
+        await manager.readRunLifecycleState(quarantine),
+        QuarantineRunLifecycleState.rolledBackVerified,
+      );
+    },
+  );
+
+  for (final crashPoint in const [
+    QuarantineJournalPoint.temporaryFlushed,
+    QuarantineJournalPoint.primaryMovedToPrevious,
+    QuarantineJournalPoint.temporaryPromoted,
+  ]) {
+    test('recovers a wave commit interrupted at ${crashPoint.name}', () async {
+      final staged = await _stageSingleVerificationWave(manager, project);
+      var armed = true;
+      manager = QuarantineManager(
+        project,
+        journalHook: (point) {
+          if (armed && point == crashPoint) {
+            armed = false;
+            throw StateError('injected journal crash');
+          }
+        },
+      );
+
+      await expectLater(
+        manager.commitVerifiedTransactionWave(
+          quarantineDir: staged.quarantine,
+          verificationWaveId: 'wave-r001',
+          round: 1,
+          transactionIds: const ['tx-r001-a'],
+          acceptedVerification: staged.accepted,
+        ),
+        throwsStateError,
+      );
+
+      final recovered = await QuarantineManager(
+        project,
+      ).readManifest(staged.quarantine);
+      final wasPublished =
+          crashPoint != QuarantineJournalPoint.temporaryFlushed;
+      expect(recovered.verificationWaves, hasLength(wasPublished ? 1 : 0));
+      expect(
+        recovered.transactions.single.status,
+        wasPublished
+            ? QuarantineTransactionStatus.committed
+            : QuarantineTransactionStatus.applied,
+      );
+    });
+  }
+
+  test('fails closed before cleaning a stale journal candidate', () async {
+    final staged = await _stageSingleVerificationWave(manager, project);
+    var armed = true;
+    final interrupted = QuarantineManager(
+      project,
+      journalHook: (point) {
+        if (armed && point == QuarantineJournalPoint.temporaryFlushed) {
+          armed = false;
+          throw StateError('leave staged candidate');
+        }
+      },
+    );
+    await expectLater(
+      interrupted.commitVerifiedTransactionWave(
+        quarantineDir: staged.quarantine,
+        verificationWaveId: 'wave-r001',
+        round: 1,
+        transactionIds: const ['tx-r001-a'],
+        acceptedVerification: staged.accepted,
+      ),
+      throwsStateError,
+    );
+
+    final guarded = QuarantineManager(
+      project,
+      journalHook: (point) {
+        if (point == QuarantineJournalPoint.beforeStaleCandidateCleanup) {
+          throw StateError('injected cleanup crash');
+        }
+      },
+    );
+    await expectLater(
+      guarded.readManifest(staged.quarantine),
+      throwsStateError,
+    );
+    expect(
+      File(p.join(staged.quarantine.path, 'manifest.json.tmp')).existsSync(),
+      isTrue,
+    );
+  });
+
+  test('rejects skipped wave rounds and inexact ordered membership', () async {
+    final staged = await _stageSingleVerificationWave(manager, project);
+    await expectLater(
+      manager.commitVerifiedTransactionWave(
+        quarantineDir: staged.quarantine,
+        verificationWaveId: 'wave-r001',
+        round: 1,
+        transactionIds: const ['tx-r001-missing'],
+        acceptedVerification: staged.accepted,
+      ),
+      throwsA(isA<QuarantineException>()),
+    );
+
+    final skipped = await _stageSingleVerificationWave(
+      manager,
+      project,
+      round: 2,
+    );
+    await expectLater(
+      manager.commitVerifiedTransactionWave(
+        quarantineDir: skipped.quarantine,
+        verificationWaveId: 'wave-r002',
+        round: 2,
+        transactionIds: const ['tx-r002-a'],
+        acceptedVerification: skipped.accepted,
+      ),
+      throwsA(
+        isA<QuarantineException>().having(
+          (error) => error.toString(),
+          'message',
+          contains('does not follow accepted round'),
+        ),
+      ),
+    );
+  });
+
+  test('rejects every inexact wave membership atomically', () async {
+    for (final variant in const [
+      'empty',
+      'duplicate',
+      'missing',
+      'extra',
+      'reorder',
+      'wrong-state',
+      'wrong-round',
+      'wrong-wave',
+      'ownership-mismatch',
+    ]) {
+      final staged = await _stageTwoVerificationWave(manager, project);
+      var waveId = 'wave-r001';
+      var round = 1;
+      var transactionIds = [...staged.transactionIds];
+      switch (variant) {
+        case 'empty':
+          transactionIds = [];
+        case 'duplicate':
+          transactionIds = [transactionIds.first, transactionIds.first];
+        case 'missing':
+          transactionIds = [transactionIds.first];
+        case 'extra':
+          transactionIds = [...transactionIds, 'tx-r001-extra'];
+        case 'reorder':
+          transactionIds = transactionIds.reversed.toList();
+        case 'wrong-state':
+          await manager.verifyTransaction(
+            quarantineDir: staged.quarantine,
+            transactionId: transactionIds.first,
+            policyHash: 'policy',
+            requiredStepIds: const ['analyze'],
+            observedStepIds: const ['analyze'],
+          );
+        case 'wrong-round':
+          waveId = 'wave-r002';
+          round = 2;
+        case 'wrong-wave':
+          waveId = 'wave-r999';
+        case 'ownership-mismatch':
+          final primary = File(p.join(staged.quarantine.path, 'manifest.json'));
+          final decoded = jsonDecode(primary.readAsStringSync()) as Map;
+          final revision = (decoded['_journal'] as Map)['revision'] as int;
+          final payload = _payload(primary);
+          final cases = payload['cases'] as List;
+          (cases.first as Map)['transactionId'] = transactionIds.last;
+          _replacePrimaryDocument(
+            primary,
+            _document(payload, revision: revision + 1),
+          );
+      }
+      final before = _journalSnapshot(staged.quarantine);
+
+      await expectLater(
+        manager.commitVerifiedTransactionWave(
+          quarantineDir: staged.quarantine,
+          verificationWaveId: waveId,
+          round: round,
+          transactionIds: transactionIds,
+          acceptedVerification: staged.accepted,
+        ),
+        throwsA(isA<QuarantineException>()),
+        reason: variant,
+      );
+
+      expect(_journalSnapshot(staged.quarantine), before, reason: variant);
+    }
+  });
+
+  test('historical wave evidence mismatch fails closed', () async {
+    final staged = await _stageSingleVerificationWave(manager, project);
+    await manager.commitVerifiedTransactionWave(
+      quarantineDir: staged.quarantine,
+      verificationWaveId: 'wave-r001',
+      round: 1,
+      transactionIds: const ['tx-r001-a'],
+      acceptedVerification: staged.accepted,
+    );
+    final primary = File(p.join(staged.quarantine.path, 'manifest.json'));
+    final decoded = jsonDecode(primary.readAsStringSync()) as Map;
+    final revision = (decoded['_journal'] as Map)['revision'] as int;
+    final payload = _payload(primary);
+    final waves = payload['verificationWaves'] as List;
+    final wave = waves.single as Map;
+    final candidate = wave['candidateEvidence'] as Map;
+    candidate['policyHash'] = 'forged-policy';
+    File('${primary.path}.previous').deleteSync();
+    primary.writeAsStringSync(_document(payload, revision: revision + 1));
+
+    await expectLater(
+      manager.readManifest(staged.quarantine),
+      throwsA(
+        isA<QuarantineException>().having(
+          (error) => error.toString(),
+          'message',
+          contains('violates the manifest verification contract'),
+        ),
+      ),
+    );
+  });
+
+  test('wave publish detects a manifest change after temp flush', () async {
+    final staged = await _stageSingleVerificationWave(manager, project);
+    manager = QuarantineManager(
+      project,
+      journalHook: (point) {
+        if (point != QuarantineJournalPoint.temporaryFlushed) return;
+        final primary = File(p.join(staged.quarantine.path, 'manifest.json'));
+        final decoded = jsonDecode(primary.readAsStringSync()) as Map;
+        final revision = (decoded['_journal'] as Map)['revision'] as int;
+        primary.writeAsStringSync(
+          _document(_payload(primary), revision: revision + 1),
+          flush: true,
+        );
+      },
+    );
+
+    await expectLater(
+      manager.commitVerifiedTransactionWave(
+        quarantineDir: staged.quarantine,
+        verificationWaveId: 'wave-r001',
+        round: 1,
+        transactionIds: const ['tx-r001-a'],
+        acceptedVerification: staged.accepted,
+      ),
+      throwsA(
+        isA<QuarantineException>().having(
+          (error) => error.toString(),
+          'message',
+          contains('changed while the verified wave was being published'),
+        ),
+      ),
+    );
+  });
+
+  test(
+    'wave publish preserves a same-revision writer before primary rename',
+    () async {
+      final staged = await _stageSingleVerificationWave(manager, project);
+      var injectedContents = '';
+      manager = QuarantineManager(
+        project,
+        journalHook: (point) {
+          if (point != QuarantineJournalPoint.beforePrimaryMoveToPrevious) {
+            return;
+          }
+          final primary = File(p.join(staged.quarantine.path, 'manifest.json'));
+          final decoded = jsonDecode(primary.readAsStringSync()) as Map;
+          final revision = (decoded['_journal'] as Map)['revision'] as int;
+          final payload = _payload(primary)..['analysisMode'] = 'package';
+          injectedContents = _document(payload, revision: revision);
+          primary.writeAsStringSync(injectedContents, flush: true);
+        },
+      );
+
+      await expectLater(
+        manager.commitVerifiedTransactionWave(
+          quarantineDir: staged.quarantine,
+          verificationWaveId: 'wave-r001',
+          round: 1,
+          transactionIds: const ['tx-r001-a'],
+          acceptedVerification: staged.accepted,
+        ),
+        throwsA(isA<QuarantineException>()),
+      );
+
+      final primary = File(p.join(staged.quarantine.path, 'manifest.json'));
+      expect(primary.readAsStringSync(), injectedContents);
+      final manifest = await manager.readManifest(staged.quarantine);
+      expect(manifest.analysisMode, 'package');
+      expect(manifest.verificationWaves, isEmpty);
+      expect(
+        manifest.transactions.single.status,
+        QuarantineTransactionStatus.applied,
+      );
+    },
+  );
+
+  test(
+    'wave publish verifies the authoritative revision after promotion',
+    () async {
+      final staged = await _stageSingleVerificationWave(manager, project);
+      manager = QuarantineManager(
+        project,
+        journalHook: (point) {
+          if (point != QuarantineJournalPoint.temporaryPromoted) return;
+          final primary = File(p.join(staged.quarantine.path, 'manifest.json'));
+          final decoded = jsonDecode(primary.readAsStringSync()) as Map;
+          final revision = (decoded['_journal'] as Map)['revision'] as int;
+          primary.writeAsStringSync(
+            _document(_payload(primary), revision: revision + 1),
+            flush: true,
+          );
+        },
+      );
+
+      await expectLater(
+        manager.commitVerifiedTransactionWave(
+          quarantineDir: staged.quarantine,
+          verificationWaveId: 'wave-r001',
+          round: 1,
+          transactionIds: const ['tx-r001-a'],
+          acceptedVerification: staged.accepted,
+        ),
+        throwsA(
+          isA<QuarantineException>().having(
+            (error) => error.toString(),
+            'message',
+            contains('changed while the verified wave was being published'),
+          ),
+        ),
+      );
+    },
+  );
+
   test(
     'exact selection rejects an unauthorized transaction atomically',
     () async {
@@ -1739,6 +2309,161 @@ void _removeLifecycleMarker(Directory quarantine) {
   primary.writeAsStringSync(_document(payload, revision: revision + 1));
 }
 
+Future<({Directory quarantine, AcceptedVerificationEvidence accepted})>
+_stageSingleVerificationWave(
+  QuarantineManager manager,
+  Directory project, {
+  int round = 1,
+}) async {
+  final baseline = _managerVerificationBaseline(project);
+  final quarantine = await manager.createCaseQuarantine(
+    runId: 'wave-crash-${DateTime.now().microsecondsSinceEpoch}',
+    verificationPolicyHash: 'policy',
+    baselineVerification: QuarantineVerificationEvidence(
+      policyHash: 'policy',
+      requiredStepIds: const ['analyze'],
+      observedStepIds: const ['analyze'],
+      workingDirectory: p.normalize(p.absolute(project.path)),
+      toolchainIdentity: 'test-toolchain',
+      available: true,
+      passed: true,
+      comparisonBaseline: baseline,
+    ),
+  );
+  final source = _source(project, 'wave.dart', 'const before = true;\n');
+  await manager.beginTransaction(
+    quarantineDir: quarantine,
+    transactionId: 'tx-r${round.toString().padLeft(3, '0')}-a',
+    round: round,
+    componentId: 'unit:a',
+    findingIds: const ['finding-a'],
+    caseIds: const ['case-r001-a'],
+    verificationWaveId: 'wave-r${round.toString().padLeft(3, '0')}',
+  );
+  await manager.beginCase(
+    quarantineDir: quarantine,
+    caseId: 'case-r001-a',
+    findingId: 'finding-a',
+    file: source,
+    operationType: QuarantineOperationType.declaration,
+    transactionId: 'tx-r${round.toString().padLeft(3, '0')}-a',
+  );
+  source.writeAsStringSync('const after = true;\n', flush: true);
+  await manager.recordCaseApplied(
+    quarantineDir: quarantine,
+    caseId: 'case-r001-a',
+  );
+  await manager.recordTransactionApplied(
+    quarantineDir: quarantine,
+    transactionId: 'tx-r${round.toString().padLeft(3, '0')}-a',
+    caseIds: const ['case-r001-a'],
+  );
+  final candidate = VerificationResult(
+    passed: true,
+    failedStep: null,
+    steps: const [
+      VerificationStep(
+        name: 'analyze',
+        parserKind: VerificationOutputParserKind.humanAnalyzer,
+        passed: true,
+        exitCode: 0,
+        stdout: '',
+        stderr: '',
+        duration: Duration.zero,
+      ),
+    ],
+    policyHash: 'policy',
+    requiredStepIds: const ['analyze'],
+    requiredParserKinds: const [VerificationOutputParserKind.humanAnalyzer],
+    workingDirectory: p.normalize(p.absolute(project.path)),
+    toolchainIdentity: 'test-toolchain',
+  );
+  return (
+    quarantine: quarantine,
+    accepted: candidate.compareToBaselineEvidence(baseline).acceptedEvidence!,
+  );
+}
+
+Future<
+  ({
+    Directory quarantine,
+    AcceptedVerificationEvidence accepted,
+    List<String> transactionIds,
+  })
+>
+_stageTwoVerificationWave(QuarantineManager manager, Directory project) async {
+  final baseline = _managerVerificationBaseline(project);
+  final quarantine = await manager.createCaseQuarantine(
+    runId: 'wave-membership-${DateTime.now().microsecondsSinceEpoch}',
+    verificationPolicyHash: 'policy',
+    baselineVerification: QuarantineVerificationEvidence(
+      policyHash: 'policy',
+      requiredStepIds: const ['analyze'],
+      observedStepIds: const ['analyze'],
+      workingDirectory: p.normalize(p.absolute(project.path)),
+      toolchainIdentity: 'test-toolchain',
+      available: true,
+      passed: true,
+      comparisonBaseline: baseline,
+    ),
+  );
+  final transactionIds = <String>[];
+  for (final suffix in const ['a', 'b']) {
+    final transactionId = 'tx-r001-$suffix';
+    final caseId = 'case-r001-$suffix';
+    transactionIds.add(transactionId);
+    final source = _source(project, 'membership-$suffix.dart', 'H1-$suffix\n');
+    await manager.beginTransaction(
+      quarantineDir: quarantine,
+      transactionId: transactionId,
+      round: 1,
+      componentId: 'unit:$suffix',
+      findingIds: ['finding-$suffix'],
+      caseIds: [caseId],
+      verificationWaveId: 'wave-r001',
+    );
+    await manager.beginCase(
+      quarantineDir: quarantine,
+      caseId: caseId,
+      findingId: 'finding-$suffix',
+      file: source,
+      operationType: QuarantineOperationType.declaration,
+      transactionId: transactionId,
+    );
+    source.writeAsStringSync('H2-$suffix\n', flush: true);
+    await manager.recordCaseApplied(quarantineDir: quarantine, caseId: caseId);
+    await manager.recordTransactionApplied(
+      quarantineDir: quarantine,
+      transactionId: transactionId,
+      caseIds: [caseId],
+    );
+  }
+  return (
+    quarantine: quarantine,
+    accepted: _passingVerificationResult(
+      project,
+    ).compareToBaselineEvidence(baseline).acceptedEvidence!,
+    transactionIds: transactionIds,
+  );
+}
+
+Map<String, String> _journalSnapshot(Directory quarantine) {
+  final primary = p.join(quarantine.path, 'manifest.json');
+  return {
+    for (final path in [primary, '$primary.tmp', '$primary.previous'])
+      if (File(path).existsSync())
+        p.basename(path): base64Encode(File(path).readAsBytesSync()),
+  };
+}
+
+void _replacePrimaryDocument(File primary, String contents) {
+  for (final suffix in ['.tmp', '.previous']) {
+    final adjacent = File('${primary.path}$suffix');
+    if (adjacent.existsSync()) adjacent.deleteSync();
+  }
+  primary.writeAsStringSync(contents, flush: true);
+}
+
 File _source(Directory project, String name, String contents) {
   final source = File(p.join(project.path, 'lib', name));
   source.parent.createSync(recursive: true);
@@ -1767,6 +2492,28 @@ VerificationBaselineEvidence _managerVerificationBaseline(Directory project) =>
           fingerprintDigests: const {},
         ),
       ],
+    );
+
+VerificationResult _passingVerificationResult(Directory project) =>
+    VerificationResult(
+      passed: true,
+      failedStep: null,
+      steps: const [
+        VerificationStep(
+          name: 'analyze',
+          parserKind: VerificationOutputParserKind.humanAnalyzer,
+          passed: true,
+          exitCode: 0,
+          stdout: '',
+          stderr: '',
+          duration: Duration.zero,
+        ),
+      ],
+      policyHash: 'policy',
+      requiredStepIds: const ['analyze'],
+      requiredParserKinds: const [VerificationOutputParserKind.humanAnalyzer],
+      workingDirectory: p.normalize(p.absolute(project.path)),
+      toolchainIdentity: 'test-toolchain',
     );
 
 Future<Directory> _beginDisplacementTransaction(

@@ -53,6 +53,15 @@ manifest V3, while V1 and V2 manifests remain readable and restorable. The
 manifest remains authoritative for bytes, transaction state, verification
 evidence, and rollback; report migrations cannot weaken that contract.
 
+Verification waves are additive in both JSON report v3 and manifest V3. A
+candidate report adds `waveId` and ordered `transactionIds`; the singular
+`transactionId` is present only when the wave has one member. Existing JSON v2
+serialization deliberately omits these fields and remains frozen at the byte
+level. Manifest readers accept legacy V3 documents without wave fields, but
+fail closed on malformed wave IDs, evidence digests, or duplicate transaction
+membership. Accepted wave records, rather than transaction-local mirror fields,
+are the authority for verification history and survive full-run rollback.
+
 ## Change checklist
 
 Before merging a report change:
