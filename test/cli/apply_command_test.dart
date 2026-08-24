@@ -455,11 +455,14 @@ void main() {
     expect(
       outcomes,
       everyElement(
-        isA<Map<String, dynamic>>().having(
-          (item) => item['status'],
-          'status',
-          'committed',
-        ),
+        isA<Map<String, dynamic>>()
+            .having((item) => item['status'], 'status', 'committed')
+            .having(
+              (item) => item['reason'],
+              'reason',
+              'The verification wave was accepted and the transaction was '
+                  'committed as a member.',
+            ),
       ),
     );
     expect((apply['transactions'] as Map)['committed'], 2);

@@ -285,7 +285,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Custom runtime callback and asset registries require explicit modeling or
   project policy.
 
-[Unreleased]: https://github.com/nhan7777/flutter_pruner/compare/v1.5.0...main
+[Unreleased]: https://github.com/nhan7777/flutter_pruner/compare/v1.6.0...main
+[1.6.0]: https://github.com/nhan7777/flutter_pruner/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/nhan7777/flutter_pruner/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/nhan7777/flutter_pruner/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/nhan7777/flutter_pruner/compare/v1.2.0...v1.3.0

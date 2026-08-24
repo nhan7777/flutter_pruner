@@ -55,15 +55,20 @@ void main() {
         caseIds: [caseId],
         verificationWaveId: 'wave-r001',
       );
-      await manager.beginCase(
+      final prepared = await manager.beginDisplacedCase(
         quarantineDir: quarantine,
         caseId: caseId,
         findingId: 'finding-$id',
         file: source,
         operationType: QuarantineOperationType.declaration,
+        expectedSha256: _sha256(source),
+        expectedPosixMode: _posixMode(source),
         transactionId: transactionId,
       );
-      source.writeAsStringSync('const after$id = true;\n', flush: true);
+      prepared.candidate.writeAsStringSync(
+        'const after$id = true;\n',
+        flush: true,
+      );
       await manager.recordCaseApplied(
         quarantineDir: quarantine,
         caseId: caseId,
@@ -168,15 +173,17 @@ void main() {
           caseIds: [state.caseId],
           verificationWaveId: 'wave-r001',
         );
-        await manager.beginCase(
+        final prepared = await manager.beginDisplacedCase(
           quarantineDir: quarantine,
           caseId: state.caseId,
           findingId: 'finding-${state.caseId}',
           file: source,
           operationType: QuarantineOperationType.declaration,
+          expectedSha256: _sha256(source),
+          expectedPosixMode: _posixMode(source),
           transactionId: state.transaction,
         );
-        source.writeAsStringSync(state.output, flush: true);
+        prepared.candidate.writeAsStringSync(state.output, flush: true);
         await manager.recordCaseApplied(
           quarantineDir: quarantine,
           caseId: state.caseId,
@@ -478,6 +485,105 @@ void main() {
         ),
       ),
     );
+  });
+
+  test('historical wave with a newly failing step fails closed', () async {
+    final staged = await _stageSingleVerificationWave(manager, project);
+    await manager.commitVerifiedTransactionWave(
+      quarantineDir: staged.quarantine,
+      verificationWaveId: 'wave-r001',
+      round: 1,
+      transactionIds: const ['tx-r001-a'],
+      acceptedVerification: staged.accepted,
+    );
+    final primary = File(p.join(staged.quarantine.path, 'manifest.json'));
+    final decoded = jsonDecode(primary.readAsStringSync()) as Map;
+    final revision = (decoded['_journal'] as Map)['revision'] as int;
+    final payload = _payload(primary);
+    final waves = payload['verificationWaves'] as List;
+    final candidate = (waves.single as Map)['candidateEvidence'] as Map;
+    final step = (candidate['steps'] as List).single as Map;
+    step
+      ..['passed'] = false
+      ..['exitCode'] = 1
+      ..['failureEvidenceComplete'] = true
+      ..['reportedFailureCount'] = 1
+      ..['fingerprintCount'] = 1
+      ..['fingerprintDigests'] = {'a' * 64: 1};
+    _replacePrimaryDocument(
+      primary,
+      _document(payload, revision: revision + 1),
+    );
+
+    await expectLater(
+      manager.readManifest(staged.quarantine),
+      throwsA(
+        isA<QuarantineException>().having(
+          (error) => error.toString(),
+          'message',
+          contains('was not accepted against its comparison baseline'),
+        ),
+      ),
+    );
+  });
+
+  test(
+    'wave commit rejects a member without displacement atomically',
+    () async {
+      final staged = await _stageSingleVerificationWave(
+        manager,
+        project,
+        displaced: false,
+      );
+      final before = _journalSnapshot(staged.quarantine);
+
+      await expectLater(
+        manager.commitVerifiedTransactionWave(
+          quarantineDir: staged.quarantine,
+          verificationWaveId: 'wave-r001',
+          round: 1,
+          transactionIds: const ['tx-r001-a'],
+          acceptedVerification: staged.accepted,
+        ),
+        throwsA(
+          isA<QuarantineException>().having(
+            (error) => error.toString(),
+            'message',
+            contains('requires one installed displacement'),
+          ),
+        ),
+      );
+
+      expect(_journalSnapshot(staged.quarantine), before);
+    },
+  );
+
+  test('wave commit rejects a non-installed displacement atomically', () async {
+    final staged = await _stageSingleVerificationWave(manager, project);
+    final primary = File(p.join(staged.quarantine.path, 'manifest.json'));
+    final decoded = jsonDecode(primary.readAsStringSync()) as Map;
+    final revision = (decoded['_journal'] as Map)['revision'] as int;
+    final payload = _payload(primary);
+    final displacements = payload['_caseDisplacements'] as List;
+    (displacements.single as Map)['state'] = 'candidatePrepared';
+    _replacePrimaryDocument(
+      primary,
+      _document(payload, revision: revision + 1),
+    );
+    final before = _journalSnapshot(staged.quarantine);
+
+    await expectLater(
+      manager.commitVerifiedTransactionWave(
+        quarantineDir: staged.quarantine,
+        verificationWaveId: 'wave-r001',
+        round: 1,
+        transactionIds: const ['tx-r001-a'],
+        acceptedVerification: staged.accepted,
+      ),
+      throwsA(isA<QuarantineException>()),
+    );
+
+    expect(_journalSnapshot(staged.quarantine), before);
   });
 
   test('wave publish detects a manifest change after temp flush', () async {
@@ -2314,6 +2420,7 @@ _stageSingleVerificationWave(
   QuarantineManager manager,
   Directory project, {
   int round = 1,
+  bool displaced = true,
 }) async {
   final baseline = _managerVerificationBaseline(project);
   final quarantine = await manager.createCaseQuarantine(
@@ -2340,15 +2447,29 @@ _stageSingleVerificationWave(
     caseIds: const ['case-r001-a'],
     verificationWaveId: 'wave-r${round.toString().padLeft(3, '0')}',
   );
-  await manager.beginCase(
-    quarantineDir: quarantine,
-    caseId: 'case-r001-a',
-    findingId: 'finding-a',
-    file: source,
-    operationType: QuarantineOperationType.declaration,
-    transactionId: 'tx-r${round.toString().padLeft(3, '0')}-a',
-  );
-  source.writeAsStringSync('const after = true;\n', flush: true);
+  if (displaced) {
+    final prepared = await manager.beginDisplacedCase(
+      quarantineDir: quarantine,
+      caseId: 'case-r001-a',
+      findingId: 'finding-a',
+      file: source,
+      operationType: QuarantineOperationType.declaration,
+      expectedSha256: _sha256(source),
+      expectedPosixMode: _posixMode(source),
+      transactionId: 'tx-r${round.toString().padLeft(3, '0')}-a',
+    );
+    prepared.candidate.writeAsStringSync('const after = true;\n', flush: true);
+  } else {
+    await manager.beginCase(
+      quarantineDir: quarantine,
+      caseId: 'case-r001-a',
+      findingId: 'finding-a',
+      file: source,
+      operationType: QuarantineOperationType.declaration,
+      transactionId: 'tx-r${round.toString().padLeft(3, '0')}-a',
+    );
+    source.writeAsStringSync('const after = true;\n', flush: true);
+  }
   await manager.recordCaseApplied(
     quarantineDir: quarantine,
     caseId: 'case-r001-a',
@@ -2422,15 +2543,17 @@ _stageTwoVerificationWave(QuarantineManager manager, Directory project) async {
       caseIds: [caseId],
       verificationWaveId: 'wave-r001',
     );
-    await manager.beginCase(
+    final prepared = await manager.beginDisplacedCase(
       quarantineDir: quarantine,
       caseId: caseId,
       findingId: 'finding-$suffix',
       file: source,
       operationType: QuarantineOperationType.declaration,
+      expectedSha256: _sha256(source),
+      expectedPosixMode: _posixMode(source),
       transactionId: transactionId,
     );
-    source.writeAsStringSync('H2-$suffix\n', flush: true);
+    prepared.candidate.writeAsStringSync('H2-$suffix\n', flush: true);
     await manager.recordCaseApplied(quarantineDir: quarantine, caseId: caseId);
     await manager.recordTransactionApplied(
       quarantineDir: quarantine,

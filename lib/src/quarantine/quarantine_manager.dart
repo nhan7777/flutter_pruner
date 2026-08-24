@@ -495,7 +495,13 @@ class QuarantineManager {
     };
     for (final caseId in ownedCaseIds) {
       final displacement = displacementByCaseId[caseId];
-      if (displacement == null) continue;
+      if (displacement == null ||
+          displacement.state != _CaseDisplacementState.installed) {
+        throw QuarantineException(
+          'Verification wave case $caseId requires one installed '
+          'displacement.',
+        );
+      }
       final applyCase = casesById[caseId]!;
       await _validateDisplacedAppliedCase(
         quarantineDir: quarantineDir,
@@ -2497,6 +2503,15 @@ class QuarantineManager {
         throw QuarantineException(
           'Verification wave ${wave.verificationWaveId} violates the '
           'manifest verification contract.',
+        );
+      }
+      if (!verificationBaselineEvidenceAcceptsCandidate(
+        baseline: rollingBaseline,
+        candidate: candidate,
+      )) {
+        throw QuarantineException(
+          'Verification wave ${wave.verificationWaveId} was not accepted '
+          'against its comparison baseline.',
         );
       }
       final declared = manifest.transactions

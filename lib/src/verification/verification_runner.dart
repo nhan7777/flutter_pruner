@@ -521,6 +521,51 @@ String verificationBaselineEvidenceSha256(
   VerificationBaselineEvidence evidence,
 ) => sha256.convert(utf8.encode(jsonEncode(evidence.toJson()))).toString();
 
+/// Whether sanitized [candidate] evidence is an accepted continuation of
+/// sanitized [baseline] evidence.
+///
+/// This replays the persisted subset of [VerificationResult]
+/// comparison semantics without reconstructing raw verifier output.
+bool verificationBaselineEvidenceAcceptsCandidate({
+  required VerificationBaselineEvidence baseline,
+  required VerificationBaselineEvidence candidate,
+}) {
+  if (!baseline.isComplete || !candidate.isComplete) return false;
+  if (candidate.policyHash != baseline.policyHash ||
+      !_sameOrderedStrings(
+        candidate.requiredStepIds,
+        baseline.requiredStepIds,
+      ) ||
+      !_sameParserKindLists(
+        candidate.requiredParserKinds,
+        baseline.requiredParserKinds,
+      ) ||
+      candidate.workingDirectory != baseline.workingDirectory ||
+      candidate.toolchainIdentity != baseline.toolchainIdentity) {
+    return false;
+  }
+
+  final baselineByName = {for (final step in baseline.steps) step.name: step};
+  for (final candidateStep in candidate.steps) {
+    final baselineStep = baselineByName[candidateStep.name];
+    if (baselineStep == null ||
+        candidateStep.parserKind != baselineStep.parserKind) {
+      return false;
+    }
+    if (baselineStep.passed) {
+      if (!candidateStep.passed) return false;
+      continue;
+    }
+    if (candidateStep.passed) continue;
+    for (final failure in candidateStep.fingerprintDigests.entries) {
+      if (failure.value > (baselineStep.fingerprintDigests[failure.key] ?? 0)) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
 /// Sanitized, immutable verification baseline suitable for a quarantine
 /// manifest. It intentionally retains no verifier stdout or stderr.
 class VerificationBaselineEvidence {

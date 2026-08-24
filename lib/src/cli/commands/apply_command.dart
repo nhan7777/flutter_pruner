@@ -1328,7 +1328,9 @@ class ApplyCommand extends Command<int> {
               finding: item.item.finding,
               status: ApplyFindingOutcomeStatus.committed,
               reasonCode: 'verification_accepted',
-              reason: 'The transaction passed verification and was committed.',
+              reason:
+                  'The verification wave was accepted and the transaction '
+                  'was committed as a member.',
               round: roundCount,
               transactionId: transactionId,
             ),
