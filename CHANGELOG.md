@@ -23,11 +23,18 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 - Add isolated `control-1x1`, `fanout-12x1`, and `chain-2plus-rounds` apply
   fixture generation plus an opt-in A/A and counterbalanced A/B admission
-  harness. The admitted macOS arm64 synthetic study measured median paired
-  changes of -0.43% for the 1x1 control (within noise), +67.52% for 12 units in
-  one round, and +28.97% for four units across two rounds. These results are a
-  fixture-scoped admission claim, not a real-project or combined-optimization
-  claim.
+  harness. In the admitted macOS arm64 synthetic study, the 1x1 control was
+  0.43% slower within its 4.91% noise threshold, while 12 units in one round
+  improved by 67.52% and four units across two rounds improved by 28.97%.
+  These results are a fixture-scoped admission claim, not a real-project or
+  combined-optimization claim.
+
+### Fixed
+
+- Scope external-package closure blockers to the selected library closure, so
+  auxiliary and test-only dependencies no longer downgrade unrelated
+  application libraries while affected application and conditional callers
+  continue to fail closed.
 
 ## [1.5.0] - 2026-08-22
 
