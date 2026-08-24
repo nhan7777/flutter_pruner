@@ -195,11 +195,13 @@ no-progress outcome and reserves `1` for infrastructure or recovery failures.
 `scan` and `apply` call the same `ProjectAnalyzer`. Apply then builds a
 dependency-closed SCC plan, snapshots all touched paths and requires the exact
 configured verifier policy for baseline, candidate and rollback checks.
-Manifest V3 records atomic-unit/round IDs, policy hash, required and observed
-step IDs, and a terminal `committed`, `rolledBackVerified`, or
-`recoveryRequired` state. A successful transaction is committed as one journal
-transition; a rejected transaction causes the whole run to be restored
-to its original baseline before the rollback verifier runs. For a regular file,
+Manifest V3 records atomic-unit/round IDs, accepted verification-wave evidence,
+policy hash, required and observed step IDs, and a terminal `committed`,
+`rolledBackVerified`, or `recoveryRequired` state. Within each non-empty round,
+apply journals every ordered transaction as applied, verifies the combined
+candidate state once, then commits the entire accepted wave through one journal
+revision. A rejected or unavailable wave causes the whole run to be restored to
+its original baseline before the rollback verifier runs. For a regular file,
 that rollback contract covers captured bytes and POSIX permission bits where the
 platform exposes them. A verified rollback ends as `safeStopped` (exit `2`) with
 no mutation retained; an unverified restore leaves `recoveryRequired` evidence

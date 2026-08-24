@@ -614,6 +614,31 @@ class HumanFormatter extends ReportFormatter {
             '$rejected rejected · $unavailable unavailable',
         color: color,
       );
+      if (purpose == VerificationAttemptPurpose.candidate) {
+        for (final attempt in attempts.where((item) => item.waveId != null)) {
+          final timings = attempt.steps
+              .map(
+                (step) =>
+                    '${step.id} ${(step.elapsedMicros / 1000).toStringAsFixed(0)}ms',
+              )
+              .join(', ');
+          final status = !attempt.available
+              ? 'UNAVAILABLE'
+              : attempt.accepted
+              ? 'ACCEPTED'
+              : 'REJECTED';
+          _writeLabeledRow(
+            buffer,
+            icon: attempt.accepted ? '✓' : '!',
+            label: 'Wave',
+            value:
+                '${attempt.waveId} · round ${attempt.round} · '
+                '${attempt.transactionIds.length} transaction(s) · '
+                '$status · $timings',
+            color: attempt.accepted ? _Ansi.green : _Ansi.yellow,
+          );
+        }
+      }
     }
   }
 

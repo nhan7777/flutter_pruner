@@ -18,6 +18,34 @@ import 'package:flutter_pruner/src/reporting/run_report.dart';
 import 'package:test/test.dart';
 
 void main() {
+  test('verification wave identity enforces attempt cardinality', () {
+    expect(
+      () => _verificationAttempt(
+        purpose: VerificationAttemptPurpose.baseline,
+        waveId: 'wave-r001',
+        transactionIds: const ['tx-a'],
+      ),
+      throwsStateError,
+    );
+    expect(
+      () => _verificationAttempt(
+        purpose: VerificationAttemptPurpose.candidate,
+        waveId: 'wave-r001',
+        transactionId: 'tx-a',
+        transactionIds: const ['tx-a', 'tx-b'],
+      ),
+      throwsStateError,
+    );
+    final single = _verificationAttempt(
+      purpose: VerificationAttemptPurpose.candidate,
+      waveId: 'wave-r001',
+      transactionId: 'tx-a',
+      transactionIds: const ['tx-a'],
+    );
+    expect(single.transactionIds, ['tx-a']);
+    expect(() => single.transactionIds.add('external'), throwsUnsupportedError);
+  });
+
   test('finding statistics preserve ownership and null byte semantics', () {
     final statistics = FindingStatistics.fromFindings([
       _finding('asset:a', adapter: 'assets', confidence: Confidence.safe),
@@ -291,6 +319,37 @@ void main() {
     );
   });
 }
+
+VerificationAttemptReport _verificationAttempt({
+  required VerificationAttemptPurpose purpose,
+  String? waveId,
+  String? transactionId,
+  List<String> transactionIds = const [],
+}) => VerificationAttemptReport(
+  purpose: purpose,
+  complete: true,
+  available: true,
+  accepted: true,
+  policyHash: 'policy',
+  requiredStepIds: const ['analyze'],
+  observedStepIds: const ['analyze'],
+  workingDirectory: '/workspace',
+  toolchainIdentity: 'toolchain',
+  steps: const [
+    VerificationStepReport(
+      id: 'analyze',
+      passed: true,
+      available: true,
+      exitCode: 0,
+      elapsedMicros: 1,
+    ),
+  ],
+  newFailureCount: 0,
+  infrastructureFailureCount: 0,
+  waveId: waveId,
+  transactionId: transactionId,
+  transactionIds: transactionIds,
+);
 
 Finding _finding(
   String id, {

@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 2,
+  "protocolId": "apply-verification-wave-v2-block3-pairs6",
+  "status": "admitted",
+  "defaultOnOptimizationAdmitted": true,
+  "profiles": [
+    {
+      "profile": "control-1x1",
+      "admitted": true,
+      "medianImprovement": -0.00430895784556725,
+      "noiseThreshold": 0.04906997956988524,
+      "fasterPairs": 3,
+      "rawArtifactSha256": "c58a056c910d5d869f3d8d3400d2aa14a0161ce00e32b77a8f65353baf9ed614"
+    },
+    {
+      "profile": "fanout-12x1",
+      "admitted": true,
+      "medianImprovement": 0.6752120948900704,
+      "noiseThreshold": 0.04799858433714017,
+      "fasterPairs": 6,
+      "rawArtifactSha256": "0a73df46e7e1e5f7cabb91415955fb216f494968e70d03c83c79e802bdd3087e"
+    },
+    {
+      "profile": "chain-2plus-rounds",
+      "admitted": true,
+      "medianImprovement": 0.2897109549245943,
+      "noiseThreshold": 0.015740675578724505,
+      "fasterPairs": 6,
+      "rawArtifactSha256": "a96698b66fa191f302b2fc196fcbaf63022ec326f4e6ed0889845077cb1ef279"
+    }
+  ],
+  "aExecutableSha256": "5ec520dc1aac1232ff023ea8c75a08ac1be4354f9b4b7575705af8160b085ef7",
+  "bExecutableSha256": "5ec520dc1aac1232ff023ea8c75a08ac1be4354f9b4b7575705af8160b085ef7",
+  "aProgramSha256": "652514d88cc38f3f30ea729223db0826d0ce3009e6940e6b40e1f6822d17b85a",
+  "bProgramSha256": "237ca65ed047cd75761ea9d42824d36ee5df2863cd58bf217b9631d2c32cf768",
+  "harnessSha256": "cc5b47c61e373473cc904cb5b090c08ef2487aecc8119ebc582d39fd9f05328b",
+  "generatorSha256": "f73d2c71b46b579848753f0e9c5cd5a20cb935f43255ac8f2d7d11633997a96a",
+  "boundaryPatchSha256": "dcda825186bf42952ec89a35a0cc91fce1f240fda0a1a989a0d2d5f536762518",
+  "verificationWavePatchSha256": "3610688c52c9abc33d864a358c981ba64ced78ede3d08517d17988daa3bd5ad3",
+  "dartToolchainSha256": "123d821f2df3fd3e8f5e02cefd344dea5eb51ee51d83cb5de959db1820ec05b9",
+  "flutterToolchainSha256": "f08ccb14094c1614cc1ec8c4ede1fc7808cbbe4cc15cc22a39b1996c0719c5b6",
+  "applyArgumentsSha256": "84d61a36a28cd9235a6f78a8f0325a4b030852edd66ff950a2cf6468c99b284a",
+  "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+  "performanceClaim": {
+    "scope": "synthetic-fixture-admission",
+    "metric": "median-paired-relative-delta"
+  }
+}

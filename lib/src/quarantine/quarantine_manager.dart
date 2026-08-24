@@ -8,6 +8,7 @@ import 'package:path/path.dart' as p;
 import '../apply/finding_selection.dart';
 import '../core/process/managed_process_runner.dart';
 import '../core/project/tool_workspace.dart';
+import '../verification/verification_runner.dart';
 import 'manifest.dart';
 
 /// Manages quarantine directories for reversible file operations.
@@ -20,6 +21,7 @@ class QuarantineManager {
     this.projectRoot, {
     QuarantineDisplacementHook? displacementHook,
     QuarantineRestoreHook? restoreHook,
+    QuarantineJournalHook? journalHook,
     QuarantineSourceRenamer? sourceRenamer,
     ProcessExecutionRunner atomicPublishProcessRunner =
         const ManagedProcessRunner(),
@@ -27,6 +29,7 @@ class QuarantineManager {
         const ManagedProcessRunner(),
   }) : _displacementHook = displacementHook,
        _restoreHook = restoreHook,
+       _journalHook = journalHook,
        _sourceRenamer = sourceRenamer ?? _renameSource,
        _atomicPublishProcessRunner = atomicPublishProcessRunner,
        _permissionProcessRunner = permissionProcessRunner;
@@ -36,6 +39,7 @@ class QuarantineManager {
 
   final QuarantineDisplacementHook? _displacementHook;
   final QuarantineRestoreHook? _restoreHook;
+  final QuarantineJournalHook? _journalHook;
   final QuarantineSourceRenamer _sourceRenamer;
   final ProcessExecutionRunner _atomicPublishProcessRunner;
   final ProcessExecutionRunner _permissionProcessRunner;
@@ -144,6 +148,7 @@ class QuarantineManager {
     required String componentId,
     required List<String> findingIds,
     required List<String> caseIds,
+    String? verificationWaveId,
   }) async {
     if (!RegExp(r'^[A-Za-z0-9_-]+$').hasMatch(transactionId)) {
       throw QuarantineException('Invalid transaction ID: $transactionId');
@@ -154,6 +159,12 @@ class QuarantineManager {
         caseIds.toSet().length != caseIds.length) {
       throw QuarantineException(
         'Transaction $transactionId must declare unique findings and cases.',
+      );
+    }
+    if (verificationWaveId != null &&
+        verificationWaveId != 'wave-r${round.toString().padLeft(3, '0')}') {
+      throw QuarantineException(
+        'Invalid verification wave ID for round $round: $verificationWaveId',
       );
     }
     final manifest = await _readManifest(quarantineDir);
@@ -203,6 +214,7 @@ class QuarantineManager {
       findingIds: List.unmodifiable(findingIds),
       caseIds: List.unmodifiable(caseIds),
       status: QuarantineTransactionStatus.pending,
+      verificationWaveId: verificationWaveId,
       verificationPolicyHash: manifest.verificationPolicyHash,
     );
     await _writeManifest(
@@ -352,6 +364,197 @@ class QuarantineManager {
       caseDisplacements: displacements,
     );
     return committed;
+  }
+
+  /// Commits every applied member of one accepted verification wave in one
+  /// recoverable manifest revision.
+  Future<List<QuarantineTransaction>> commitVerifiedTransactionWave({
+    required Directory quarantineDir,
+    required String verificationWaveId,
+    required int round,
+    required List<String> transactionIds,
+    required AcceptedVerificationEvidence acceptedVerification,
+  }) async {
+    final document = await _resolveManifestDocument(quarantineDir);
+    final manifest = document.manifest;
+    _validateManifestProject(manifest);
+    _requireV3PosixModeEvidence(manifest);
+    if (document.runLifecycle?.state != QuarantineRunLifecycleState.active) {
+      throw QuarantineException(
+        'Verification wave commit requires an active run lifecycle.',
+      );
+    }
+    if (round <= 0 ||
+        verificationWaveId != 'wave-r${round.toString().padLeft(3, '0')}') {
+      throw QuarantineException('Invalid verification wave identity.');
+    }
+    final expectedRound = manifest.verificationWaves.isEmpty
+        ? 1
+        : manifest.verificationWaves.last.round + 1;
+    if (round != expectedRound) {
+      throw QuarantineException(
+        'Verification wave round $round does not follow accepted round '
+        '${expectedRound - 1}.',
+      );
+    }
+    if (transactionIds.isEmpty ||
+        transactionIds.toSet().length != transactionIds.length) {
+      throw QuarantineException('Verification wave membership is invalid.');
+    }
+    if (manifest.verificationWaves.any(
+      (wave) =>
+          wave.verificationWaveId == verificationWaveId || wave.round == round,
+    )) {
+      throw QuarantineException('Verification wave identity already exists.');
+    }
+    final declared = manifest.transactions
+        .where(
+          (transaction) => transaction.verificationWaveId == verificationWaveId,
+        )
+        .toList();
+    if (!_sameOrderedValues(
+      transactionIds,
+      declared.map((transaction) => transaction.transactionId).toList(),
+    )) {
+      throw QuarantineException(
+        'Verification wave membership does not match the journal.',
+      );
+    }
+    final candidate = acceptedVerification.candidateEvidence;
+    final baselineVerification = manifest.baselineVerification;
+    final baselineEvidence = baselineVerification?.comparisonBaseline;
+    if (baselineVerification == null ||
+        baselineEvidence == null ||
+        !candidate.isComplete ||
+        candidate.policyHash != manifest.verificationPolicyHash ||
+        candidate.policyHash != baselineVerification.policyHash ||
+        candidate.workingDirectory != baselineVerification.workingDirectory ||
+        candidate.toolchainIdentity != baselineVerification.toolchainIdentity ||
+        !_sameOrderedValues(
+          candidate.requiredStepIds,
+          baselineVerification.requiredStepIds,
+        ) ||
+        !_sameOrderedValues(
+          candidate.steps.map((step) => step.name).toList(),
+          baselineVerification.observedStepIds,
+        )) {
+      throw QuarantineException('Accepted verification evidence is invalid.');
+    }
+    final comparisonBaseline = manifest.verificationWaves.isEmpty
+        ? baselineEvidence
+        : manifest.verificationWaves.last.candidateEvidence;
+    if (acceptedVerification.comparisonBaselineSha256 !=
+        verificationBaselineEvidenceSha256(comparisonBaseline)) {
+      throw QuarantineException(
+        'Accepted verification baseline does not match the journal chain.',
+      );
+    }
+
+    final ownedCaseIds = <String>{};
+    for (final transaction in declared) {
+      if (transaction.round != round ||
+          transaction.status != QuarantineTransactionStatus.applied ||
+          transaction.verificationPolicyHash !=
+              manifest.verificationPolicyHash) {
+        throw QuarantineException(
+          'Transaction ${transaction.transactionId} is not an applied wave member.',
+        );
+      }
+      for (final caseId in transaction.caseIds) {
+        if (!ownedCaseIds.add(caseId)) {
+          throw QuarantineException('Verification wave owns a case twice.');
+        }
+      }
+    }
+    final casesById = {
+      for (final applyCase in manifest.cases) applyCase.caseId: applyCase,
+    };
+    final lastCaseByPath = <String, String>{};
+    for (final applyCase in manifest.cases) {
+      if (ownedCaseIds.contains(applyCase.caseId)) {
+        lastCaseByPath[applyCase.entry.originalPath] = applyCase.caseId;
+      }
+    }
+    for (final transaction in declared) {
+      for (final caseId in transaction.caseIds) {
+        final applyCase = casesById[caseId];
+        if (applyCase == null ||
+            applyCase.transactionId != transaction.transactionId ||
+            applyCase.status != QuarantineCaseStatus.applied) {
+          throw QuarantineException('Invalid owned wave case: $caseId.');
+        }
+        await _validateAppliedCaseSnapshot(quarantineDir, applyCase);
+        if (lastCaseByPath[applyCase.entry.originalPath] == caseId) {
+          await _validateAppliedCaseOutput(applyCase);
+        }
+      }
+    }
+    final displacementByCaseId = {
+      for (final displacement in document.caseDisplacements)
+        displacement.caseId: displacement,
+    };
+    for (final caseId in ownedCaseIds) {
+      final displacement = displacementByCaseId[caseId];
+      if (displacement == null ||
+          displacement.state != _CaseDisplacementState.installed) {
+        throw QuarantineException(
+          'Verification wave case $caseId requires one installed '
+          'displacement.',
+        );
+      }
+      final applyCase = casesById[caseId]!;
+      await _validateDisplacedAppliedCase(
+        quarantineDir: quarantineDir,
+        applyCase: applyCase,
+        displacement: displacement,
+        validateOutput: lastCaseByPath[applyCase.entry.originalPath] == caseId,
+      );
+    }
+
+    final committedById = <String, QuarantineTransaction>{};
+    final transactions = manifest.transactions.map((transaction) {
+      if (!transactionIds.contains(transaction.transactionId)) {
+        return transaction;
+      }
+      final committed = transaction.withState(
+        status: QuarantineTransactionStatus.committed,
+        verificationPolicyHash: candidate.policyHash,
+        requiredStepIds: candidate.requiredStepIds,
+        observedStepIds: candidate.steps.map((step) => step.name).toList(),
+      );
+      committedById[committed.transactionId] = committed;
+      return committed;
+    }).toList();
+    final cases = manifest.cases.map((applyCase) {
+      if (!ownedCaseIds.contains(applyCase.caseId)) return applyCase;
+      return applyCase.withStatus(QuarantineCaseStatus.kept);
+    }).toList();
+    final displacements = document.caseDisplacements.map((displacement) {
+      if (!ownedCaseIds.contains(displacement.caseId)) return displacement;
+      return displacement.withState(_CaseDisplacementState.committed);
+    }).toList();
+    final wave = QuarantineVerificationWave(
+      verificationWaveId: verificationWaveId,
+      round: round,
+      transactionIds: transactionIds,
+      comparisonBaselineSha256: acceptedVerification.comparisonBaselineSha256,
+      candidateEvidence: candidate,
+    );
+    await _writeManifest(
+      quarantineDir,
+      _copyManifest(
+        manifest,
+        cases: cases,
+        transactions: transactions,
+        verificationWaves: [...manifest.verificationWaves, wave],
+      ),
+      caseDisplacements: displacements,
+      expectedRevision: document.revision,
+      expectedPayloadSha256: document.payloadSha256,
+    );
+    return List.unmodifiable(
+      transactionIds.map((transactionId) => committedById[transactionId]!),
+    );
   }
 
   /// Records that an atomic transaction was restored and re-verified.
@@ -2250,6 +2453,126 @@ class QuarantineManager {
     );
   }
 
+  void _validateVerificationWaveJournal(QuarantineManifest manifest) {
+    final transactionsById = {
+      for (final transaction in manifest.transactions)
+        transaction.transactionId: transaction,
+    };
+    final wavesById = {
+      for (final wave in manifest.verificationWaves)
+        wave.verificationWaveId: wave,
+    };
+    VerificationBaselineEvidence? rollingBaseline =
+        manifest.baselineVerification?.comparisonBaseline;
+    final baselineVerification = manifest.baselineVerification;
+    var expectedRound = 1;
+    for (final wave in manifest.verificationWaves) {
+      final candidate = wave.candidateEvidence;
+      if (wave.round != expectedRound) {
+        throw QuarantineException(
+          'Verification wave ${wave.verificationWaveId} is out of sequence.',
+        );
+      }
+      expectedRound++;
+      if (rollingBaseline == null ||
+          baselineVerification == null ||
+          wave.comparisonBaselineSha256 !=
+              verificationBaselineEvidenceSha256(rollingBaseline)) {
+        throw QuarantineException(
+          'Verification wave ${wave.verificationWaveId} has a broken evidence chain.',
+        );
+      }
+      if (!candidate.isComplete ||
+          candidate.policyHash != manifest.verificationPolicyHash ||
+          candidate.policyHash != baselineVerification.policyHash ||
+          candidate.workingDirectory != baselineVerification.workingDirectory ||
+          candidate.toolchainIdentity !=
+              baselineVerification.toolchainIdentity ||
+          !_sameOrderedValues(
+            candidate.requiredStepIds,
+            rollingBaseline.requiredStepIds,
+          ) ||
+          !_sameOrderedValues(
+            candidate.requiredParserKinds,
+            rollingBaseline.requiredParserKinds,
+          ) ||
+          !_sameOrderedValues(
+            candidate.steps.map((step) => step.name).toList(),
+            rollingBaseline.steps.map((step) => step.name).toList(),
+          )) {
+        throw QuarantineException(
+          'Verification wave ${wave.verificationWaveId} violates the '
+          'manifest verification contract.',
+        );
+      }
+      if (!verificationBaselineEvidenceAcceptsCandidate(
+        baseline: rollingBaseline,
+        candidate: candidate,
+      )) {
+        throw QuarantineException(
+          'Verification wave ${wave.verificationWaveId} was not accepted '
+          'against its comparison baseline.',
+        );
+      }
+      final declared = manifest.transactions
+          .where(
+            (transaction) =>
+                transaction.verificationWaveId == wave.verificationWaveId,
+          )
+          .map((transaction) => transaction.transactionId)
+          .toList();
+      if (!_sameOrderedValues(declared, wave.transactionIds)) {
+        throw QuarantineException(
+          'Verification wave ${wave.verificationWaveId} has inconsistent membership.',
+        );
+      }
+      for (final transactionId in wave.transactionIds) {
+        final transaction = transactionsById[transactionId];
+        if (transaction == null ||
+            transaction.round != wave.round ||
+            transaction.verificationPolicyHash != candidate.policyHash ||
+            !_sameOrderedValues(
+              transaction.requiredStepIds,
+              candidate.requiredStepIds,
+            ) ||
+            !_sameOrderedValues(
+              transaction.observedStepIds,
+              candidate.steps.map((step) => step.name).toList(),
+            ) ||
+            transaction.status == QuarantineTransactionStatus.pending ||
+            transaction.status == QuarantineTransactionStatus.applied ||
+            transaction.status == QuarantineTransactionStatus.verified) {
+          throw QuarantineException(
+            'Verification wave ${wave.verificationWaveId} has a non-terminal member.',
+          );
+        }
+      }
+      rollingBaseline = wave.candidateEvidence;
+    }
+    for (final transaction in manifest.transactions) {
+      final waveId = transaction.verificationWaveId;
+      if (waveId == null) continue;
+      if (waveId != 'wave-r${transaction.round.toString().padLeft(3, '0')}') {
+        throw QuarantineException(
+          'Transaction ${transaction.transactionId} has an invalid wave identity.',
+        );
+      }
+      final acceptedWave = wavesById[waveId];
+      if (transaction.status == QuarantineTransactionStatus.committed &&
+          acceptedWave == null) {
+        throw QuarantineException(
+          'Committed wave transaction ${transaction.transactionId} lacks accepted evidence.',
+        );
+      }
+      if (acceptedWave != null &&
+          !acceptedWave.transactionIds.contains(transaction.transactionId)) {
+        throw QuarantineException(
+          'Transaction ${transaction.transactionId} is absent from its accepted wave.',
+        );
+      }
+    }
+  }
+
   void _validateRolledBackTransactionJournal(QuarantineManifest manifest) {
     if (!manifest.fullRollbackVerified) {
       throw QuarantineException(
@@ -2366,6 +2689,8 @@ class QuarantineManager {
     QuarantineManifest manifest, {
     QuarantineRunLifecycleState? runLifecycleState,
     List<_CaseDisplacementDocument>? caseDisplacements,
+    int? expectedRevision,
+    String? expectedPayloadSha256,
   }) async {
     final manifestFile = File(p.join(quarantineDir.path, 'manifest.json'));
     final temporaryFile = File('${manifestFile.path}.tmp');
@@ -2376,6 +2701,13 @@ class QuarantineManager {
         temporaryFile.existsSync() ||
         previousFile.existsSync()) {
       current = await _resolveManifestDocument(quarantineDir);
+    }
+    if (expectedRevision != null &&
+        (current?.revision != expectedRevision ||
+            current?.payloadSha256 != expectedPayloadSha256)) {
+      throw QuarantineException(
+        'Manifest changed before the verified wave could be published.',
+      );
     }
     final revision = (current?.revision ?? 0) + 1;
     final lifecycle = runLifecycleState == null
@@ -2408,20 +2740,69 @@ class QuarantineManager {
       '${const JsonEncoder.withIndent('  ').convert(document)}\n',
     );
     await _readManifestCandidate(temporaryFile);
+    await _journalHook?.call(QuarantineJournalPoint.temporaryFlushed);
+    if (expectedRevision != null) {
+      final authoritative = await _readManifestCandidate(manifestFile);
+      if (authoritative.revision != expectedRevision ||
+          authoritative.payloadSha256 != expectedPayloadSha256) {
+        throw QuarantineException(
+          'Manifest changed while the verified wave was being published.',
+        );
+      }
+    }
 
     if (!manifestFile.existsSync()) {
       await temporaryFile.rename(manifestFile.path);
-      return;
+      await _journalHook?.call(QuarantineJournalPoint.temporaryPromoted);
+    } else {
+      await _journalHook?.call(
+        QuarantineJournalPoint.beforePrimaryMoveToPrevious,
+      );
+      if (previousFile.existsSync()) await previousFile.delete();
+      await manifestFile.rename(previousFile.path);
+      if (expectedRevision != null) {
+        late final _ManifestDocument movedAuthoritative;
+        try {
+          movedAuthoritative = await _readManifestCandidate(previousFile);
+        } catch (_) {
+          await previousFile.rename(manifestFile.path);
+          rethrow;
+        }
+        if (movedAuthoritative.revision != expectedRevision ||
+            movedAuthoritative.payloadSha256 != expectedPayloadSha256) {
+          await previousFile.rename(manifestFile.path);
+          throw QuarantineException(
+            'Manifest changed while the verified wave was being published.',
+          );
+        }
+      }
+      await _journalHook?.call(QuarantineJournalPoint.primaryMovedToPrevious);
+      try {
+        await temporaryFile.rename(manifestFile.path);
+        await _journalHook?.call(QuarantineJournalPoint.temporaryPromoted);
+      } on FileSystemException {
+        // The previous authoritative document and the fully flushed next
+        // document remain side by side. The reader deterministically completes
+        // this transition on the next access.
+        rethrow;
+      }
     }
-    if (previousFile.existsSync()) await previousFile.delete();
-    await manifestFile.rename(previousFile.path);
-    try {
-      await temporaryFile.rename(manifestFile.path);
-    } on FileSystemException {
-      // The previous authoritative document and the fully flushed next
-      // document remain side by side. The reader deterministically completes
-      // this transition on the next access.
-      rethrow;
+    if (expectedRevision != null) {
+      late final _ManifestDocument authoritative;
+      try {
+        authoritative = await _resolveManifestDocument(quarantineDir);
+      } on QuarantineException catch (error) {
+        throw QuarantineException(
+          'Manifest changed while the verified wave was being published: '
+          '${error.message}',
+        );
+      }
+      if (authoritative.revision != revision ||
+          authoritative.payloadSha256 != payloadSha256) {
+        throw QuarantineException(
+          'Manifest changed while the verified wave was being published.',
+        );
+      }
     }
   }
 
@@ -2469,6 +2850,9 @@ class QuarantineManager {
             'Ambiguous manifest transition in ${quarantineDir.path}.',
           );
         }
+        await _journalHook?.call(
+          QuarantineJournalPoint.beforeStaleCandidateCleanup,
+        );
         await temporaryFile.delete();
       }
       if (previous != null) {
@@ -2572,8 +2956,10 @@ class QuarantineManager {
           caseDisplacements.length) {
         throw const FormatException('duplicate case displacement journal');
       }
+      final manifest = QuarantineManifest.fromJson(payload);
+      _validateVerificationWaveJournal(manifest);
       return _ManifestDocument(
-        manifest: QuarantineManifest.fromJson(payload),
+        manifest: manifest,
         revision: revision,
         payloadSha256: payloadSha256,
         contents: contents,
@@ -3130,6 +3516,42 @@ class QuarantineManager {
       throw QuarantineDisplacementRecoveryRequiredException(
         'Case output bytes or permissions changed after candidate '
         'installation: ${target.path}.',
+      );
+    }
+  }
+
+  Future<void> _validateAppliedCaseSnapshot(
+    Directory quarantineDir,
+    QuarantineCase applyCase,
+  ) async {
+    final snapshot = _caseSnapshotFor(quarantineDir, applyCase);
+    if (FileSystemEntity.typeSync(snapshot.path, followLinks: false) !=
+            FileSystemEntityType.file ||
+        await _computeSha256(snapshot) != applyCase.entry.sha256 ||
+        _readPosixMode(snapshot) != applyCase.entry.posixMode) {
+      throw QuarantineException(
+        'Wave case snapshot changed: ${applyCase.caseId}.',
+      );
+    }
+  }
+
+  Future<void> _validateAppliedCaseOutput(QuarantineCase applyCase) async {
+    final target = File(applyCase.entry.originalPath);
+    final expectedSha256 = applyCase.entry.modifiedSha256;
+    final type = FileSystemEntity.typeSync(target.path, followLinks: false);
+    if (expectedSha256 == null) {
+      if (type != FileSystemEntityType.notFound) {
+        throw QuarantineException(
+          'Deleted wave output was recreated: ${target.path}.',
+        );
+      }
+      return;
+    }
+    if (type != FileSystemEntityType.file ||
+        await _computeSha256(target) != expectedSha256 ||
+        _readPosixMode(target) != applyCase.entry.posixMode) {
+      throw QuarantineException(
+        'Wave output bytes or permissions changed: ${target.path}.',
       );
     }
   }
@@ -3727,6 +4149,7 @@ class QuarantineManager {
     List<QuarantineEntry>? entries,
     List<QuarantineCase>? cases,
     List<QuarantineTransaction>? transactions,
+    List<QuarantineVerificationWave>? verificationWaves,
     DateTime? fullRollbackAtUtc,
     bool? fullRollbackVerified,
   }) => QuarantineManifest(
@@ -3736,6 +4159,7 @@ class QuarantineManager {
     entries: entries ?? manifest.entries,
     cases: cases ?? manifest.cases,
     transactions: transactions ?? manifest.transactions,
+    verificationWaves: verificationWaves ?? manifest.verificationWaves,
     caseJournal: manifest.caseJournal,
     transactionJournal: manifest.transactionJournal,
     verificationPolicyHash: manifest.verificationPolicyHash,
@@ -5270,6 +5694,14 @@ class _RestoreIntentDocument {
       value == null || (value is int && value >= 0 && value <= 0xfff);
 }
 
+bool _sameOrderedValues<T>(List<T> left, List<T> right) {
+  if (left.length != right.length) return false;
+  for (var index = 0; index < left.length; index++) {
+    if (left[index] != right[index]) return false;
+  }
+  return true;
+}
+
 class _ManifestDocument {
   const _ManifestDocument({
     required this.manifest,
@@ -5387,6 +5819,28 @@ enum QuarantineRunLifecycleState {
   /// The whole run was restored and verified against its original baseline.
   rolledBackVerified,
 }
+
+/// Observable points in the atomic manifest-journal publication protocol.
+enum QuarantineJournalPoint {
+  /// The next revision is flushed and validated in the temporary file.
+  temporaryFlushed,
+
+  /// Final expected-authority check passed; primary has not moved yet.
+  beforePrimaryMoveToPrevious,
+
+  /// The primary revision has been moved to the recovery slot.
+  primaryMovedToPrevious,
+
+  /// The next revision has become the primary manifest.
+  temporaryPromoted,
+
+  /// A completed or duplicate staged candidate is about to be removed.
+  beforeStaleCandidateCleanup,
+}
+
+/// Fault observer used by journal crash-recovery tests.
+typedef QuarantineJournalHook =
+    FutureOr<void> Function(QuarantineJournalPoint point);
 
 /// Observable points in the atomic source-displacement protocol.
 enum QuarantineDisplacementPoint {

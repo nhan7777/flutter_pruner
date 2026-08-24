@@ -1,0 +1,5033 @@
+{
+  "schemaVersion": 2,
+  "protocolId": "apply-verification-wave-v2-block3-pairs6",
+  "profile": "chain-2plus-rounds",
+  "status": "complete",
+  "sampleRepetitionsPerBlock": 3,
+  "schedule": [
+    "AB",
+    "BA",
+    "AB",
+    "BA",
+    "AB",
+    "BA"
+  ],
+  "aaPairs": [
+    {
+      "order": "AB",
+      "firstRepetitions": [
+        {
+          "elapsedMicros": 15186487,
+          "contract": {
+            "finalHash": "34977be4ee49a99cd4e51ec4eedea77ff48cc8ab67ebe343176b332ecb0b1ff8",
+            "transactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "roundCount": 2,
+            "transactionRounds": [
+              1,
+              1,
+              2,
+              2
+            ],
+            "transactionCount": 4,
+            "waveCount": 0,
+            "waveIds": [],
+            "waveTransactionIds": [],
+            "lifecycleState": "completed",
+            "transactionStatuses": [
+              "committed",
+              "committed",
+              "committed",
+              "committed"
+            ],
+            "caseStatuses": [
+              "kept",
+              "kept",
+              "kept",
+              "kept"
+            ],
+            "verifierInvocationCount": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          },
+          "timings": {
+            "runElapsedMicros": 15126880,
+            "verificationElapsedMicros": 10317040,
+            "candidateVerificationElapsedMicros": 7837678,
+            "analysisElapsedMicros": 2497807,
+            "unaccountedElapsedMicros": 2312033,
+            "verificationAttempts": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          }
+        },
+        {
+          "elapsedMicros": 15077213,
+          "contract": {
+            "finalHash": "34977be4ee49a99cd4e51ec4eedea77ff48cc8ab67ebe343176b332ecb0b1ff8",
+            "transactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "roundCount": 2,
+            "transactionRounds": [
+              1,
+              1,
+              2,
+              2
+            ],
+            "transactionCount": 4,
+            "waveCount": 0,
+            "waveIds": [],
+            "waveTransactionIds": [],
+            "lifecycleState": "completed",
+            "transactionStatuses": [
+              "committed",
+              "committed",
+              "committed",
+              "committed"
+            ],
+            "caseStatuses": [
+              "kept",
+              "kept",
+              "kept",
+              "kept"
+            ],
+            "verifierInvocationCount": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          },
+          "timings": {
+            "runElapsedMicros": 15031576,
+            "verificationElapsedMicros": 10275037,
+            "candidateVerificationElapsedMicros": 7798354,
+            "analysisElapsedMicros": 2451559,
+            "unaccountedElapsedMicros": 2304980,
+            "verificationAttempts": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          }
+        },
+        {
+          "elapsedMicros": 15099532,
+          "contract": {
+            "finalHash": "34977be4ee49a99cd4e51ec4eedea77ff48cc8ab67ebe343176b332ecb0b1ff8",
+            "transactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "roundCount": 2,
+            "transactionRounds": [
+              1,
+              1,
+              2,
+              2
+            ],
+            "transactionCount": 4,
+            "waveCount": 0,
+            "waveIds": [],
+            "waveTransactionIds": [],
+            "lifecycleState": "completed",
+            "transactionStatuses": [
+              "committed",
+              "committed",
+              "committed",
+              "committed"
+            ],
+            "caseStatuses": [
+              "kept",
+              "kept",
+              "kept",
+              "kept"
+            ],
+            "verifierInvocationCount": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          },
+          "timings": {
+            "runElapsedMicros": 15047463,
+            "verificationElapsedMicros": 10276909,
+            "candidateVerificationElapsedMicros": 7803149,
+            "analysisElapsedMicros": 2496895,
+            "unaccountedElapsedMicros": 2273659,
+            "verificationAttempts": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          }
+        }
+      ],
+      "secondRepetitions": [
+        {
+          "elapsedMicros": 15149388,
+          "contract": {
+            "finalHash": "34977be4ee49a99cd4e51ec4eedea77ff48cc8ab67ebe343176b332ecb0b1ff8",
+            "transactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "roundCount": 2,
+            "transactionRounds": [
+              1,
+              1,
+              2,
+              2
+            ],
+            "transactionCount": 4,
+            "waveCount": 0,
+            "waveIds": [],
+            "waveTransactionIds": [],
+            "lifecycleState": "completed",
+            "transactionStatuses": [
+              "committed",
+              "committed",
+              "committed",
+              "committed"
+            ],
+            "caseStatuses": [
+              "kept",
+              "kept",
+              "kept",
+              "kept"
+            ],
+            "verifierInvocationCount": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          },
+          "timings": {
+            "runElapsedMicros": 15098413,
+            "verificationElapsedMicros": 10354238,
+            "candidateVerificationElapsedMicros": 7821683,
+            "analysisElapsedMicros": 2467252,
+            "unaccountedElapsedMicros": 2276923,
+            "verificationAttempts": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          }
+        },
+        {
+          "elapsedMicros": 15079076,
+          "contract": {
+            "finalHash": "34977be4ee49a99cd4e51ec4eedea77ff48cc8ab67ebe343176b332ecb0b1ff8",
+            "transactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "roundCount": 2,
+            "transactionRounds": [
+              1,
+              1,
+              2,
+              2
+            ],
+            "transactionCount": 4,
+            "waveCount": 0,
+            "waveIds": [],
+            "waveTransactionIds": [],
+            "lifecycleState": "completed",
+            "transactionStatuses": [
+              "committed",
+              "committed",
+              "committed",
+              "committed"
+            ],
+            "caseStatuses": [
+              "kept",
+              "kept",
+              "kept",
+              "kept"
+            ],
+            "verifierInvocationCount": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          },
+          "timings": {
+            "runElapsedMicros": 15030223,
+            "verificationElapsedMicros": 10285346,
+            "candidateVerificationElapsedMicros": 7797429,
+            "analysisElapsedMicros": 2466026,
+            "unaccountedElapsedMicros": 2278851,
+            "verificationAttempts": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          }
+        },
+        {
+          "elapsedMicros": 15115806,
+          "contract": {
+            "finalHash": "34977be4ee49a99cd4e51ec4eedea77ff48cc8ab67ebe343176b332ecb0b1ff8",
+            "transactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "roundCount": 2,
+            "transactionRounds": [
+              1,
+              1,
+              2,
+              2
+            ],
+            "transactionCount": 4,
+            "waveCount": 0,
+            "waveIds": [],
+            "waveTransactionIds": [],
+            "lifecycleState": "completed",
+            "transactionStatuses": [
+              "committed",
+              "committed",
+              "committed",
+              "committed"
+            ],
+            "caseStatuses": [
+              "kept",
+              "kept",
+              "kept",
+              "kept"
+            ],
+            "verifierInvocationCount": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          },
+          "timings": {
+            "runElapsedMicros": 15064562,
+            "verificationElapsedMicros": 10301006,
+            "candidateVerificationElapsedMicros": 7828178,
+            "analysisElapsedMicros": 2489296,
+            "unaccountedElapsedMicros": 2274260,
+            "verificationAttempts": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          }
+        }
+      ],
+      "firstBlockElapsedMicros": 45363232,
+      "secondBlockElapsedMicros": 45344270,
+      "pairedRelativeDelta": 0.00041800372601317294
+    },
+    {
+      "order": "BA",
+      "firstRepetitions": [
+        {
+          "elapsedMicros": 15024458,
+          "contract": {
+            "finalHash": "34977be4ee49a99cd4e51ec4eedea77ff48cc8ab67ebe343176b332ecb0b1ff8",
+            "transactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "roundCount": 2,
+            "transactionRounds": [
+              1,
+              1,
+              2,
+              2
+            ],
+            "transactionCount": 4,
+            "waveCount": 0,
+            "waveIds": [],
+            "waveTransactionIds": [],
+            "lifecycleState": "completed",
+            "transactionStatuses": [
+              "committed",
+              "committed",
+              "committed",
+              "committed"
+            ],
+            "caseStatuses": [
+              "kept",
+              "kept",
+              "kept",
+              "kept"
+            ],
+            "verifierInvocationCount": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          },
+          "timings": {
+            "runElapsedMicros": 14975981,
+            "verificationElapsedMicros": 10228966,
+            "candidateVerificationElapsedMicros": 7767274,
+            "analysisElapsedMicros": 2489623,
+            "unaccountedElapsedMicros": 2257392,
+            "verificationAttempts": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          }
+        },
+        {
+          "elapsedMicros": 15369332,
+          "contract": {
+            "finalHash": "34977be4ee49a99cd4e51ec4eedea77ff48cc8ab67ebe343176b332ecb0b1ff8",
+            "transactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "roundCount": 2,
+            "transactionRounds": [
+              1,
+              1,
+              2,
+              2
+            ],
+            "transactionCount": 4,
+            "waveCount": 0,
+            "waveIds": [],
+            "waveTransactionIds": [],
+            "lifecycleState": "completed",
+            "transactionStatuses": [
+              "committed",
+              "committed",
+              "committed",
+              "committed"
+            ],
+            "caseStatuses": [
+              "kept",
+              "kept",
+              "kept",
+              "kept"
+            ],
+            "verifierInvocationCount": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          },
+          "timings": {
+            "runElapsedMicros": 15323665,
+            "verificationElapsedMicros": 10539050,
+            "candidateVerificationElapsedMicros": 8030258,
+            "analysisElapsedMicros": 2532255,
+            "unaccountedElapsedMicros": 2252360,
+            "verificationAttempts": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          }
+        },
+        {
+          "elapsedMicros": 15602852,
+          "contract": {
+            "finalHash": "34977be4ee49a99cd4e51ec4eedea77ff48cc8ab67ebe343176b332ecb0b1ff8",
+            "transactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "roundCount": 2,
+            "transactionRounds": [
+              1,
+              1,
+              2,
+              2
+            ],
+            "transactionCount": 4,
+            "waveCount": 0,
+            "waveIds": [],
+            "waveTransactionIds": [],
+            "lifecycleState": "completed",
+            "transactionStatuses": [
+              "committed",
+              "committed",
+              "committed",
+              "committed"
+            ],
+            "caseStatuses": [
+              "kept",
+              "kept",
+              "kept",
+              "kept"
+            ],
+            "verifierInvocationCount": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          },
+          "timings": {
+            "runElapsedMicros": 15552708,
+            "verificationElapsedMicros": 10645067,
+            "candidateVerificationElapsedMicros": 8100093,
+            "analysisElapsedMicros": 2657262,
+            "unaccountedElapsedMicros": 2250379,
+            "verificationAttempts": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          }
+        }
+      ],
+      "secondRepetitions": [
+        {
+          "elapsedMicros": 15574895,
+          "contract": {
+            "finalHash": "34977be4ee49a99cd4e51ec4eedea77ff48cc8ab67ebe343176b332ecb0b1ff8",
+            "transactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "roundCount": 2,
+            "transactionRounds": [
+              1,
+              1,
+              2,
+              2
+            ],
+            "transactionCount": 4,
+            "waveCount": 0,
+            "waveIds": [],
+            "waveTransactionIds": [],
+            "lifecycleState": "completed",
+            "transactionStatuses": [
+              "committed",
+              "committed",
+              "committed",
+              "committed"
+            ],
+            "caseStatuses": [
+              "kept",
+              "kept",
+              "kept",
+              "kept"
+            ],
+            "verifierInvocationCount": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          },
+          "timings": {
+            "runElapsedMicros": 15525492,
+            "verificationElapsedMicros": 10593280,
+            "candidateVerificationElapsedMicros": 7926203,
+            "analysisElapsedMicros": 2684121,
+            "unaccountedElapsedMicros": 2248091,
+            "verificationAttempts": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          }
+        },
+        {
+          "elapsedMicros": 15464134,
+          "contract": {
+            "finalHash": "34977be4ee49a99cd4e51ec4eedea77ff48cc8ab67ebe343176b332ecb0b1ff8",
+            "transactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "roundCount": 2,
+            "transactionRounds": [
+              1,
+              1,
+              2,
+              2
+            ],
+            "transactionCount": 4,
+            "waveCount": 0,
+            "waveIds": [],
+            "waveTransactionIds": [],
+            "lifecycleState": "completed",
+            "transactionStatuses": [
+              "committed",
+              "committed",
+              "committed",
+              "committed"
+            ],
+            "caseStatuses": [
+              "kept",
+              "kept",
+              "kept",
+              "kept"
+            ],
+            "verifierInvocationCount": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          },
+          "timings": {
+            "runElapsedMicros": 15408546,
+            "verificationElapsedMicros": 10607536,
+            "candidateVerificationElapsedMicros": 8016751,
+            "analysisElapsedMicros": 2561997,
+            "unaccountedElapsedMicros": 2239013,
+            "verificationAttempts": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          }
+        },
+        {
+          "elapsedMicros": 15097604,
+          "contract": {
+            "finalHash": "34977be4ee49a99cd4e51ec4eedea77ff48cc8ab67ebe343176b332ecb0b1ff8",
+            "transactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "roundCount": 2,
+            "transactionRounds": [
+              1,
+              1,
+              2,
+              2
+            ],
+            "transactionCount": 4,
+            "waveCount": 0,
+            "waveIds": [],
+            "waveTransactionIds": [],
+            "lifecycleState": "completed",
+            "transactionStatuses": [
+              "committed",
+              "committed",
+              "committed",
+              "committed"
+            ],
+            "caseStatuses": [
+              "kept",
+              "kept",
+              "kept",
+              "kept"
+            ],
+            "verifierInvocationCount": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          },
+          "timings": {
+            "runElapsedMicros": 15046703,
+            "verificationElapsedMicros": 10259612,
+            "candidateVerificationElapsedMicros": 7774958,
+            "analysisElapsedMicros": 2540785,
+            "unaccountedElapsedMicros": 2246306,
+            "verificationAttempts": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          }
+        }
+      ],
+      "firstBlockElapsedMicros": 45996642,
+      "secondBlockElapsedMicros": 46136633,
+      "pairedRelativeDelta": 0.0030342699693755287
+    },
+    {
+      "order": "AB",
+      "firstRepetitions": [
+        {
+          "elapsedMicros": 15591049,
+          "contract": {
+            "finalHash": "34977be4ee49a99cd4e51ec4eedea77ff48cc8ab67ebe343176b332ecb0b1ff8",
+            "transactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "roundCount": 2,
+            "transactionRounds": [
+              1,
+              1,
+              2,
+              2
+            ],
+            "transactionCount": 4,
+            "waveCount": 0,
+            "waveIds": [],
+            "waveTransactionIds": [],
+            "lifecycleState": "completed",
+            "transactionStatuses": [
+              "committed",
+              "committed",
+              "committed",
+              "committed"
+            ],
+            "caseStatuses": [
+              "kept",
+              "kept",
+              "kept",
+              "kept"
+            ],
+            "verifierInvocationCount": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          },
+          "timings": {
+            "runElapsedMicros": 15532101,
+            "verificationElapsedMicros": 10838691,
+            "candidateVerificationElapsedMicros": 8376055,
+            "analysisElapsedMicros": 2462501,
+            "unaccountedElapsedMicros": 2230909,
+            "verificationAttempts": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          }
+        },
+        {
+          "elapsedMicros": 14966751,
+          "contract": {
+            "finalHash": "34977be4ee49a99cd4e51ec4eedea77ff48cc8ab67ebe343176b332ecb0b1ff8",
+            "transactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "roundCount": 2,
+            "transactionRounds": [
+              1,
+              1,
+              2,
+              2
+            ],
+            "transactionCount": 4,
+            "waveCount": 0,
+            "waveIds": [],
+            "waveTransactionIds": [],
+            "lifecycleState": "completed",
+            "transactionStatuses": [
+              "committed",
+              "committed",
+              "committed",
+              "committed"
+            ],
+            "caseStatuses": [
+              "kept",
+              "kept",
+              "kept",
+              "kept"
+            ],
+            "verifierInvocationCount": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          },
+          "timings": {
+            "runElapsedMicros": 14917773,
+            "verificationElapsedMicros": 10192102,
+            "candidateVerificationElapsedMicros": 7728602,
+            "analysisElapsedMicros": 2486915,
+            "unaccountedElapsedMicros": 2238756,
+            "verificationAttempts": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          }
+        },
+        {
+          "elapsedMicros": 15026584,
+          "contract": {
+            "finalHash": "34977be4ee49a99cd4e51ec4eedea77ff48cc8ab67ebe343176b332ecb0b1ff8",
+            "transactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "roundCount": 2,
+            "transactionRounds": [
+              1,
+              1,
+              2,
+              2
+            ],
+            "transactionCount": 4,
+            "waveCount": 0,
+            "waveIds": [],
+            "waveTransactionIds": [],
+            "lifecycleState": "completed",
+            "transactionStatuses": [
+              "committed",
+              "committed",
+              "committed",
+              "committed"
+            ],
+            "caseStatuses": [
+              "kept",
+              "kept",
+              "kept",
+              "kept"
+            ],
+            "verifierInvocationCount": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          },
+          "timings": {
+            "runElapsedMicros": 14975300,
+            "verificationElapsedMicros": 10170758,
+            "candidateVerificationElapsedMicros": 7719386,
+            "analysisElapsedMicros": 2572232,
+            "unaccountedElapsedMicros": 2232310,
+            "verificationAttempts": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          }
+        }
+      ],
+      "secondRepetitions": [
+        {
+          "elapsedMicros": 15027021,
+          "contract": {
+            "finalHash": "34977be4ee49a99cd4e51ec4eedea77ff48cc8ab67ebe343176b332ecb0b1ff8",
+            "transactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "roundCount": 2,
+            "transactionRounds": [
+              1,
+              1,
+              2,
+              2
+            ],
+            "transactionCount": 4,
+            "waveCount": 0,
+            "waveIds": [],
+            "waveTransactionIds": [],
+            "lifecycleState": "completed",
+            "transactionStatuses": [
+              "committed",
+              "committed",
+              "committed",
+              "committed"
+            ],
+            "caseStatuses": [
+              "kept",
+              "kept",
+              "kept",
+              "kept"
+            ],
+            "verifierInvocationCount": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          },
+          "timings": {
+            "runElapsedMicros": 14973940,
+            "verificationElapsedMicros": 10224067,
+            "candidateVerificationElapsedMicros": 7768539,
+            "analysisElapsedMicros": 2523016,
+            "unaccountedElapsedMicros": 2226857,
+            "verificationAttempts": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          }
+        },
+        {
+          "elapsedMicros": 14907105,
+          "contract": {
+            "finalHash": "34977be4ee49a99cd4e51ec4eedea77ff48cc8ab67ebe343176b332ecb0b1ff8",
+            "transactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "roundCount": 2,
+            "transactionRounds": [
+              1,
+              1,
+              2,
+              2
+            ],
+            "transactionCount": 4,
+            "waveCount": 0,
+            "waveIds": [],
+            "waveTransactionIds": [],
+            "lifecycleState": "completed",
+            "transactionStatuses": [
+              "committed",
+              "committed",
+              "committed",
+              "committed"
+            ],
+            "caseStatuses": [
+              "kept",
+              "kept",
+              "kept",
+              "kept"
+            ],
+            "verifierInvocationCount": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          },
+          "timings": {
+            "runElapsedMicros": 14859378,
+            "verificationElapsedMicros": 10158988,
+            "candidateVerificationElapsedMicros": 7700943,
+            "analysisElapsedMicros": 2462245,
+            "unaccountedElapsedMicros": 2238145,
+            "verificationAttempts": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          }
+        },
+        {
+          "elapsedMicros": 14932729,
+          "contract": {
+            "finalHash": "34977be4ee49a99cd4e51ec4eedea77ff48cc8ab67ebe343176b332ecb0b1ff8",
+            "transactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "roundCount": 2,
+            "transactionRounds": [
+              1,
+              1,
+              2,
+              2
+            ],
+            "transactionCount": 4,
+            "waveCount": 0,
+            "waveIds": [],
+            "waveTransactionIds": [],
+            "lifecycleState": "completed",
+            "transactionStatuses": [
+              "committed",
+              "committed",
+              "committed",
+              "committed"
+            ],
+            "caseStatuses": [
+              "kept",
+              "kept",
+              "kept",
+              "kept"
+            ],
+            "verifierInvocationCount": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          },
+          "timings": {
+            "runElapsedMicros": 14882395,
+            "verificationElapsedMicros": 10174282,
+            "candidateVerificationElapsedMicros": 7702120,
+            "analysisElapsedMicros": 2465083,
+            "unaccountedElapsedMicros": 2243030,
+            "verificationAttempts": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          }
+        }
+      ],
+      "firstBlockElapsedMicros": 45584384,
+      "secondBlockElapsedMicros": 44866855,
+      "pairedRelativeDelta": 0.015740675578724505
+    },
+    {
+      "order": "BA",
+      "firstRepetitions": [
+        {
+          "elapsedMicros": 15003428,
+          "contract": {
+            "finalHash": "34977be4ee49a99cd4e51ec4eedea77ff48cc8ab67ebe343176b332ecb0b1ff8",
+            "transactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "roundCount": 2,
+            "transactionRounds": [
+              1,
+              1,
+              2,
+              2
+            ],
+            "transactionCount": 4,
+            "waveCount": 0,
+            "waveIds": [],
+            "waveTransactionIds": [],
+            "lifecycleState": "completed",
+            "transactionStatuses": [
+              "committed",
+              "committed",
+              "committed",
+              "committed"
+            ],
+            "caseStatuses": [
+              "kept",
+              "kept",
+              "kept",
+              "kept"
+            ],
+            "verifierInvocationCount": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          },
+          "timings": {
+            "runElapsedMicros": 14942385,
+            "verificationElapsedMicros": 10147170,
+            "candidateVerificationElapsedMicros": 7704998,
+            "analysisElapsedMicros": 2547606,
+            "unaccountedElapsedMicros": 2247609,
+            "verificationAttempts": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          }
+        },
+        {
+          "elapsedMicros": 15000486,
+          "contract": {
+            "finalHash": "34977be4ee49a99cd4e51ec4eedea77ff48cc8ab67ebe343176b332ecb0b1ff8",
+            "transactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "roundCount": 2,
+            "transactionRounds": [
+              1,
+              1,
+              2,
+              2
+            ],
+            "transactionCount": 4,
+            "waveCount": 0,
+            "waveIds": [],
+            "waveTransactionIds": [],
+            "lifecycleState": "completed",
+            "transactionStatuses": [
+              "committed",
+              "committed",
+              "committed",
+              "committed"
+            ],
+            "caseStatuses": [
+              "kept",
+              "kept",
+              "kept",
+              "kept"
+            ],
+            "verifierInvocationCount": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          },
+          "timings": {
+            "runElapsedMicros": 14948641,
+            "verificationElapsedMicros": 10198064,
+            "candidateVerificationElapsedMicros": 7752352,
+            "analysisElapsedMicros": 2519759,
+            "unaccountedElapsedMicros": 2230818,
+            "verificationAttempts": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          }
+        },
+        {
+          "elapsedMicros": 14954493,
+          "contract": {
+            "finalHash": "34977be4ee49a99cd4e51ec4eedea77ff48cc8ab67ebe343176b332ecb0b1ff8",
+            "transactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "roundCount": 2,
+            "transactionRounds": [
+              1,
+              1,
+              2,
+              2
+            ],
+            "transactionCount": 4,
+            "waveCount": 0,
+            "waveIds": [],
+            "waveTransactionIds": [],
+            "lifecycleState": "completed",
+            "transactionStatuses": [
+              "committed",
+              "committed",
+              "committed",
+              "committed"
+            ],
+            "caseStatuses": [
+              "kept",
+              "kept",
+              "kept",
+              "kept"
+            ],
+            "verifierInvocationCount": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          },
+          "timings": {
+            "runElapsedMicros": 14903884,
+            "verificationElapsedMicros": 10211600,
+            "candidateVerificationElapsedMicros": 7746719,
+            "analysisElapsedMicros": 2453678,
+            "unaccountedElapsedMicros": 2238606,
+            "verificationAttempts": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          }
+        }
+      ],
+      "secondRepetitions": [
+        {
+          "elapsedMicros": 14969144,
+          "contract": {
+            "finalHash": "34977be4ee49a99cd4e51ec4eedea77ff48cc8ab67ebe343176b332ecb0b1ff8",
+            "transactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "roundCount": 2,
+            "transactionRounds": [
+              1,
+              1,
+              2,
+              2
+            ],
+            "transactionCount": 4,
+            "waveCount": 0,
+            "waveIds": [],
+            "waveTransactionIds": [],
+            "lifecycleState": "completed",
+            "transactionStatuses": [
+              "committed",
+              "committed",
+              "committed",
+              "committed"
+            ],
+            "caseStatuses": [
+              "kept",
+              "kept",
+              "kept",
+              "kept"
+            ],
+            "verifierInvocationCount": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          },
+          "timings": {
+            "runElapsedMicros": 14919599,
+            "verificationElapsedMicros": 10192591,
+            "candidateVerificationElapsedMicros": 7734771,
+            "analysisElapsedMicros": 2468512,
+            "unaccountedElapsedMicros": 2258496,
+            "verificationAttempts": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          }
+        },
+        {
+          "elapsedMicros": 15051176,
+          "contract": {
+            "finalHash": "34977be4ee49a99cd4e51ec4eedea77ff48cc8ab67ebe343176b332ecb0b1ff8",
+            "transactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "roundCount": 2,
+            "transactionRounds": [
+              1,
+              1,
+              2,
+              2
+            ],
+            "transactionCount": 4,
+            "waveCount": 0,
+            "waveIds": [],
+            "waveTransactionIds": [],
+            "lifecycleState": "completed",
+            "transactionStatuses": [
+              "committed",
+              "committed",
+              "committed",
+              "committed"
+            ],
+            "caseStatuses": [
+              "kept",
+              "kept",
+              "kept",
+              "kept"
+            ],
+            "verifierInvocationCount": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          },
+          "timings": {
+            "runElapsedMicros": 14999917,
+            "verificationElapsedMicros": 10192367,
+            "candidateVerificationElapsedMicros": 7717524,
+            "analysisElapsedMicros": 2557556,
+            "unaccountedElapsedMicros": 2249994,
+            "verificationAttempts": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          }
+        },
+        {
+          "elapsedMicros": 15048127,
+          "contract": {
+            "finalHash": "34977be4ee49a99cd4e51ec4eedea77ff48cc8ab67ebe343176b332ecb0b1ff8",
+            "transactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "roundCount": 2,
+            "transactionRounds": [
+              1,
+              1,
+              2,
+              2
+            ],
+            "transactionCount": 4,
+            "waveCount": 0,
+            "waveIds": [],
+            "waveTransactionIds": [],
+            "lifecycleState": "completed",
+            "transactionStatuses": [
+              "committed",
+              "committed",
+              "committed",
+              "committed"
+            ],
+            "caseStatuses": [
+              "kept",
+              "kept",
+              "kept",
+              "kept"
+            ],
+            "verifierInvocationCount": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          },
+          "timings": {
+            "runElapsedMicros": 14996112,
+            "verificationElapsedMicros": 10215776,
+            "candidateVerificationElapsedMicros": 7758241,
+            "analysisElapsedMicros": 2556781,
+            "unaccountedElapsedMicros": 2223555,
+            "verificationAttempts": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          }
+        }
+      ],
+      "firstBlockElapsedMicros": 44958407,
+      "secondBlockElapsedMicros": 45068447,
+      "pairedRelativeDelta": 0.002441619521524671
+    },
+    {
+      "order": "AB",
+      "firstRepetitions": [
+        {
+          "elapsedMicros": 14950191,
+          "contract": {
+            "finalHash": "34977be4ee49a99cd4e51ec4eedea77ff48cc8ab67ebe343176b332ecb0b1ff8",
+            "transactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "roundCount": 2,
+            "transactionRounds": [
+              1,
+              1,
+              2,
+              2
+            ],
+            "transactionCount": 4,
+            "waveCount": 0,
+            "waveIds": [],
+            "waveTransactionIds": [],
+            "lifecycleState": "completed",
+            "transactionStatuses": [
+              "committed",
+              "committed",
+              "committed",
+              "committed"
+            ],
+            "caseStatuses": [
+              "kept",
+              "kept",
+              "kept",
+              "kept"
+            ],
+            "verifierInvocationCount": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          },
+          "timings": {
+            "runElapsedMicros": 14903713,
+            "verificationElapsedMicros": 10181892,
+            "candidateVerificationElapsedMicros": 7712467,
+            "analysisElapsedMicros": 2488427,
+            "unaccountedElapsedMicros": 2233394,
+            "verificationAttempts": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          }
+        },
+        {
+          "elapsedMicros": 14896365,
+          "contract": {
+            "finalHash": "34977be4ee49a99cd4e51ec4eedea77ff48cc8ab67ebe343176b332ecb0b1ff8",
+            "transactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "roundCount": 2,
+            "transactionRounds": [
+              1,
+              1,
+              2,
+              2
+            ],
+            "transactionCount": 4,
+            "waveCount": 0,
+            "waveIds": [],
+            "waveTransactionIds": [],
+            "lifecycleState": "completed",
+            "transactionStatuses": [
+              "committed",
+              "committed",
+              "committed",
+              "committed"
+            ],
+            "caseStatuses": [
+              "kept",
+              "kept",
+              "kept",
+              "kept"
+            ],
+            "verifierInvocationCount": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          },
+          "timings": {
+            "runElapsedMicros": 14838622,
+            "verificationElapsedMicros": 10189500,
+            "candidateVerificationElapsedMicros": 7703809,
+            "analysisElapsedMicros": 2404439,
+            "unaccountedElapsedMicros": 2244683,
+            "verificationAttempts": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          }
+        },
+        {
+          "elapsedMicros": 15058228,
+          "contract": {
+            "finalHash": "34977be4ee49a99cd4e51ec4eedea77ff48cc8ab67ebe343176b332ecb0b1ff8",
+            "transactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "roundCount": 2,
+            "transactionRounds": [
+              1,
+              1,
+              2,
+              2
+            ],
+            "transactionCount": 4,
+            "waveCount": 0,
+            "waveIds": [],
+            "waveTransactionIds": [],
+            "lifecycleState": "completed",
+            "transactionStatuses": [
+              "committed",
+              "committed",
+              "committed",
+              "committed"
+            ],
+            "caseStatuses": [
+              "kept",
+              "kept",
+              "kept",
+              "kept"
+            ],
+            "verifierInvocationCount": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          },
+          "timings": {
+            "runElapsedMicros": 14989325,
+            "verificationElapsedMicros": 10179682,
+            "candidateVerificationElapsedMicros": 7733793,
+            "analysisElapsedMicros": 2560652,
+            "unaccountedElapsedMicros": 2248991,
+            "verificationAttempts": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          }
+        }
+      ],
+      "secondRepetitions": [
+        {
+          "elapsedMicros": 14934118,
+          "contract": {
+            "finalHash": "34977be4ee49a99cd4e51ec4eedea77ff48cc8ab67ebe343176b332ecb0b1ff8",
+            "transactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "roundCount": 2,
+            "transactionRounds": [
+              1,
+              1,
+              2,
+              2
+            ],
+            "transactionCount": 4,
+            "waveCount": 0,
+            "waveIds": [],
+            "waveTransactionIds": [],
+            "lifecycleState": "completed",
+            "transactionStatuses": [
+              "committed",
+              "committed",
+              "committed",
+              "committed"
+            ],
+            "caseStatuses": [
+              "kept",
+              "kept",
+              "kept",
+              "kept"
+            ],
+            "verifierInvocationCount": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          },
+          "timings": {
+            "runElapsedMicros": 14875018,
+            "verificationElapsedMicros": 10169203,
+            "candidateVerificationElapsedMicros": 7719503,
+            "analysisElapsedMicros": 2476485,
+            "unaccountedElapsedMicros": 2229330,
+            "verificationAttempts": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          }
+        },
+        {
+          "elapsedMicros": 14985745,
+          "contract": {
+            "finalHash": "34977be4ee49a99cd4e51ec4eedea77ff48cc8ab67ebe343176b332ecb0b1ff8",
+            "transactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "roundCount": 2,
+            "transactionRounds": [
+              1,
+              1,
+              2,
+              2
+            ],
+            "transactionCount": 4,
+            "waveCount": 0,
+            "waveIds": [],
+            "waveTransactionIds": [],
+            "lifecycleState": "completed",
+            "transactionStatuses": [
+              "committed",
+              "committed",
+              "committed",
+              "committed"
+            ],
+            "caseStatuses": [
+              "kept",
+              "kept",
+              "kept",
+              "kept"
+            ],
+            "verifierInvocationCount": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          },
+          "timings": {
+            "runElapsedMicros": 14937102,
+            "verificationElapsedMicros": 10200286,
+            "candidateVerificationElapsedMicros": 7722754,
+            "analysisElapsedMicros": 2483956,
+            "unaccountedElapsedMicros": 2252860,
+            "verificationAttempts": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          }
+        },
+        {
+          "elapsedMicros": 14970461,
+          "contract": {
+            "finalHash": "34977be4ee49a99cd4e51ec4eedea77ff48cc8ab67ebe343176b332ecb0b1ff8",
+            "transactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "roundCount": 2,
+            "transactionRounds": [
+              1,
+              1,
+              2,
+              2
+            ],
+            "transactionCount": 4,
+            "waveCount": 0,
+            "waveIds": [],
+            "waveTransactionIds": [],
+            "lifecycleState": "completed",
+            "transactionStatuses": [
+              "committed",
+              "committed",
+              "committed",
+              "committed"
+            ],
+            "caseStatuses": [
+              "kept",
+              "kept",
+              "kept",
+              "kept"
+            ],
+            "verifierInvocationCount": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          },
+          "timings": {
+            "runElapsedMicros": 14919829,
+            "verificationElapsedMicros": 10174721,
+            "candidateVerificationElapsedMicros": 7709397,
+            "analysisElapsedMicros": 2491101,
+            "unaccountedElapsedMicros": 2254007,
+            "verificationAttempts": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          }
+        }
+      ],
+      "firstBlockElapsedMicros": 44904784,
+      "secondBlockElapsedMicros": 44890324,
+      "pairedRelativeDelta": 0.0003220146877891674
+    },
+    {
+      "order": "BA",
+      "firstRepetitions": [
+        {
+          "elapsedMicros": 15008953,
+          "contract": {
+            "finalHash": "34977be4ee49a99cd4e51ec4eedea77ff48cc8ab67ebe343176b332ecb0b1ff8",
+            "transactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "roundCount": 2,
+            "transactionRounds": [
+              1,
+              1,
+              2,
+              2
+            ],
+            "transactionCount": 4,
+            "waveCount": 0,
+            "waveIds": [],
+            "waveTransactionIds": [],
+            "lifecycleState": "completed",
+            "transactionStatuses": [
+              "committed",
+              "committed",
+              "committed",
+              "committed"
+            ],
+            "caseStatuses": [
+              "kept",
+              "kept",
+              "kept",
+              "kept"
+            ],
+            "verifierInvocationCount": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          },
+          "timings": {
+            "runElapsedMicros": 14955313,
+            "verificationElapsedMicros": 10162334,
+            "candidateVerificationElapsedMicros": 7706788,
+            "analysisElapsedMicros": 2553521,
+            "unaccountedElapsedMicros": 2239458,
+            "verificationAttempts": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          }
+        },
+        {
+          "elapsedMicros": 15000227,
+          "contract": {
+            "finalHash": "34977be4ee49a99cd4e51ec4eedea77ff48cc8ab67ebe343176b332ecb0b1ff8",
+            "transactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "roundCount": 2,
+            "transactionRounds": [
+              1,
+              1,
+              2,
+              2
+            ],
+            "transactionCount": 4,
+            "waveCount": 0,
+            "waveIds": [],
+            "waveTransactionIds": [],
+            "lifecycleState": "completed",
+            "transactionStatuses": [
+              "committed",
+              "committed",
+              "committed",
+              "committed"
+            ],
+            "caseStatuses": [
+              "kept",
+              "kept",
+              "kept",
+              "kept"
+            ],
+            "verifierInvocationCount": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          },
+          "timings": {
+            "runElapsedMicros": 14948024,
+            "verificationElapsedMicros": 10197424,
+            "candidateVerificationElapsedMicros": 7745341,
+            "analysisElapsedMicros": 2509046,
+            "unaccountedElapsedMicros": 2241554,
+            "verificationAttempts": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          }
+        },
+        {
+          "elapsedMicros": 14922049,
+          "contract": {
+            "finalHash": "34977be4ee49a99cd4e51ec4eedea77ff48cc8ab67ebe343176b332ecb0b1ff8",
+            "transactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "roundCount": 2,
+            "transactionRounds": [
+              1,
+              1,
+              2,
+              2
+            ],
+            "transactionCount": 4,
+            "waveCount": 0,
+            "waveIds": [],
+            "waveTransactionIds": [],
+            "lifecycleState": "completed",
+            "transactionStatuses": [
+              "committed",
+              "committed",
+              "committed",
+              "committed"
+            ],
+            "caseStatuses": [
+              "kept",
+              "kept",
+              "kept",
+              "kept"
+            ],
+            "verifierInvocationCount": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          },
+          "timings": {
+            "runElapsedMicros": 14870003,
+            "verificationElapsedMicros": 10170495,
+            "candidateVerificationElapsedMicros": 7714567,
+            "analysisElapsedMicros": 2471553,
+            "unaccountedElapsedMicros": 2227955,
+            "verificationAttempts": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          }
+        }
+      ],
+      "secondRepetitions": [
+        {
+          "elapsedMicros": 14859076,
+          "contract": {
+            "finalHash": "34977be4ee49a99cd4e51ec4eedea77ff48cc8ab67ebe343176b332ecb0b1ff8",
+            "transactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "roundCount": 2,
+            "transactionRounds": [
+              1,
+              1,
+              2,
+              2
+            ],
+            "transactionCount": 4,
+            "waveCount": 0,
+            "waveIds": [],
+            "waveTransactionIds": [],
+            "lifecycleState": "completed",
+            "transactionStatuses": [
+              "committed",
+              "committed",
+              "committed",
+              "committed"
+            ],
+            "caseStatuses": [
+              "kept",
+              "kept",
+              "kept",
+              "kept"
+            ],
+            "verifierInvocationCount": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          },
+          "timings": {
+            "runElapsedMicros": 14801092,
+            "verificationElapsedMicros": 10157703,
+            "candidateVerificationElapsedMicros": 7702853,
+            "analysisElapsedMicros": 2405399,
+            "unaccountedElapsedMicros": 2237990,
+            "verificationAttempts": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          }
+        },
+        {
+          "elapsedMicros": 14996206,
+          "contract": {
+            "finalHash": "34977be4ee49a99cd4e51ec4eedea77ff48cc8ab67ebe343176b332ecb0b1ff8",
+            "transactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "roundCount": 2,
+            "transactionRounds": [
+              1,
+              1,
+              2,
+              2
+            ],
+            "transactionCount": 4,
+            "waveCount": 0,
+            "waveIds": [],
+            "waveTransactionIds": [],
+            "lifecycleState": "completed",
+            "transactionStatuses": [
+              "committed",
+              "committed",
+              "committed",
+              "committed"
+            ],
+            "caseStatuses": [
+              "kept",
+              "kept",
+              "kept",
+              "kept"
+            ],
+            "verifierInvocationCount": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          },
+          "timings": {
+            "runElapsedMicros": 14944990,
+            "verificationElapsedMicros": 10153624,
+            "candidateVerificationElapsedMicros": 7707761,
+            "analysisElapsedMicros": 2545302,
+            "unaccountedElapsedMicros": 2246064,
+            "verificationAttempts": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          }
+        },
+        {
+          "elapsedMicros": 14989226,
+          "contract": {
+            "finalHash": "34977be4ee49a99cd4e51ec4eedea77ff48cc8ab67ebe343176b332ecb0b1ff8",
+            "transactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "roundCount": 2,
+            "transactionRounds": [
+              1,
+              1,
+              2,
+              2
+            ],
+            "transactionCount": 4,
+            "waveCount": 0,
+            "waveIds": [],
+            "waveTransactionIds": [],
+            "lifecycleState": "completed",
+            "transactionStatuses": [
+              "committed",
+              "committed",
+              "committed",
+              "committed"
+            ],
+            "caseStatuses": [
+              "kept",
+              "kept",
+              "kept",
+              "kept"
+            ],
+            "verifierInvocationCount": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          },
+          "timings": {
+            "runElapsedMicros": 14938528,
+            "verificationElapsedMicros": 10190195,
+            "candidateVerificationElapsedMicros": 7711680,
+            "analysisElapsedMicros": 2522733,
+            "unaccountedElapsedMicros": 2225600,
+            "verificationAttempts": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          }
+        }
+      ],
+      "firstBlockElapsedMicros": 44931229,
+      "secondBlockElapsedMicros": 44844508,
+      "pairedRelativeDelta": -0.0019338153960792703
+    }
+  ],
+  "fixtureSha256": "a3767776100e336123e6350ca08135c63ba41333cf831d6662315245bae6a89a",
+  "aExecutableSha256": "5ec520dc1aac1232ff023ea8c75a08ac1be4354f9b4b7575705af8160b085ef7",
+  "bExecutableSha256": "5ec520dc1aac1232ff023ea8c75a08ac1be4354f9b4b7575705af8160b085ef7",
+  "aProgramSha256": "652514d88cc38f3f30ea729223db0826d0ce3009e6940e6b40e1f6822d17b85a",
+  "bProgramSha256": "237ca65ed047cd75761ea9d42824d36ee5df2863cd58bf217b9631d2c32cf768",
+  "harnessSha256": "cc5b47c61e373473cc904cb5b090c08ef2487aecc8119ebc582d39fd9f05328b",
+  "generatorSha256": "f73d2c71b46b579848753f0e9c5cd5a20cb935f43255ac8f2d7d11633997a96a",
+  "boundaryPatchSha256": "dcda825186bf42952ec89a35a0cc91fce1f240fda0a1a989a0d2d5f536762518",
+  "verificationWavePatchSha256": "3610688c52c9abc33d864a358c981ba64ced78ede3d08517d17988daa3bd5ad3",
+  "dartToolchainSha256": "123d821f2df3fd3e8f5e02cefd344dea5eb51ee51d83cb5de959db1820ec05b9",
+  "flutterToolchainSha256": "f08ccb14094c1614cc1ec8c4ede1fc7808cbbe4cc15cc22a39b1996c0719c5b6",
+  "applyArgumentsSha256": "84d61a36a28cd9235a6f78a8f0325a4b030852edd66ff950a2cf6468c99b284a",
+  "memory": "informational-no-process-tree-sampler",
+  "noiseThreshold": 0.015740675578724505,
+  "aaPairedRelativeDeltas": [
+    0.00041800372601317294,
+    0.0030342699693755287,
+    0.015740675578724505,
+    0.002441619521524671,
+    0.0003220146877891674,
+    -0.0019338153960792703
+  ],
+  "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+  "abPairs": [
+    {
+      "order": "AB",
+      "aRepetitions": [
+        {
+          "elapsedMicros": 15563462,
+          "contract": {
+            "finalHash": "34977be4ee49a99cd4e51ec4eedea77ff48cc8ab67ebe343176b332ecb0b1ff8",
+            "transactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "roundCount": 2,
+            "transactionRounds": [
+              1,
+              1,
+              2,
+              2
+            ],
+            "transactionCount": 4,
+            "waveCount": 0,
+            "waveIds": [],
+            "waveTransactionIds": [],
+            "lifecycleState": "completed",
+            "transactionStatuses": [
+              "committed",
+              "committed",
+              "committed",
+              "committed"
+            ],
+            "caseStatuses": [
+              "kept",
+              "kept",
+              "kept",
+              "kept"
+            ],
+            "verifierInvocationCount": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          },
+          "timings": {
+            "runElapsedMicros": 15514234,
+            "verificationElapsedMicros": 10636186,
+            "candidateVerificationElapsedMicros": 7870249,
+            "analysisElapsedMicros": 2619866,
+            "unaccountedElapsedMicros": 2258182,
+            "verificationAttempts": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          }
+        },
+        {
+          "elapsedMicros": 16206017,
+          "contract": {
+            "finalHash": "34977be4ee49a99cd4e51ec4eedea77ff48cc8ab67ebe343176b332ecb0b1ff8",
+            "transactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "roundCount": 2,
+            "transactionRounds": [
+              1,
+              1,
+              2,
+              2
+            ],
+            "transactionCount": 4,
+            "waveCount": 0,
+            "waveIds": [],
+            "waveTransactionIds": [],
+            "lifecycleState": "completed",
+            "transactionStatuses": [
+              "committed",
+              "committed",
+              "committed",
+              "committed"
+            ],
+            "caseStatuses": [
+              "kept",
+              "kept",
+              "kept",
+              "kept"
+            ],
+            "verifierInvocationCount": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          },
+          "timings": {
+            "runElapsedMicros": 16156742,
+            "verificationElapsedMicros": 11228705,
+            "candidateVerificationElapsedMicros": 8598216,
+            "analysisElapsedMicros": 2651096,
+            "unaccountedElapsedMicros": 2276941,
+            "verificationAttempts": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          }
+        },
+        {
+          "elapsedMicros": 15444669,
+          "contract": {
+            "finalHash": "34977be4ee49a99cd4e51ec4eedea77ff48cc8ab67ebe343176b332ecb0b1ff8",
+            "transactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "roundCount": 2,
+            "transactionRounds": [
+              1,
+              1,
+              2,
+              2
+            ],
+            "transactionCount": 4,
+            "waveCount": 0,
+            "waveIds": [],
+            "waveTransactionIds": [],
+            "lifecycleState": "completed",
+            "transactionStatuses": [
+              "committed",
+              "committed",
+              "committed",
+              "committed"
+            ],
+            "caseStatuses": [
+              "kept",
+              "kept",
+              "kept",
+              "kept"
+            ],
+            "verifierInvocationCount": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          },
+          "timings": {
+            "runElapsedMicros": 15386524,
+            "verificationElapsedMicros": 10548387,
+            "candidateVerificationElapsedMicros": 7919108,
+            "analysisElapsedMicros": 2594307,
+            "unaccountedElapsedMicros": 2243830,
+            "verificationAttempts": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          }
+        }
+      ],
+      "bRepetitions": [
+        {
+          "elapsedMicros": 11097579,
+          "contract": {
+            "finalHash": "34977be4ee49a99cd4e51ec4eedea77ff48cc8ab67ebe343176b332ecb0b1ff8",
+            "transactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "roundCount": 2,
+            "transactionRounds": [
+              1,
+              1,
+              2,
+              2
+            ],
+            "transactionCount": 4,
+            "waveCount": 2,
+            "waveIds": [
+              "wave-r001",
+              "wave-r002"
+            ],
+            "waveTransactionIds": [
+              [
+                "tx-r001-d658d0dcda49860a",
+                "tx-r001-f005296c3145a378"
+              ],
+              [
+                "tx-r002-3dcde5f611f53f8e",
+                "tx-r002-d460280f9eb71e6e"
+              ]
+            ],
+            "lifecycleState": "completed",
+            "transactionStatuses": [
+              "committed",
+              "committed",
+              "committed",
+              "committed"
+            ],
+            "caseStatuses": [
+              "kept",
+              "kept",
+              "kept",
+              "kept"
+            ],
+            "verifierInvocationCount": 3,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              [
+                "tx-r001-d658d0dcda49860a",
+                "tx-r001-f005296c3145a378"
+              ],
+              [
+                "tx-r002-3dcde5f611f53f8e",
+                "tx-r002-d460280f9eb71e6e"
+              ]
+            ],
+            "verificationWaveIds": [
+              "wave-r001",
+              "wave-r002"
+            ]
+          },
+          "timings": {
+            "runElapsedMicros": 11043328,
+            "verificationElapsedMicros": 6710004,
+            "candidateVerificationElapsedMicros": 4051531,
+            "analysisElapsedMicros": 2593299,
+            "unaccountedElapsedMicros": 1740025,
+            "verificationAttempts": 3,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              [
+                "tx-r001-d658d0dcda49860a",
+                "tx-r001-f005296c3145a378"
+              ],
+              [
+                "tx-r002-3dcde5f611f53f8e",
+                "tx-r002-d460280f9eb71e6e"
+              ]
+            ],
+            "verificationWaveIds": [
+              "wave-r001",
+              "wave-r002"
+            ]
+          }
+        },
+        {
+          "elapsedMicros": 11222128,
+          "contract": {
+            "finalHash": "34977be4ee49a99cd4e51ec4eedea77ff48cc8ab67ebe343176b332ecb0b1ff8",
+            "transactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "roundCount": 2,
+            "transactionRounds": [
+              1,
+              1,
+              2,
+              2
+            ],
+            "transactionCount": 4,
+            "waveCount": 2,
+            "waveIds": [
+              "wave-r001",
+              "wave-r002"
+            ],
+            "waveTransactionIds": [
+              [
+                "tx-r001-d658d0dcda49860a",
+                "tx-r001-f005296c3145a378"
+              ],
+              [
+                "tx-r002-3dcde5f611f53f8e",
+                "tx-r002-d460280f9eb71e6e"
+              ]
+            ],
+            "lifecycleState": "completed",
+            "transactionStatuses": [
+              "committed",
+              "committed",
+              "committed",
+              "committed"
+            ],
+            "caseStatuses": [
+              "kept",
+              "kept",
+              "kept",
+              "kept"
+            ],
+            "verifierInvocationCount": 3,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              [
+                "tx-r001-d658d0dcda49860a",
+                "tx-r001-f005296c3145a378"
+              ],
+              [
+                "tx-r002-3dcde5f611f53f8e",
+                "tx-r002-d460280f9eb71e6e"
+              ]
+            ],
+            "verificationWaveIds": [
+              "wave-r001",
+              "wave-r002"
+            ]
+          },
+          "timings": {
+            "runElapsedMicros": 11169872,
+            "verificationElapsedMicros": 6868691,
+            "candidateVerificationElapsedMicros": 4266231,
+            "analysisElapsedMicros": 2575283,
+            "unaccountedElapsedMicros": 1725898,
+            "verificationAttempts": 3,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              [
+                "tx-r001-d658d0dcda49860a",
+                "tx-r001-f005296c3145a378"
+              ],
+              [
+                "tx-r002-3dcde5f611f53f8e",
+                "tx-r002-d460280f9eb71e6e"
+              ]
+            ],
+            "verificationWaveIds": [
+              "wave-r001",
+              "wave-r002"
+            ]
+          }
+        },
+        {
+          "elapsedMicros": 11170065,
+          "contract": {
+            "finalHash": "34977be4ee49a99cd4e51ec4eedea77ff48cc8ab67ebe343176b332ecb0b1ff8",
+            "transactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "roundCount": 2,
+            "transactionRounds": [
+              1,
+              1,
+              2,
+              2
+            ],
+            "transactionCount": 4,
+            "waveCount": 2,
+            "waveIds": [
+              "wave-r001",
+              "wave-r002"
+            ],
+            "waveTransactionIds": [
+              [
+                "tx-r001-d658d0dcda49860a",
+                "tx-r001-f005296c3145a378"
+              ],
+              [
+                "tx-r002-3dcde5f611f53f8e",
+                "tx-r002-d460280f9eb71e6e"
+              ]
+            ],
+            "lifecycleState": "completed",
+            "transactionStatuses": [
+              "committed",
+              "committed",
+              "committed",
+              "committed"
+            ],
+            "caseStatuses": [
+              "kept",
+              "kept",
+              "kept",
+              "kept"
+            ],
+            "verifierInvocationCount": 3,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              [
+                "tx-r001-d658d0dcda49860a",
+                "tx-r001-f005296c3145a378"
+              ],
+              [
+                "tx-r002-3dcde5f611f53f8e",
+                "tx-r002-d460280f9eb71e6e"
+              ]
+            ],
+            "verificationWaveIds": [
+              "wave-r001",
+              "wave-r002"
+            ]
+          },
+          "timings": {
+            "runElapsedMicros": 11123699,
+            "verificationElapsedMicros": 6791686,
+            "candidateVerificationElapsedMicros": 4146510,
+            "analysisElapsedMicros": 2592158,
+            "unaccountedElapsedMicros": 1739855,
+            "verificationAttempts": 3,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              [
+                "tx-r001-d658d0dcda49860a",
+                "tx-r001-f005296c3145a378"
+              ],
+              [
+                "tx-r002-3dcde5f611f53f8e",
+                "tx-r002-d460280f9eb71e6e"
+              ]
+            ],
+            "verificationWaveIds": [
+              "wave-r001",
+              "wave-r002"
+            ]
+          }
+        }
+      ],
+      "aBlockElapsedMicros": 47214148,
+      "bBlockElapsedMicros": 33489772,
+      "pairedRelativeDelta": 0.29068354680465697
+    },
+    {
+      "order": "BA",
+      "aRepetitions": [
+        {
+          "elapsedMicros": 18765779,
+          "contract": {
+            "finalHash": "34977be4ee49a99cd4e51ec4eedea77ff48cc8ab67ebe343176b332ecb0b1ff8",
+            "transactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "roundCount": 2,
+            "transactionRounds": [
+              1,
+              1,
+              2,
+              2
+            ],
+            "transactionCount": 4,
+            "waveCount": 0,
+            "waveIds": [],
+            "waveTransactionIds": [],
+            "lifecycleState": "completed",
+            "transactionStatuses": [
+              "committed",
+              "committed",
+              "committed",
+              "committed"
+            ],
+            "caseStatuses": [
+              "kept",
+              "kept",
+              "kept",
+              "kept"
+            ],
+            "verifierInvocationCount": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          },
+          "timings": {
+            "runElapsedMicros": 18684873,
+            "verificationElapsedMicros": 13153522,
+            "candidateVerificationElapsedMicros": 9374606,
+            "analysisElapsedMicros": 3038740,
+            "unaccountedElapsedMicros": 2492611,
+            "verificationAttempts": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          }
+        },
+        {
+          "elapsedMicros": 16298344,
+          "contract": {
+            "finalHash": "34977be4ee49a99cd4e51ec4eedea77ff48cc8ab67ebe343176b332ecb0b1ff8",
+            "transactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "roundCount": 2,
+            "transactionRounds": [
+              1,
+              1,
+              2,
+              2
+            ],
+            "transactionCount": 4,
+            "waveCount": 0,
+            "waveIds": [],
+            "waveTransactionIds": [],
+            "lifecycleState": "completed",
+            "transactionStatuses": [
+              "committed",
+              "committed",
+              "committed",
+              "committed"
+            ],
+            "caseStatuses": [
+              "kept",
+              "kept",
+              "kept",
+              "kept"
+            ],
+            "verifierInvocationCount": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          },
+          "timings": {
+            "runElapsedMicros": 16239045,
+            "verificationElapsedMicros": 11026475,
+            "candidateVerificationElapsedMicros": 8183903,
+            "analysisElapsedMicros": 2942862,
+            "unaccountedElapsedMicros": 2269708,
+            "verificationAttempts": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          }
+        },
+        {
+          "elapsedMicros": 15577878,
+          "contract": {
+            "finalHash": "34977be4ee49a99cd4e51ec4eedea77ff48cc8ab67ebe343176b332ecb0b1ff8",
+            "transactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "roundCount": 2,
+            "transactionRounds": [
+              1,
+              1,
+              2,
+              2
+            ],
+            "transactionCount": 4,
+            "waveCount": 0,
+            "waveIds": [],
+            "waveTransactionIds": [],
+            "lifecycleState": "completed",
+            "transactionStatuses": [
+              "committed",
+              "committed",
+              "committed",
+              "committed"
+            ],
+            "caseStatuses": [
+              "kept",
+              "kept",
+              "kept",
+              "kept"
+            ],
+            "verifierInvocationCount": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          },
+          "timings": {
+            "runElapsedMicros": 15522211,
+            "verificationElapsedMicros": 10666774,
+            "candidateVerificationElapsedMicros": 8048893,
+            "analysisElapsedMicros": 2612057,
+            "unaccountedElapsedMicros": 2243380,
+            "verificationAttempts": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          }
+        }
+      ],
+      "bRepetitions": [
+        {
+          "elapsedMicros": 11974499,
+          "contract": {
+            "finalHash": "34977be4ee49a99cd4e51ec4eedea77ff48cc8ab67ebe343176b332ecb0b1ff8",
+            "transactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "roundCount": 2,
+            "transactionRounds": [
+              1,
+              1,
+              2,
+              2
+            ],
+            "transactionCount": 4,
+            "waveCount": 2,
+            "waveIds": [
+              "wave-r001",
+              "wave-r002"
+            ],
+            "waveTransactionIds": [
+              [
+                "tx-r001-d658d0dcda49860a",
+                "tx-r001-f005296c3145a378"
+              ],
+              [
+                "tx-r002-3dcde5f611f53f8e",
+                "tx-r002-d460280f9eb71e6e"
+              ]
+            ],
+            "lifecycleState": "completed",
+            "transactionStatuses": [
+              "committed",
+              "committed",
+              "committed",
+              "committed"
+            ],
+            "caseStatuses": [
+              "kept",
+              "kept",
+              "kept",
+              "kept"
+            ],
+            "verifierInvocationCount": 3,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              [
+                "tx-r001-d658d0dcda49860a",
+                "tx-r001-f005296c3145a378"
+              ],
+              [
+                "tx-r002-3dcde5f611f53f8e",
+                "tx-r002-d460280f9eb71e6e"
+              ]
+            ],
+            "verificationWaveIds": [
+              "wave-r001",
+              "wave-r002"
+            ]
+          },
+          "timings": {
+            "runElapsedMicros": 11905514,
+            "verificationElapsedMicros": 7436690,
+            "candidateVerificationElapsedMicros": 4690174,
+            "analysisElapsedMicros": 2705262,
+            "unaccountedElapsedMicros": 1763562,
+            "verificationAttempts": 3,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              [
+                "tx-r001-d658d0dcda49860a",
+                "tx-r001-f005296c3145a378"
+              ],
+              [
+                "tx-r002-3dcde5f611f53f8e",
+                "tx-r002-d460280f9eb71e6e"
+              ]
+            ],
+            "verificationWaveIds": [
+              "wave-r001",
+              "wave-r002"
+            ]
+          }
+        },
+        {
+          "elapsedMicros": 11762192,
+          "contract": {
+            "finalHash": "34977be4ee49a99cd4e51ec4eedea77ff48cc8ab67ebe343176b332ecb0b1ff8",
+            "transactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "roundCount": 2,
+            "transactionRounds": [
+              1,
+              1,
+              2,
+              2
+            ],
+            "transactionCount": 4,
+            "waveCount": 2,
+            "waveIds": [
+              "wave-r001",
+              "wave-r002"
+            ],
+            "waveTransactionIds": [
+              [
+                "tx-r001-d658d0dcda49860a",
+                "tx-r001-f005296c3145a378"
+              ],
+              [
+                "tx-r002-3dcde5f611f53f8e",
+                "tx-r002-d460280f9eb71e6e"
+              ]
+            ],
+            "lifecycleState": "completed",
+            "transactionStatuses": [
+              "committed",
+              "committed",
+              "committed",
+              "committed"
+            ],
+            "caseStatuses": [
+              "kept",
+              "kept",
+              "kept",
+              "kept"
+            ],
+            "verifierInvocationCount": 3,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              [
+                "tx-r001-d658d0dcda49860a",
+                "tx-r001-f005296c3145a378"
+              ],
+              [
+                "tx-r002-3dcde5f611f53f8e",
+                "tx-r002-d460280f9eb71e6e"
+              ]
+            ],
+            "verificationWaveIds": [
+              "wave-r001",
+              "wave-r002"
+            ]
+          },
+          "timings": {
+            "runElapsedMicros": 11692604,
+            "verificationElapsedMicros": 6997932,
+            "candidateVerificationElapsedMicros": 4189589,
+            "analysisElapsedMicros": 2961317,
+            "unaccountedElapsedMicros": 1733355,
+            "verificationAttempts": 3,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              [
+                "tx-r001-d658d0dcda49860a",
+                "tx-r001-f005296c3145a378"
+              ],
+              [
+                "tx-r002-3dcde5f611f53f8e",
+                "tx-r002-d460280f9eb71e6e"
+              ]
+            ],
+            "verificationWaveIds": [
+              "wave-r001",
+              "wave-r002"
+            ]
+          }
+        },
+        {
+          "elapsedMicros": 14214258,
+          "contract": {
+            "finalHash": "34977be4ee49a99cd4e51ec4eedea77ff48cc8ab67ebe343176b332ecb0b1ff8",
+            "transactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "roundCount": 2,
+            "transactionRounds": [
+              1,
+              1,
+              2,
+              2
+            ],
+            "transactionCount": 4,
+            "waveCount": 2,
+            "waveIds": [
+              "wave-r001",
+              "wave-r002"
+            ],
+            "waveTransactionIds": [
+              [
+                "tx-r001-d658d0dcda49860a",
+                "tx-r001-f005296c3145a378"
+              ],
+              [
+                "tx-r002-3dcde5f611f53f8e",
+                "tx-r002-d460280f9eb71e6e"
+              ]
+            ],
+            "lifecycleState": "completed",
+            "transactionStatuses": [
+              "committed",
+              "committed",
+              "committed",
+              "committed"
+            ],
+            "caseStatuses": [
+              "kept",
+              "kept",
+              "kept",
+              "kept"
+            ],
+            "verifierInvocationCount": 3,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              [
+                "tx-r001-d658d0dcda49860a",
+                "tx-r001-f005296c3145a378"
+              ],
+              [
+                "tx-r002-3dcde5f611f53f8e",
+                "tx-r002-d460280f9eb71e6e"
+              ]
+            ],
+            "verificationWaveIds": [
+              "wave-r001",
+              "wave-r002"
+            ]
+          },
+          "timings": {
+            "runElapsedMicros": 14161388,
+            "verificationElapsedMicros": 8951681,
+            "candidateVerificationElapsedMicros": 6307295,
+            "analysisElapsedMicros": 3307683,
+            "unaccountedElapsedMicros": 1902024,
+            "verificationAttempts": 3,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              [
+                "tx-r001-d658d0dcda49860a",
+                "tx-r001-f005296c3145a378"
+              ],
+              [
+                "tx-r002-3dcde5f611f53f8e",
+                "tx-r002-d460280f9eb71e6e"
+              ]
+            ],
+            "verificationWaveIds": [
+              "wave-r001",
+              "wave-r002"
+            ]
+          }
+        }
+      ],
+      "aBlockElapsedMicros": 50642001,
+      "bBlockElapsedMicros": 37950949,
+      "pairedRelativeDelta": 0.25060328876025256
+    },
+    {
+      "order": "AB",
+      "aRepetitions": [
+        {
+          "elapsedMicros": 16982714,
+          "contract": {
+            "finalHash": "34977be4ee49a99cd4e51ec4eedea77ff48cc8ab67ebe343176b332ecb0b1ff8",
+            "transactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "roundCount": 2,
+            "transactionRounds": [
+              1,
+              1,
+              2,
+              2
+            ],
+            "transactionCount": 4,
+            "waveCount": 0,
+            "waveIds": [],
+            "waveTransactionIds": [],
+            "lifecycleState": "completed",
+            "transactionStatuses": [
+              "committed",
+              "committed",
+              "committed",
+              "committed"
+            ],
+            "caseStatuses": [
+              "kept",
+              "kept",
+              "kept",
+              "kept"
+            ],
+            "verifierInvocationCount": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          },
+          "timings": {
+            "runElapsedMicros": 16925719,
+            "verificationElapsedMicros": 11978860,
+            "candidateVerificationElapsedMicros": 9178315,
+            "analysisElapsedMicros": 2696688,
+            "unaccountedElapsedMicros": 2250171,
+            "verificationAttempts": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          }
+        },
+        {
+          "elapsedMicros": 15731591,
+          "contract": {
+            "finalHash": "34977be4ee49a99cd4e51ec4eedea77ff48cc8ab67ebe343176b332ecb0b1ff8",
+            "transactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "roundCount": 2,
+            "transactionRounds": [
+              1,
+              1,
+              2,
+              2
+            ],
+            "transactionCount": 4,
+            "waveCount": 0,
+            "waveIds": [],
+            "waveTransactionIds": [],
+            "lifecycleState": "completed",
+            "transactionStatuses": [
+              "committed",
+              "committed",
+              "committed",
+              "committed"
+            ],
+            "caseStatuses": [
+              "kept",
+              "kept",
+              "kept",
+              "kept"
+            ],
+            "verifierInvocationCount": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          },
+          "timings": {
+            "runElapsedMicros": 15665095,
+            "verificationElapsedMicros": 10790374,
+            "candidateVerificationElapsedMicros": 8067020,
+            "analysisElapsedMicros": 2642337,
+            "unaccountedElapsedMicros": 2232384,
+            "verificationAttempts": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          }
+        },
+        {
+          "elapsedMicros": 16005223,
+          "contract": {
+            "finalHash": "34977be4ee49a99cd4e51ec4eedea77ff48cc8ab67ebe343176b332ecb0b1ff8",
+            "transactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "roundCount": 2,
+            "transactionRounds": [
+              1,
+              1,
+              2,
+              2
+            ],
+            "transactionCount": 4,
+            "waveCount": 0,
+            "waveIds": [],
+            "waveTransactionIds": [],
+            "lifecycleState": "completed",
+            "transactionStatuses": [
+              "committed",
+              "committed",
+              "committed",
+              "committed"
+            ],
+            "caseStatuses": [
+              "kept",
+              "kept",
+              "kept",
+              "kept"
+            ],
+            "verifierInvocationCount": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          },
+          "timings": {
+            "runElapsedMicros": 15954506,
+            "verificationElapsedMicros": 11011377,
+            "candidateVerificationElapsedMicros": 8278171,
+            "analysisElapsedMicros": 2692427,
+            "unaccountedElapsedMicros": 2250702,
+            "verificationAttempts": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          }
+        }
+      ],
+      "bRepetitions": [
+        {
+          "elapsedMicros": 11247244,
+          "contract": {
+            "finalHash": "34977be4ee49a99cd4e51ec4eedea77ff48cc8ab67ebe343176b332ecb0b1ff8",
+            "transactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "roundCount": 2,
+            "transactionRounds": [
+              1,
+              1,
+              2,
+              2
+            ],
+            "transactionCount": 4,
+            "waveCount": 2,
+            "waveIds": [
+              "wave-r001",
+              "wave-r002"
+            ],
+            "waveTransactionIds": [
+              [
+                "tx-r001-d658d0dcda49860a",
+                "tx-r001-f005296c3145a378"
+              ],
+              [
+                "tx-r002-3dcde5f611f53f8e",
+                "tx-r002-d460280f9eb71e6e"
+              ]
+            ],
+            "lifecycleState": "completed",
+            "transactionStatuses": [
+              "committed",
+              "committed",
+              "committed",
+              "committed"
+            ],
+            "caseStatuses": [
+              "kept",
+              "kept",
+              "kept",
+              "kept"
+            ],
+            "verifierInvocationCount": 3,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              [
+                "tx-r001-d658d0dcda49860a",
+                "tx-r001-f005296c3145a378"
+              ],
+              [
+                "tx-r002-3dcde5f611f53f8e",
+                "tx-r002-d460280f9eb71e6e"
+              ]
+            ],
+            "verificationWaveIds": [
+              "wave-r001",
+              "wave-r002"
+            ]
+          },
+          "timings": {
+            "runElapsedMicros": 11183491,
+            "verificationElapsedMicros": 6820835,
+            "candidateVerificationElapsedMicros": 4107865,
+            "analysisElapsedMicros": 2625153,
+            "unaccountedElapsedMicros": 1737503,
+            "verificationAttempts": 3,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              [
+                "tx-r001-d658d0dcda49860a",
+                "tx-r001-f005296c3145a378"
+              ],
+              [
+                "tx-r002-3dcde5f611f53f8e",
+                "tx-r002-d460280f9eb71e6e"
+              ]
+            ],
+            "verificationWaveIds": [
+              "wave-r001",
+              "wave-r002"
+            ]
+          }
+        },
+        {
+          "elapsedMicros": 10677198,
+          "contract": {
+            "finalHash": "34977be4ee49a99cd4e51ec4eedea77ff48cc8ab67ebe343176b332ecb0b1ff8",
+            "transactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "roundCount": 2,
+            "transactionRounds": [
+              1,
+              1,
+              2,
+              2
+            ],
+            "transactionCount": 4,
+            "waveCount": 2,
+            "waveIds": [
+              "wave-r001",
+              "wave-r002"
+            ],
+            "waveTransactionIds": [
+              [
+                "tx-r001-d658d0dcda49860a",
+                "tx-r001-f005296c3145a378"
+              ],
+              [
+                "tx-r002-3dcde5f611f53f8e",
+                "tx-r002-d460280f9eb71e6e"
+              ]
+            ],
+            "lifecycleState": "completed",
+            "transactionStatuses": [
+              "committed",
+              "committed",
+              "committed",
+              "committed"
+            ],
+            "caseStatuses": [
+              "kept",
+              "kept",
+              "kept",
+              "kept"
+            ],
+            "verifierInvocationCount": 3,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              [
+                "tx-r001-d658d0dcda49860a",
+                "tx-r001-f005296c3145a378"
+              ],
+              [
+                "tx-r002-3dcde5f611f53f8e",
+                "tx-r002-d460280f9eb71e6e"
+              ]
+            ],
+            "verificationWaveIds": [
+              "wave-r001",
+              "wave-r002"
+            ]
+          },
+          "timings": {
+            "runElapsedMicros": 10620409,
+            "verificationElapsedMicros": 6416755,
+            "candidateVerificationElapsedMicros": 3882179,
+            "analysisElapsedMicros": 2519696,
+            "unaccountedElapsedMicros": 1683958,
+            "verificationAttempts": 3,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              [
+                "tx-r001-d658d0dcda49860a",
+                "tx-r001-f005296c3145a378"
+              ],
+              [
+                "tx-r002-3dcde5f611f53f8e",
+                "tx-r002-d460280f9eb71e6e"
+              ]
+            ],
+            "verificationWaveIds": [
+              "wave-r001",
+              "wave-r002"
+            ]
+          }
+        },
+        {
+          "elapsedMicros": 10632511,
+          "contract": {
+            "finalHash": "34977be4ee49a99cd4e51ec4eedea77ff48cc8ab67ebe343176b332ecb0b1ff8",
+            "transactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "roundCount": 2,
+            "transactionRounds": [
+              1,
+              1,
+              2,
+              2
+            ],
+            "transactionCount": 4,
+            "waveCount": 2,
+            "waveIds": [
+              "wave-r001",
+              "wave-r002"
+            ],
+            "waveTransactionIds": [
+              [
+                "tx-r001-d658d0dcda49860a",
+                "tx-r001-f005296c3145a378"
+              ],
+              [
+                "tx-r002-3dcde5f611f53f8e",
+                "tx-r002-d460280f9eb71e6e"
+              ]
+            ],
+            "lifecycleState": "completed",
+            "transactionStatuses": [
+              "committed",
+              "committed",
+              "committed",
+              "committed"
+            ],
+            "caseStatuses": [
+              "kept",
+              "kept",
+              "kept",
+              "kept"
+            ],
+            "verifierInvocationCount": 3,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              [
+                "tx-r001-d658d0dcda49860a",
+                "tx-r001-f005296c3145a378"
+              ],
+              [
+                "tx-r002-3dcde5f611f53f8e",
+                "tx-r002-d460280f9eb71e6e"
+              ]
+            ],
+            "verificationWaveIds": [
+              "wave-r001",
+              "wave-r002"
+            ]
+          },
+          "timings": {
+            "runElapsedMicros": 10583082,
+            "verificationElapsedMicros": 6409731,
+            "candidateVerificationElapsedMicros": 3864271,
+            "analysisElapsedMicros": 2478232,
+            "unaccountedElapsedMicros": 1695119,
+            "verificationAttempts": 3,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              [
+                "tx-r001-d658d0dcda49860a",
+                "tx-r001-f005296c3145a378"
+              ],
+              [
+                "tx-r002-3dcde5f611f53f8e",
+                "tx-r002-d460280f9eb71e6e"
+              ]
+            ],
+            "verificationWaveIds": [
+              "wave-r001",
+              "wave-r002"
+            ]
+          }
+        }
+      ],
+      "aBlockElapsedMicros": 48719528,
+      "bBlockElapsedMicros": 32556953,
+      "pairedRelativeDelta": 0.3317473642191279
+    },
+    {
+      "order": "BA",
+      "aRepetitions": [
+        {
+          "elapsedMicros": 15446268,
+          "contract": {
+            "finalHash": "34977be4ee49a99cd4e51ec4eedea77ff48cc8ab67ebe343176b332ecb0b1ff8",
+            "transactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "roundCount": 2,
+            "transactionRounds": [
+              1,
+              1,
+              2,
+              2
+            ],
+            "transactionCount": 4,
+            "waveCount": 0,
+            "waveIds": [],
+            "waveTransactionIds": [],
+            "lifecycleState": "completed",
+            "transactionStatuses": [
+              "committed",
+              "committed",
+              "committed",
+              "committed"
+            ],
+            "caseStatuses": [
+              "kept",
+              "kept",
+              "kept",
+              "kept"
+            ],
+            "verifierInvocationCount": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          },
+          "timings": {
+            "runElapsedMicros": 15377301,
+            "verificationElapsedMicros": 10630438,
+            "candidateVerificationElapsedMicros": 8164937,
+            "analysisElapsedMicros": 2514371,
+            "unaccountedElapsedMicros": 2232492,
+            "verificationAttempts": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          }
+        },
+        {
+          "elapsedMicros": 15241545,
+          "contract": {
+            "finalHash": "34977be4ee49a99cd4e51ec4eedea77ff48cc8ab67ebe343176b332ecb0b1ff8",
+            "transactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "roundCount": 2,
+            "transactionRounds": [
+              1,
+              1,
+              2,
+              2
+            ],
+            "transactionCount": 4,
+            "waveCount": 0,
+            "waveIds": [],
+            "waveTransactionIds": [],
+            "lifecycleState": "completed",
+            "transactionStatuses": [
+              "committed",
+              "committed",
+              "committed",
+              "committed"
+            ],
+            "caseStatuses": [
+              "kept",
+              "kept",
+              "kept",
+              "kept"
+            ],
+            "verifierInvocationCount": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          },
+          "timings": {
+            "runElapsedMicros": 15192376,
+            "verificationElapsedMicros": 10507278,
+            "candidateVerificationElapsedMicros": 8049981,
+            "analysisElapsedMicros": 2463738,
+            "unaccountedElapsedMicros": 2221360,
+            "verificationAttempts": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          }
+        },
+        {
+          "elapsedMicros": 15047762,
+          "contract": {
+            "finalHash": "34977be4ee49a99cd4e51ec4eedea77ff48cc8ab67ebe343176b332ecb0b1ff8",
+            "transactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "roundCount": 2,
+            "transactionRounds": [
+              1,
+              1,
+              2,
+              2
+            ],
+            "transactionCount": 4,
+            "waveCount": 0,
+            "waveIds": [],
+            "waveTransactionIds": [],
+            "lifecycleState": "completed",
+            "transactionStatuses": [
+              "committed",
+              "committed",
+              "committed",
+              "committed"
+            ],
+            "caseStatuses": [
+              "kept",
+              "kept",
+              "kept",
+              "kept"
+            ],
+            "verifierInvocationCount": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          },
+          "timings": {
+            "runElapsedMicros": 14996466,
+            "verificationElapsedMicros": 10268343,
+            "candidateVerificationElapsedMicros": 7692207,
+            "analysisElapsedMicros": 2517886,
+            "unaccountedElapsedMicros": 2210237,
+            "verificationAttempts": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          }
+        }
+      ],
+      "bRepetitions": [
+        {
+          "elapsedMicros": 10587094,
+          "contract": {
+            "finalHash": "34977be4ee49a99cd4e51ec4eedea77ff48cc8ab67ebe343176b332ecb0b1ff8",
+            "transactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "roundCount": 2,
+            "transactionRounds": [
+              1,
+              1,
+              2,
+              2
+            ],
+            "transactionCount": 4,
+            "waveCount": 2,
+            "waveIds": [
+              "wave-r001",
+              "wave-r002"
+            ],
+            "waveTransactionIds": [
+              [
+                "tx-r001-d658d0dcda49860a",
+                "tx-r001-f005296c3145a378"
+              ],
+              [
+                "tx-r002-3dcde5f611f53f8e",
+                "tx-r002-d460280f9eb71e6e"
+              ]
+            ],
+            "lifecycleState": "completed",
+            "transactionStatuses": [
+              "committed",
+              "committed",
+              "committed",
+              "committed"
+            ],
+            "caseStatuses": [
+              "kept",
+              "kept",
+              "kept",
+              "kept"
+            ],
+            "verifierInvocationCount": 3,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              [
+                "tx-r001-d658d0dcda49860a",
+                "tx-r001-f005296c3145a378"
+              ],
+              [
+                "tx-r002-3dcde5f611f53f8e",
+                "tx-r002-d460280f9eb71e6e"
+              ]
+            ],
+            "verificationWaveIds": [
+              "wave-r001",
+              "wave-r002"
+            ]
+          },
+          "timings": {
+            "runElapsedMicros": 10536311,
+            "verificationElapsedMicros": 6339021,
+            "candidateVerificationElapsedMicros": 3873181,
+            "analysisElapsedMicros": 2514072,
+            "unaccountedElapsedMicros": 1683218,
+            "verificationAttempts": 3,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              [
+                "tx-r001-d658d0dcda49860a",
+                "tx-r001-f005296c3145a378"
+              ],
+              [
+                "tx-r002-3dcde5f611f53f8e",
+                "tx-r002-d460280f9eb71e6e"
+              ]
+            ],
+            "verificationWaveIds": [
+              "wave-r001",
+              "wave-r002"
+            ]
+          }
+        },
+        {
+          "elapsedMicros": 10501925,
+          "contract": {
+            "finalHash": "34977be4ee49a99cd4e51ec4eedea77ff48cc8ab67ebe343176b332ecb0b1ff8",
+            "transactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "roundCount": 2,
+            "transactionRounds": [
+              1,
+              1,
+              2,
+              2
+            ],
+            "transactionCount": 4,
+            "waveCount": 2,
+            "waveIds": [
+              "wave-r001",
+              "wave-r002"
+            ],
+            "waveTransactionIds": [
+              [
+                "tx-r001-d658d0dcda49860a",
+                "tx-r001-f005296c3145a378"
+              ],
+              [
+                "tx-r002-3dcde5f611f53f8e",
+                "tx-r002-d460280f9eb71e6e"
+              ]
+            ],
+            "lifecycleState": "completed",
+            "transactionStatuses": [
+              "committed",
+              "committed",
+              "committed",
+              "committed"
+            ],
+            "caseStatuses": [
+              "kept",
+              "kept",
+              "kept",
+              "kept"
+            ],
+            "verifierInvocationCount": 3,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              [
+                "tx-r001-d658d0dcda49860a",
+                "tx-r001-f005296c3145a378"
+              ],
+              [
+                "tx-r002-3dcde5f611f53f8e",
+                "tx-r002-d460280f9eb71e6e"
+              ]
+            ],
+            "verificationWaveIds": [
+              "wave-r001",
+              "wave-r002"
+            ]
+          },
+          "timings": {
+            "runElapsedMicros": 10451649,
+            "verificationElapsedMicros": 6340606,
+            "candidateVerificationElapsedMicros": 3878495,
+            "analysisElapsedMicros": 2433681,
+            "unaccountedElapsedMicros": 1677362,
+            "verificationAttempts": 3,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              [
+                "tx-r001-d658d0dcda49860a",
+                "tx-r001-f005296c3145a378"
+              ],
+              [
+                "tx-r002-3dcde5f611f53f8e",
+                "tx-r002-d460280f9eb71e6e"
+              ]
+            ],
+            "verificationWaveIds": [
+              "wave-r001",
+              "wave-r002"
+            ]
+          }
+        },
+        {
+          "elapsedMicros": 10652462,
+          "contract": {
+            "finalHash": "34977be4ee49a99cd4e51ec4eedea77ff48cc8ab67ebe343176b332ecb0b1ff8",
+            "transactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "roundCount": 2,
+            "transactionRounds": [
+              1,
+              1,
+              2,
+              2
+            ],
+            "transactionCount": 4,
+            "waveCount": 2,
+            "waveIds": [
+              "wave-r001",
+              "wave-r002"
+            ],
+            "waveTransactionIds": [
+              [
+                "tx-r001-d658d0dcda49860a",
+                "tx-r001-f005296c3145a378"
+              ],
+              [
+                "tx-r002-3dcde5f611f53f8e",
+                "tx-r002-d460280f9eb71e6e"
+              ]
+            ],
+            "lifecycleState": "completed",
+            "transactionStatuses": [
+              "committed",
+              "committed",
+              "committed",
+              "committed"
+            ],
+            "caseStatuses": [
+              "kept",
+              "kept",
+              "kept",
+              "kept"
+            ],
+            "verifierInvocationCount": 3,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              [
+                "tx-r001-d658d0dcda49860a",
+                "tx-r001-f005296c3145a378"
+              ],
+              [
+                "tx-r002-3dcde5f611f53f8e",
+                "tx-r002-d460280f9eb71e6e"
+              ]
+            ],
+            "verificationWaveIds": [
+              "wave-r001",
+              "wave-r002"
+            ]
+          },
+          "timings": {
+            "runElapsedMicros": 10606189,
+            "verificationElapsedMicros": 6383204,
+            "candidateVerificationElapsedMicros": 3906720,
+            "analysisElapsedMicros": 2530676,
+            "unaccountedElapsedMicros": 1692309,
+            "verificationAttempts": 3,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              [
+                "tx-r001-d658d0dcda49860a",
+                "tx-r001-f005296c3145a378"
+              ],
+              [
+                "tx-r002-3dcde5f611f53f8e",
+                "tx-r002-d460280f9eb71e6e"
+              ]
+            ],
+            "verificationWaveIds": [
+              "wave-r001",
+              "wave-r002"
+            ]
+          }
+        }
+      ],
+      "aBlockElapsedMicros": 45735575,
+      "bBlockElapsedMicros": 31741481,
+      "pairedRelativeDelta": 0.3059783111942946
+    },
+    {
+      "order": "AB",
+      "aRepetitions": [
+        {
+          "elapsedMicros": 15056533,
+          "contract": {
+            "finalHash": "34977be4ee49a99cd4e51ec4eedea77ff48cc8ab67ebe343176b332ecb0b1ff8",
+            "transactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "roundCount": 2,
+            "transactionRounds": [
+              1,
+              1,
+              2,
+              2
+            ],
+            "transactionCount": 4,
+            "waveCount": 0,
+            "waveIds": [],
+            "waveTransactionIds": [],
+            "lifecycleState": "completed",
+            "transactionStatuses": [
+              "committed",
+              "committed",
+              "committed",
+              "committed"
+            ],
+            "caseStatuses": [
+              "kept",
+              "kept",
+              "kept",
+              "kept"
+            ],
+            "verifierInvocationCount": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          },
+          "timings": {
+            "runElapsedMicros": 15002755,
+            "verificationElapsedMicros": 10282934,
+            "candidateVerificationElapsedMicros": 7827114,
+            "analysisElapsedMicros": 2511757,
+            "unaccountedElapsedMicros": 2208064,
+            "verificationAttempts": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          }
+        },
+        {
+          "elapsedMicros": 15306635,
+          "contract": {
+            "finalHash": "34977be4ee49a99cd4e51ec4eedea77ff48cc8ab67ebe343176b332ecb0b1ff8",
+            "transactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "roundCount": 2,
+            "transactionRounds": [
+              1,
+              1,
+              2,
+              2
+            ],
+            "transactionCount": 4,
+            "waveCount": 0,
+            "waveIds": [],
+            "waveTransactionIds": [],
+            "lifecycleState": "completed",
+            "transactionStatuses": [
+              "committed",
+              "committed",
+              "committed",
+              "committed"
+            ],
+            "caseStatuses": [
+              "kept",
+              "kept",
+              "kept",
+              "kept"
+            ],
+            "verifierInvocationCount": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          },
+          "timings": {
+            "runElapsedMicros": 15243350,
+            "verificationElapsedMicros": 10289490,
+            "candidateVerificationElapsedMicros": 7735718,
+            "analysisElapsedMicros": 2751494,
+            "unaccountedElapsedMicros": 2202366,
+            "verificationAttempts": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          }
+        },
+        {
+          "elapsedMicros": 16591686,
+          "contract": {
+            "finalHash": "34977be4ee49a99cd4e51ec4eedea77ff48cc8ab67ebe343176b332ecb0b1ff8",
+            "transactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "roundCount": 2,
+            "transactionRounds": [
+              1,
+              1,
+              2,
+              2
+            ],
+            "transactionCount": 4,
+            "waveCount": 0,
+            "waveIds": [],
+            "waveTransactionIds": [],
+            "lifecycleState": "completed",
+            "transactionStatuses": [
+              "committed",
+              "committed",
+              "committed",
+              "committed"
+            ],
+            "caseStatuses": [
+              "kept",
+              "kept",
+              "kept",
+              "kept"
+            ],
+            "verifierInvocationCount": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          },
+          "timings": {
+            "runElapsedMicros": 16534071,
+            "verificationElapsedMicros": 11597637,
+            "candidateVerificationElapsedMicros": 8862897,
+            "analysisElapsedMicros": 2696388,
+            "unaccountedElapsedMicros": 2240046,
+            "verificationAttempts": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          }
+        }
+      ],
+      "bRepetitions": [
+        {
+          "elapsedMicros": 12438917,
+          "contract": {
+            "finalHash": "34977be4ee49a99cd4e51ec4eedea77ff48cc8ab67ebe343176b332ecb0b1ff8",
+            "transactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "roundCount": 2,
+            "transactionRounds": [
+              1,
+              1,
+              2,
+              2
+            ],
+            "transactionCount": 4,
+            "waveCount": 2,
+            "waveIds": [
+              "wave-r001",
+              "wave-r002"
+            ],
+            "waveTransactionIds": [
+              [
+                "tx-r001-d658d0dcda49860a",
+                "tx-r001-f005296c3145a378"
+              ],
+              [
+                "tx-r002-3dcde5f611f53f8e",
+                "tx-r002-d460280f9eb71e6e"
+              ]
+            ],
+            "lifecycleState": "completed",
+            "transactionStatuses": [
+              "committed",
+              "committed",
+              "committed",
+              "committed"
+            ],
+            "caseStatuses": [
+              "kept",
+              "kept",
+              "kept",
+              "kept"
+            ],
+            "verifierInvocationCount": 3,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              [
+                "tx-r001-d658d0dcda49860a",
+                "tx-r001-f005296c3145a378"
+              ],
+              [
+                "tx-r002-3dcde5f611f53f8e",
+                "tx-r002-d460280f9eb71e6e"
+              ]
+            ],
+            "verificationWaveIds": [
+              "wave-r001",
+              "wave-r002"
+            ]
+          },
+          "timings": {
+            "runElapsedMicros": 12374641,
+            "verificationElapsedMicros": 7961631,
+            "candidateVerificationElapsedMicros": 5239974,
+            "analysisElapsedMicros": 2647619,
+            "unaccountedElapsedMicros": 1765391,
+            "verificationAttempts": 3,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              [
+                "tx-r001-d658d0dcda49860a",
+                "tx-r001-f005296c3145a378"
+              ],
+              [
+                "tx-r002-3dcde5f611f53f8e",
+                "tx-r002-d460280f9eb71e6e"
+              ]
+            ],
+            "verificationWaveIds": [
+              "wave-r001",
+              "wave-r002"
+            ]
+          }
+        },
+        {
+          "elapsedMicros": 11440772,
+          "contract": {
+            "finalHash": "34977be4ee49a99cd4e51ec4eedea77ff48cc8ab67ebe343176b332ecb0b1ff8",
+            "transactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "roundCount": 2,
+            "transactionRounds": [
+              1,
+              1,
+              2,
+              2
+            ],
+            "transactionCount": 4,
+            "waveCount": 2,
+            "waveIds": [
+              "wave-r001",
+              "wave-r002"
+            ],
+            "waveTransactionIds": [
+              [
+                "tx-r001-d658d0dcda49860a",
+                "tx-r001-f005296c3145a378"
+              ],
+              [
+                "tx-r002-3dcde5f611f53f8e",
+                "tx-r002-d460280f9eb71e6e"
+              ]
+            ],
+            "lifecycleState": "completed",
+            "transactionStatuses": [
+              "committed",
+              "committed",
+              "committed",
+              "committed"
+            ],
+            "caseStatuses": [
+              "kept",
+              "kept",
+              "kept",
+              "kept"
+            ],
+            "verifierInvocationCount": 3,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              [
+                "tx-r001-d658d0dcda49860a",
+                "tx-r001-f005296c3145a378"
+              ],
+              [
+                "tx-r002-3dcde5f611f53f8e",
+                "tx-r002-d460280f9eb71e6e"
+              ]
+            ],
+            "verificationWaveIds": [
+              "wave-r001",
+              "wave-r002"
+            ]
+          },
+          "timings": {
+            "runElapsedMicros": 11393788,
+            "verificationElapsedMicros": 6832442,
+            "candidateVerificationElapsedMicros": 4221463,
+            "analysisElapsedMicros": 2801427,
+            "unaccountedElapsedMicros": 1759919,
+            "verificationAttempts": 3,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              [
+                "tx-r001-d658d0dcda49860a",
+                "tx-r001-f005296c3145a378"
+              ],
+              [
+                "tx-r002-3dcde5f611f53f8e",
+                "tx-r002-d460280f9eb71e6e"
+              ]
+            ],
+            "verificationWaveIds": [
+              "wave-r001",
+              "wave-r002"
+            ]
+          }
+        },
+        {
+          "elapsedMicros": 11548344,
+          "contract": {
+            "finalHash": "34977be4ee49a99cd4e51ec4eedea77ff48cc8ab67ebe343176b332ecb0b1ff8",
+            "transactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "roundCount": 2,
+            "transactionRounds": [
+              1,
+              1,
+              2,
+              2
+            ],
+            "transactionCount": 4,
+            "waveCount": 2,
+            "waveIds": [
+              "wave-r001",
+              "wave-r002"
+            ],
+            "waveTransactionIds": [
+              [
+                "tx-r001-d658d0dcda49860a",
+                "tx-r001-f005296c3145a378"
+              ],
+              [
+                "tx-r002-3dcde5f611f53f8e",
+                "tx-r002-d460280f9eb71e6e"
+              ]
+            ],
+            "lifecycleState": "completed",
+            "transactionStatuses": [
+              "committed",
+              "committed",
+              "committed",
+              "committed"
+            ],
+            "caseStatuses": [
+              "kept",
+              "kept",
+              "kept",
+              "kept"
+            ],
+            "verifierInvocationCount": 3,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              [
+                "tx-r001-d658d0dcda49860a",
+                "tx-r001-f005296c3145a378"
+              ],
+              [
+                "tx-r002-3dcde5f611f53f8e",
+                "tx-r002-d460280f9eb71e6e"
+              ]
+            ],
+            "verificationWaveIds": [
+              "wave-r001",
+              "wave-r002"
+            ]
+          },
+          "timings": {
+            "runElapsedMicros": 11494368,
+            "verificationElapsedMicros": 6989020,
+            "candidateVerificationElapsedMicros": 4191673,
+            "analysisElapsedMicros": 2689578,
+            "unaccountedElapsedMicros": 1815770,
+            "verificationAttempts": 3,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              [
+                "tx-r001-d658d0dcda49860a",
+                "tx-r001-f005296c3145a378"
+              ],
+              [
+                "tx-r002-3dcde5f611f53f8e",
+                "tx-r002-d460280f9eb71e6e"
+              ]
+            ],
+            "verificationWaveIds": [
+              "wave-r001",
+              "wave-r002"
+            ]
+          }
+        }
+      ],
+      "aBlockElapsedMicros": 46954854,
+      "bBlockElapsedMicros": 35428033,
+      "pairedRelativeDelta": 0.2454873142614819
+    },
+    {
+      "order": "BA",
+      "aRepetitions": [
+        {
+          "elapsedMicros": 15531091,
+          "contract": {
+            "finalHash": "34977be4ee49a99cd4e51ec4eedea77ff48cc8ab67ebe343176b332ecb0b1ff8",
+            "transactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "roundCount": 2,
+            "transactionRounds": [
+              1,
+              1,
+              2,
+              2
+            ],
+            "transactionCount": 4,
+            "waveCount": 0,
+            "waveIds": [],
+            "waveTransactionIds": [],
+            "lifecycleState": "completed",
+            "transactionStatuses": [
+              "committed",
+              "committed",
+              "committed",
+              "committed"
+            ],
+            "caseStatuses": [
+              "kept",
+              "kept",
+              "kept",
+              "kept"
+            ],
+            "verifierInvocationCount": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          },
+          "timings": {
+            "runElapsedMicros": 15470931,
+            "verificationElapsedMicros": 10596387,
+            "candidateVerificationElapsedMicros": 7974931,
+            "analysisElapsedMicros": 2636712,
+            "unaccountedElapsedMicros": 2237832,
+            "verificationAttempts": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          }
+        },
+        {
+          "elapsedMicros": 15940368,
+          "contract": {
+            "finalHash": "34977be4ee49a99cd4e51ec4eedea77ff48cc8ab67ebe343176b332ecb0b1ff8",
+            "transactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "roundCount": 2,
+            "transactionRounds": [
+              1,
+              1,
+              2,
+              2
+            ],
+            "transactionCount": 4,
+            "waveCount": 0,
+            "waveIds": [],
+            "waveTransactionIds": [],
+            "lifecycleState": "completed",
+            "transactionStatuses": [
+              "committed",
+              "committed",
+              "committed",
+              "committed"
+            ],
+            "caseStatuses": [
+              "kept",
+              "kept",
+              "kept",
+              "kept"
+            ],
+            "verifierInvocationCount": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          },
+          "timings": {
+            "runElapsedMicros": 15889166,
+            "verificationElapsedMicros": 10985460,
+            "candidateVerificationElapsedMicros": 8241850,
+            "analysisElapsedMicros": 2638959,
+            "unaccountedElapsedMicros": 2264747,
+            "verificationAttempts": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          }
+        },
+        {
+          "elapsedMicros": 15896708,
+          "contract": {
+            "finalHash": "34977be4ee49a99cd4e51ec4eedea77ff48cc8ab67ebe343176b332ecb0b1ff8",
+            "transactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "roundCount": 2,
+            "transactionRounds": [
+              1,
+              1,
+              2,
+              2
+            ],
+            "transactionCount": 4,
+            "waveCount": 0,
+            "waveIds": [],
+            "waveTransactionIds": [],
+            "lifecycleState": "completed",
+            "transactionStatuses": [
+              "committed",
+              "committed",
+              "committed",
+              "committed"
+            ],
+            "caseStatuses": [
+              "kept",
+              "kept",
+              "kept",
+              "kept"
+            ],
+            "verifierInvocationCount": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          },
+          "timings": {
+            "runElapsedMicros": 15841984,
+            "verificationElapsedMicros": 10944589,
+            "candidateVerificationElapsedMicros": 8207950,
+            "analysisElapsedMicros": 2639408,
+            "unaccountedElapsedMicros": 2257987,
+            "verificationAttempts": 5,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "verificationWaveIds": []
+          }
+        }
+      ],
+      "bRepetitions": [
+        {
+          "elapsedMicros": 11426994,
+          "contract": {
+            "finalHash": "34977be4ee49a99cd4e51ec4eedea77ff48cc8ab67ebe343176b332ecb0b1ff8",
+            "transactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "roundCount": 2,
+            "transactionRounds": [
+              1,
+              1,
+              2,
+              2
+            ],
+            "transactionCount": 4,
+            "waveCount": 2,
+            "waveIds": [
+              "wave-r001",
+              "wave-r002"
+            ],
+            "waveTransactionIds": [
+              [
+                "tx-r001-d658d0dcda49860a",
+                "tx-r001-f005296c3145a378"
+              ],
+              [
+                "tx-r002-3dcde5f611f53f8e",
+                "tx-r002-d460280f9eb71e6e"
+              ]
+            ],
+            "lifecycleState": "completed",
+            "transactionStatuses": [
+              "committed",
+              "committed",
+              "committed",
+              "committed"
+            ],
+            "caseStatuses": [
+              "kept",
+              "kept",
+              "kept",
+              "kept"
+            ],
+            "verifierInvocationCount": 3,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              [
+                "tx-r001-d658d0dcda49860a",
+                "tx-r001-f005296c3145a378"
+              ],
+              [
+                "tx-r002-3dcde5f611f53f8e",
+                "tx-r002-d460280f9eb71e6e"
+              ]
+            ],
+            "verificationWaveIds": [
+              "wave-r001",
+              "wave-r002"
+            ]
+          },
+          "timings": {
+            "runElapsedMicros": 11363983,
+            "verificationElapsedMicros": 6923082,
+            "candidateVerificationElapsedMicros": 4129513,
+            "analysisElapsedMicros": 2688177,
+            "unaccountedElapsedMicros": 1752724,
+            "verificationAttempts": 3,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              [
+                "tx-r001-d658d0dcda49860a",
+                "tx-r001-f005296c3145a378"
+              ],
+              [
+                "tx-r002-3dcde5f611f53f8e",
+                "tx-r002-d460280f9eb71e6e"
+              ]
+            ],
+            "verificationWaveIds": [
+              "wave-r001",
+              "wave-r002"
+            ]
+          }
+        },
+        {
+          "elapsedMicros": 11142462,
+          "contract": {
+            "finalHash": "34977be4ee49a99cd4e51ec4eedea77ff48cc8ab67ebe343176b332ecb0b1ff8",
+            "transactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "roundCount": 2,
+            "transactionRounds": [
+              1,
+              1,
+              2,
+              2
+            ],
+            "transactionCount": 4,
+            "waveCount": 2,
+            "waveIds": [
+              "wave-r001",
+              "wave-r002"
+            ],
+            "waveTransactionIds": [
+              [
+                "tx-r001-d658d0dcda49860a",
+                "tx-r001-f005296c3145a378"
+              ],
+              [
+                "tx-r002-3dcde5f611f53f8e",
+                "tx-r002-d460280f9eb71e6e"
+              ]
+            ],
+            "lifecycleState": "completed",
+            "transactionStatuses": [
+              "committed",
+              "committed",
+              "committed",
+              "committed"
+            ],
+            "caseStatuses": [
+              "kept",
+              "kept",
+              "kept",
+              "kept"
+            ],
+            "verifierInvocationCount": 3,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              [
+                "tx-r001-d658d0dcda49860a",
+                "tx-r001-f005296c3145a378"
+              ],
+              [
+                "tx-r002-3dcde5f611f53f8e",
+                "tx-r002-d460280f9eb71e6e"
+              ]
+            ],
+            "verificationWaveIds": [
+              "wave-r001",
+              "wave-r002"
+            ]
+          },
+          "timings": {
+            "runElapsedMicros": 11091796,
+            "verificationElapsedMicros": 6741216,
+            "candidateVerificationElapsedMicros": 4083342,
+            "analysisElapsedMicros": 2649350,
+            "unaccountedElapsedMicros": 1701230,
+            "verificationAttempts": 3,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              [
+                "tx-r001-d658d0dcda49860a",
+                "tx-r001-f005296c3145a378"
+              ],
+              [
+                "tx-r002-3dcde5f611f53f8e",
+                "tx-r002-d460280f9eb71e6e"
+              ]
+            ],
+            "verificationWaveIds": [
+              "wave-r001",
+              "wave-r002"
+            ]
+          }
+        },
+        {
+          "elapsedMicros": 11121704,
+          "contract": {
+            "finalHash": "34977be4ee49a99cd4e51ec4eedea77ff48cc8ab67ebe343176b332ecb0b1ff8",
+            "transactionIds": [
+              "tx-r001-d658d0dcda49860a",
+              "tx-r001-f005296c3145a378",
+              "tx-r002-3dcde5f611f53f8e",
+              "tx-r002-d460280f9eb71e6e"
+            ],
+            "roundCount": 2,
+            "transactionRounds": [
+              1,
+              1,
+              2,
+              2
+            ],
+            "transactionCount": 4,
+            "waveCount": 2,
+            "waveIds": [
+              "wave-r001",
+              "wave-r002"
+            ],
+            "waveTransactionIds": [
+              [
+                "tx-r001-d658d0dcda49860a",
+                "tx-r001-f005296c3145a378"
+              ],
+              [
+                "tx-r002-3dcde5f611f53f8e",
+                "tx-r002-d460280f9eb71e6e"
+              ]
+            ],
+            "lifecycleState": "completed",
+            "transactionStatuses": [
+              "committed",
+              "committed",
+              "committed",
+              "committed"
+            ],
+            "caseStatuses": [
+              "kept",
+              "kept",
+              "kept",
+              "kept"
+            ],
+            "verifierInvocationCount": 3,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              [
+                "tx-r001-d658d0dcda49860a",
+                "tx-r001-f005296c3145a378"
+              ],
+              [
+                "tx-r002-3dcde5f611f53f8e",
+                "tx-r002-d460280f9eb71e6e"
+              ]
+            ],
+            "verificationWaveIds": [
+              "wave-r001",
+              "wave-r002"
+            ]
+          },
+          "timings": {
+            "runElapsedMicros": 11072143,
+            "verificationElapsedMicros": 6757583,
+            "candidateVerificationElapsedMicros": 4017498,
+            "analysisElapsedMicros": 2598386,
+            "unaccountedElapsedMicros": 1716174,
+            "verificationAttempts": 3,
+            "verificationPolicyHash": "c379ae1e906ffdd2dd72b84eaf50454fc4d8cc382c3041a426e7cc31abf5e861",
+            "verificationAttemptTransactionIds": [
+              [
+                "tx-r001-d658d0dcda49860a",
+                "tx-r001-f005296c3145a378"
+              ],
+              [
+                "tx-r002-3dcde5f611f53f8e",
+                "tx-r002-d460280f9eb71e6e"
+              ]
+            ],
+            "verificationWaveIds": [
+              "wave-r001",
+              "wave-r002"
+            ]
+          }
+        }
+      ],
+      "aBlockElapsedMicros": 47368167,
+      "bBlockElapsedMicros": 33691160,
+      "pairedRelativeDelta": 0.2887383630445316
+    }
+  ],
+  "abPairedRelativeDeltas": [
+    0.29068354680465697,
+    0.25060328876025256,
+    0.3317473642191279,
+    0.3059783111942946,
+    0.2454873142614819,
+    0.2887383630445316
+  ],
+  "medianImprovement": 0.2897109549245943,
+  "fasterPairs": 6,
+  "admitted": true
+}
