@@ -1008,7 +1008,7 @@ class ApplyCommand extends Command<int> {
       return 1;
     }
     final originalBaseline = baseline;
-    var rollingBaseline = originalBaseline;
+    var rollingBaselineEvidence = baselineEvidence;
 
     final runId = recorder.runId;
     workflow.section(
@@ -1053,7 +1053,6 @@ class ApplyCommand extends Command<int> {
     final committedTransactionIds = <String>{};
     final rolledBackVerifiedTransactionIds = <String>{};
     final recoveryRequiredTransactionIds = <String>{};
-    var verificationUnavailable = false;
     var roundCount = 0;
     var nextCaseIndex = 0;
     final excludedFindingIds = <String>{};
@@ -1145,6 +1144,8 @@ class ApplyCommand extends Command<int> {
       );
     }
 
+    var activeWavePathStateByPath = <String, _WavePathState>{};
+
     Future<_AppliedFinding?> applyOne(_FindingCase item) async {
       final finding = item.finding;
       workflow.info(
@@ -1154,6 +1155,13 @@ class ApplyCommand extends Command<int> {
       );
 
       final file = item.file;
+      final pathState = activeWavePathStateByPath[file.path];
+      if (pathState == null || !pathState.exists || pathState.sha256 == null) {
+        throw _StaleAnalysisSnapshotException(
+          'Wave expected an absent or unknown source before ${item.caseId}: '
+          '${file.path}',
+        );
+      }
       var caseStarted = false;
       try {
         final prepared = await quarantineManager.beginDisplacedCase(
@@ -1171,8 +1179,8 @@ class ApplyCommand extends Command<int> {
                   finding.node.kind == NodeKind.declaration
               ? [finding.node.id]
               : null,
-          expectedSha256: expectedSha256ByPath[file.path]!,
-          expectedPosixMode: planFileSnapshots[file.path]!.posixMode,
+          expectedSha256: pathState.sha256!,
+          expectedPosixMode: pathState.posixMode,
           transactionId: item.transactionId,
         );
         caseStarted = true;
@@ -1233,6 +1241,10 @@ class ApplyCommand extends Command<int> {
           caseId: item.caseId,
         );
         expectedSha256ByPath[file.path] = appliedCase.entry.modifiedSha256;
+        activeWavePathStateByPath[file.path] = pathState.afterCase(
+          caseId: item.caseId,
+          sha256: appliedCase.entry.modifiedSha256,
+        );
         return _AppliedFinding(
           item: item,
           file: file,
@@ -1286,16 +1298,22 @@ class ApplyCommand extends Command<int> {
 
     Future<void> keepApplied(
       List<_AppliedFinding> applied,
-      VerificationResult? candidate,
-      String transactionId,
+      VerificationResult candidate,
+      AcceptedVerificationEvidence acceptedVerification,
+      String waveId,
+      List<String> transactionIds,
     ) async {
-      await quarantineManager.commitTransaction(
+      await quarantineManager.commitVerifiedTransactionWave(
         quarantineDir: quarantineDir,
-        transactionId: transactionId,
+        verificationWaveId: waveId,
+        round: roundCount,
+        transactionIds: transactionIds,
+        acceptedVerification: acceptedVerification,
       );
-      committedTransactionIds.add(transactionId);
+      committedTransactionIds.addAll(transactionIds);
       actionsCommittedCount += applied.length;
       for (final item in applied) {
+        final transactionId = item.item.transactionId!;
         expectedSha256ByPath[item.file.path] = item.appliedSha256;
         workflow.success(
           'COMMITTED',
@@ -1310,22 +1328,26 @@ class ApplyCommand extends Command<int> {
               finding: item.item.finding,
               status: ApplyFindingOutcomeStatus.committed,
               reasonCode: 'verification_accepted',
-              reason: 'The transaction passed verification and was committed.',
+              reason:
+                  'The verification wave was accepted and the transaction '
+                  'was committed as a member.',
               round: roundCount,
               transactionId: transactionId,
             ),
           );
         }
       }
-      if (candidate != null) rollingBaseline = candidate;
+      rollingBaselineEvidence = candidate.toBaselineEvidence();
     }
 
     Future<_VerificationAttempt> verifyApplied(
       List<_AppliedFinding> applied,
       String scope,
+      String waveId,
+      List<String> transactionIds,
     ) async {
-      if (applied.isEmpty) {
-        throw StateError('Cannot verify an empty mutation transaction.');
+      if (applied.isEmpty || transactionIds.isEmpty) {
+        throw StateError('Cannot verify an empty mutation wave.');
       }
       progress.start(scope, activity: 'Verifying');
       verificationAttemptCount++;
@@ -1336,7 +1358,9 @@ class ApplyCommand extends Command<int> {
         progress.finish(succeeded: false);
         rethrow;
       }
-      final comparison = candidate.compareTo(rollingBaseline);
+      final comparison = candidate.compareToBaselineEvidence(
+        rollingBaselineEvidence,
+      );
       progress.finish(succeeded: comparison.accepted);
       recorder.addVerificationAttempt(
         _verificationAttemptReport(
@@ -1344,7 +1368,8 @@ class ApplyCommand extends Command<int> {
           result: candidate,
           accepted: comparison.accepted,
           round: roundCount,
-          transactionId: applied.first.item.transactionId,
+          waveId: waveId,
+          transactionIds: transactionIds,
           comparison: comparison,
         ),
       );
@@ -1356,7 +1381,10 @@ class ApplyCommand extends Command<int> {
               '${applied.length} '
               '${applied.length == 1 ? 'finding' : 'findings'} checked.',
         );
-        return _VerificationAttempt.accepted(candidate);
+        return _VerificationAttempt.accepted(
+          candidate,
+          comparison.acceptedEvidence!,
+        );
       }
       final reasons = comparison.unavailable
           ? comparison.infrastructureFailures
@@ -1542,16 +1570,28 @@ class ApplyCommand extends Command<int> {
       return _RunRecoveryResult.required(recoveryReason);
     }
 
-    Future<_UnitOutcome> processAtomicUnit(
-      AtomicUnit unit,
+    void validateTouchedWavePaths() {
+      for (final entry in activeWavePathStateByPath.entries) {
+        final expected = entry.value;
+        if (expected.lastWriterCaseId == null) continue;
+        _validateWavePathState(
+          File(entry.key),
+          expected: expected,
+          project: project,
+        );
+      }
+    }
+
+    Future<List<_AppliedFinding>?> stageAtomicUnit(
       List<_FindingCase> group,
       String transactionId,
     ) async {
       final applied = <_AppliedFinding>[];
       for (final item in group) {
+        validateTouchedWavePaths();
         final result = await applyOne(item);
         if (result == null) {
-          return _UnitOutcome.rejected;
+          return null;
         }
         applied.add(result);
       }
@@ -1561,25 +1601,7 @@ class ApplyCommand extends Command<int> {
         transactionId: transactionId,
         caseIds: group.map((item) => item.caseId).toList(),
       );
-
-      final attempt = await verifyApplied(applied, 'atomic unit ${unit.id}');
-      if (attempt.accepted) {
-        final candidate = attempt.candidate!;
-        await quarantineManager.verifyTransaction(
-          quarantineDir: quarantineDir,
-          transactionId: transactionId,
-          policyHash: candidate.policyHash,
-          requiredStepIds: candidate.requiredStepIds,
-          observedStepIds: candidate.steps.map((step) => step.name).toList(),
-        );
-        await keepApplied(applied, attempt.candidate, transactionId);
-        return _UnitOutcome.kept;
-      }
-      if (attempt.unavailable) {
-        verificationUnavailable = true;
-        return _UnitOutcome.unavailable;
-      }
-      return _UnitOutcome.rejected;
+      return applied;
     }
 
     try {
@@ -1598,11 +1620,15 @@ class ApplyCommand extends Command<int> {
             _printBlocked([blocked], project, workflow);
           }
         }
-        var roundProgress = false;
-        final unitsById = {for (final unit in plan.units) unit.id: unit};
-        final skippedUnitIds = <String>{};
+        final verificationWaveId =
+            'wave-r${roundCount.toString().padLeft(3, '0')}';
+        activeWavePathStateByPath = {
+          for (final entry in planFileSnapshots.entries)
+            entry.key: _WavePathState.fromSnapshot(entry.value),
+        };
+        final stagedTransactions = <_StagedTransaction>[];
         for (final unit in plan.units) {
-          if (skippedUnitIds.contains(unit.id)) continue;
+          validateTouchedWavePaths();
           final transactionId =
               'tx-r${roundCount.toString().padLeft(3, '0')}-'
               '${unit.id.substring('unit:'.length)}';
@@ -1613,26 +1639,21 @@ class ApplyCommand extends Command<int> {
           );
           nextCaseIndex += cases.length;
           for (final item in cases) {
-            final expectedSha256 = expectedSha256ByPath[item.file.path];
-            final analysisFile = planFileSnapshots[item.file.path];
-            if (!expectedSha256ByPath.containsKey(item.file.path) ||
-                expectedSha256 == null ||
-                analysisFile == null) {
+            final pathState = activeWavePathStateByPath[item.file.path];
+            if (pathState == null) {
               throw _StaleAnalysisSnapshotException(
                 'Action ${item.effectiveLabel} was not bound to the current '
                 'analysis snapshot: ${item.file.path}',
               );
             }
-            _validateExpectedFileState(
+            _validateWavePathState(
               item.file,
-              expectedSha256: expectedSha256,
-              expectedCanonicalPath: analysisFile.canonicalPath,
-              expectedPosixMode: analysisFile.posixMode,
+              expected: pathState,
               project: project,
             );
             initialSizeByPath.putIfAbsent(
               item.file.path,
-              () => analysisFile.sizeBytes,
+              () => planFileSnapshots[item.file.path]!.sizeBytes,
             );
           }
           activeUnit = unit;
@@ -1649,68 +1670,59 @@ class ApplyCommand extends Command<int> {
                 .map((finding) => finding.node.id)
                 .toList(),
             caseIds: cases.map((item) => item.caseId).toList(),
+            verificationWaveId: verificationWaveId,
           );
           begunTransactionIds.add(transactionId);
           actionsDeclaredCount += cases.length;
 
-          final outcome = await processAtomicUnit(unit, cases, transactionId);
+          final staged = await stageAtomicUnit(cases, transactionId);
           activeUnit = null;
           activeTransactionId = null;
-          if (outcome == _UnitOutcome.kept) {
-            roundProgress = true;
-            continue;
-          }
-          excludedFindingIds.addAll(
-            unit.findings.map((finding) => finding.node.id),
-          );
-          rejectedFindingIds.addAll(
-            unit.findings.map((finding) => finding.node.id),
-          );
-          final descendants = _dependencyClosure(unit, unitsById);
-          skippedUnitIds.addAll(descendants);
-          for (final descendantId in descendants) {
-            final descendant = unitsById[descendantId]!;
-            excludedFindingIds.addAll(
-              descendant.findings.map((finding) => finding.node.id),
-            );
-            skippedDependencyFindingIds.addAll(
-              descendant.findings.map((finding) => finding.node.id),
-            );
-            recorder.recordApplyFindingOutcomes(
-              descendant.findings.map(
-                (finding) => ApplyFindingOutcome(
-                  finding: finding,
-                  status: ApplyFindingOutcomeStatus.skippedDependency,
-                  reasonCode: 'dependency_transaction_rejected',
-                  reason:
-                      'A dependency transaction was not attempted because '
-                      '$transactionId was rejected.',
-                  round: roundCount,
-                  relatedNodeIds: unit.findings
-                      .map((finding) => finding.node.id)
-                      .toList(),
-                ),
-              ),
+          if (staged == null) {
+            throw _ApplyRunAbort(
+              reason: 'Atomic transaction $transactionId failed while staging.',
+              reasonCode: 'apply_failed',
+              status: RunStatus.safeStopped,
+              exitCode: 2,
             );
           }
-          throw _ApplyRunAbort(
-            reason: outcome == _UnitOutcome.unavailable
-                ? 'Verification became unavailable for $transactionId.'
-                : 'Atomic transaction $transactionId was rejected.',
-            reasonCode: outcome == _UnitOutcome.unavailable
-                ? 'verification_unavailable'
-                : applyFailureReasonByTransactionId.containsKey(transactionId)
-                ? 'apply_failed'
-                : 'verification_regression',
-            status: outcome == _UnitOutcome.unavailable
-                ? RunStatus.infrastructureFailure
-                : RunStatus.safeStopped,
-            exitCode: outcome == _UnitOutcome.unavailable ? 1 : 2,
+          stagedTransactions.add(
+            _StagedTransaction(transactionId: transactionId, applied: staged),
           );
         }
-        if (verificationUnavailable) break;
-
-        if (!roundProgress) break;
+        final wave = _VerificationWave(
+          verificationWaveId: verificationWaveId,
+          round: roundCount,
+          transactions: stagedTransactions,
+        );
+        if (wave.applied.isEmpty) break;
+        final attempt = await verifyApplied(
+          wave.applied,
+          'verification wave $verificationWaveId (round ${wave.round})',
+          wave.verificationWaveId,
+          wave.transactionIds,
+        );
+        if (!attempt.accepted) {
+          throw _ApplyRunAbort(
+            reason: attempt.unavailable
+                ? 'Verification became unavailable for $verificationWaveId.'
+                : 'Verification wave $verificationWaveId was rejected.',
+            reasonCode: attempt.unavailable
+                ? 'verification_unavailable'
+                : 'verification_regression',
+            status: attempt.unavailable
+                ? RunStatus.infrastructureFailure
+                : RunStatus.safeStopped,
+            exitCode: attempt.unavailable ? 1 : 2,
+          );
+        }
+        await keepApplied(
+          wave.applied,
+          attempt.candidate!,
+          attempt.acceptedVerification!,
+          wave.verificationWaveId,
+          wave.transactionIds,
+        );
         progress.start(
           'project after round $roundCount',
           activity: 'Rescanning',
@@ -1764,7 +1776,7 @@ class ApplyCommand extends Command<int> {
         }
       }
 
-      if (!verificationUnavailable && appliedCount > 0) {
+      if (appliedCount > 0) {
         progress.start('project convergence', activity: 'Scanning final');
         try {
           snapshot = await analyzer.analyze();
@@ -1989,37 +2001,6 @@ class ApplyCommand extends Command<int> {
       return exitCode;
     }
 
-    if (verificationUnavailable) {
-      final reportRemaining = selectionBoundFindingsForError(snapshot.findings);
-      recordRemainingOutcomes(
-        undispositioned(reportRemaining),
-        reasonCode: 'apply_stopped_verification_unavailable',
-        reason:
-            'Apply stopped before this finding could be attempted because '
-            'verification became unavailable.',
-      );
-      await _writeRunReport(
-        recorder.finish(
-          project: project,
-          status: RunStatus.infrastructureFailure,
-          exitCode: 1,
-          findings: snapshot.findings,
-          partialApplied: committedFindingIds.isNotEmpty,
-          applyStatistics: buildApplyStatistics(
-            remaining: reportRemaining
-                .map((item) => item.node.id)
-                .toSet()
-                .length,
-          ),
-          quarantinePath: quarantineDir.path,
-        ),
-        outputIdentity: reportOutput,
-        outputFormat: reportFormat,
-        quarantineDir: quarantineDir,
-      );
-      return 1;
-    }
-
     final remaining = selectedRemainingFindings(snapshot.findings);
     final missingCommitted = findingSelection.isExact
         ? findingSelection.requestedFindingIds.toSet().difference(
@@ -2233,11 +2214,17 @@ class ApplyCommand extends Command<int> {
     required bool accepted,
     int? round,
     String? transactionId,
+    String? waveId,
+    List<String> transactionIds = const [],
     VerificationComparison? comparison,
   }) => VerificationAttemptReport(
     purpose: purpose,
     round: round,
-    transactionId: transactionId,
+    transactionId: transactionIds.length == 1
+        ? transactionIds.single
+        : transactionId,
+    waveId: waveId,
+    transactionIds: transactionIds,
     complete: result.isComplete,
     available: result.isAvailable,
     accepted: accepted,
@@ -2408,6 +2395,30 @@ class ApplyCommand extends Command<int> {
     }
   }
 
+  void _validateWavePathState(
+    File file, {
+    required _WavePathState expected,
+    required ProjectContext project,
+  }) {
+    final type = FileSystemEntity.typeSync(file.path, followLinks: false);
+    if (!expected.exists) {
+      if (type != FileSystemEntityType.notFound) {
+        throw _StaleAnalysisSnapshotException(
+          'Wave path was recreated after deletion: ${file.path}\n'
+          'Last writer: ${expected.lastWriterCaseId}',
+        );
+      }
+      return;
+    }
+    _validateExpectedFileState(
+      file,
+      expectedSha256: expected.sha256!,
+      expectedCanonicalPath: expected.canonicalPath,
+      expectedPosixMode: expected.posixMode,
+      project: project,
+    );
+  }
+
   int? _readPosixMode(File file) => Platform.isLinux || Platform.isMacOS
       ? file.statSync().mode & 0xfff
       : null;
@@ -2558,20 +2569,6 @@ class ApplyCommand extends Command<int> {
     verificationAttempts: 0,
     sourceBytesRemoved: 0,
   );
-
-  Set<String> _dependencyClosure(
-    AtomicUnit unit,
-    Map<String, AtomicUnit> unitsById,
-  ) {
-    final result = <String>{};
-    final pending = [...unit.dependencyUnitIds];
-    while (pending.isNotEmpty) {
-      final current = pending.removeLast();
-      if (!result.add(current)) continue;
-      pending.addAll(unitsById[current]?.dependencyUnitIds ?? const []);
-    }
-    return result;
-  }
 
   void _printPlannedFindings(
     Iterable<Finding> findings,
@@ -3071,8 +3068,6 @@ enum _ApplyOperation { removeFinding, cleanupImports, deleteFile }
 
 enum _ReportOutputFormat { json, html }
 
-enum _UnitOutcome { kept, rejected, unavailable }
-
 class _ApplyRunAbort implements Exception {
   const _ApplyRunAbort({
     required this.reason,
@@ -3097,6 +3092,70 @@ class _RunRecoveryResult {
 
   final bool verified;
   final String? reason;
+}
+
+class _VerificationWave {
+  _VerificationWave({
+    required this.verificationWaveId,
+    required this.round,
+    required List<_StagedTransaction> transactions,
+  }) : transactions = List.unmodifiable(transactions);
+
+  final String verificationWaveId;
+  final int round;
+  final List<_StagedTransaction> transactions;
+
+  List<String> get transactionIds => List.unmodifiable(
+    transactions.map((transaction) => transaction.transactionId),
+  );
+
+  List<_AppliedFinding> get applied => List.unmodifiable(
+    transactions.expand((transaction) => transaction.applied),
+  );
+}
+
+class _StagedTransaction {
+  _StagedTransaction({
+    required this.transactionId,
+    required List<_AppliedFinding> applied,
+  }) : applied = List.unmodifiable(applied);
+
+  final String transactionId;
+  final List<_AppliedFinding> applied;
+}
+
+class _WavePathState {
+  const _WavePathState({
+    required this.exists,
+    required this.sha256,
+    required this.posixMode,
+    required this.canonicalPath,
+    required this.lastWriterCaseId,
+  });
+
+  factory _WavePathState.fromSnapshot(_AnalysisFileSnapshot snapshot) =>
+      _WavePathState(
+        exists: true,
+        sha256: snapshot.sha256,
+        posixMode: snapshot.posixMode,
+        canonicalPath: snapshot.canonicalPath,
+        lastWriterCaseId: null,
+      );
+
+  final bool exists;
+  final String? sha256;
+  final int? posixMode;
+  final String canonicalPath;
+  final String? lastWriterCaseId;
+
+  _WavePathState afterCase({required String caseId, required String? sha256}) =>
+      _WavePathState(
+        exists: sha256 != null,
+        sha256: sha256,
+        posixMode: posixMode,
+        canonicalPath: canonicalPath,
+        lastWriterCaseId: caseId,
+      );
 }
 
 class _AnalysisFileSnapshot {
@@ -3155,15 +3214,19 @@ class _VerificationAttempt {
     required this.unavailable,
     required this.reason,
     this.candidate,
+    this.acceptedVerification,
   });
 
-  factory _VerificationAttempt.accepted(VerificationResult candidate) =>
-      _VerificationAttempt._(
-        accepted: true,
-        unavailable: false,
-        reason: '',
-        candidate: candidate,
-      );
+  factory _VerificationAttempt.accepted(
+    VerificationResult candidate,
+    AcceptedVerificationEvidence acceptedVerification,
+  ) => _VerificationAttempt._(
+    accepted: true,
+    unavailable: false,
+    reason: '',
+    candidate: candidate,
+    acceptedVerification: acceptedVerification,
+  );
 
   factory _VerificationAttempt.rejected({
     required String reason,
@@ -3178,4 +3241,5 @@ class _VerificationAttempt {
   final bool unavailable;
   final String reason;
   final VerificationResult? candidate;
+  final AcceptedVerificationEvidence? acceptedVerification;
 }

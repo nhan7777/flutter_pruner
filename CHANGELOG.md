@@ -7,6 +7,37 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-08-24
+
+### Changed
+
+- Batch each non-empty fixed-point apply round into one verification wave and
+  atomically commit its ordered transactions after a single accepted candidate
+  verification. The baseline, verification policy and command order, apply
+  eligibility, rollback boundary, exit codes, and package-mode safety remain
+  unchanged.
+- Extend manifest V3 and JSON report v3 additively with immutable accepted-wave
+  evidence and ordered transaction membership. Legacy manifests remain
+  readable, accepted wave audit records survive rollback, and JSON v2 output
+  remains byte-for-byte frozen.
+
+### Added
+
+- Add isolated `control-1x1`, `fanout-12x1`, and `chain-2plus-rounds` apply
+  fixture generation plus an opt-in A/A and counterbalanced A/B admission
+  harness. In the admitted macOS arm64 synthetic study, the 1x1 control was
+  0.43% slower within its 4.91% noise threshold, while 12 units in one round
+  improved by 67.52% and four units across two rounds improved by 28.97%.
+  These results are a fixture-scoped admission claim, not a real-project or
+  combined-optimization claim.
+
+### Fixed
+
+- Scope external-package closure blockers to the selected library closure, so
+  auxiliary and test-only dependencies no longer downgrade unrelated
+  application libraries while affected application and conditional callers
+  continue to fail closed.
+
 ## [1.5.0] - 2026-08-22
 
 ### Added
@@ -18,6 +49,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- Recognized exact localization-member uses in execution-selected path
+  dependencies without admitting dependency sources as removal candidates;
+  imports reachable only from dead selected source remain non-live.
 - Parsed project-owned Dart sources at the language version declared by the
   project's SDK lower bound, preventing newer analyzer releases from rejecting
   valid `final` formal parameters during `init` and `scan`; unparseable sources
@@ -251,7 +285,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Custom runtime callback and asset registries require explicit modeling or
   project policy.
 
-[Unreleased]: https://github.com/nhan7777/flutter_pruner/compare/v1.5.0...main
+[Unreleased]: https://github.com/nhan7777/flutter_pruner/compare/v1.6.0...main
+[1.6.0]: https://github.com/nhan7777/flutter_pruner/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/nhan7777/flutter_pruner/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/nhan7777/flutter_pruner/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/nhan7777/flutter_pruner/compare/v1.2.0...v1.3.0

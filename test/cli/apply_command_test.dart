@@ -317,6 +317,16 @@ void unselectedFunction() {}
 
       final report =
           jsonDecode(reportFile.readAsStringSync()) as Map<String, dynamic>;
+      final candidateAttempt = (report['verificationAttempts'] as List)
+          .cast<Map<String, dynamic>>()
+          .singleWhere((attempt) => attempt['purpose'] == 'candidate');
+      expect(candidateAttempt['waveId'], 'wave-r001');
+      final transactionId =
+          ((manifestJson['transactions'] as List).single
+                  as Map)['transactionId']
+              as String;
+      expect(candidateAttempt['transactionIds'], [transactionId]);
+      expect(candidateAttempt['transactionId'], transactionId);
       final apply = report['apply'] as Map<String, dynamic>;
       final reportSelection = apply['selection'] as Map<String, dynamic>;
       expect(reportSelection['mode'], 'exact');
@@ -348,24 +358,22 @@ void unselectedFunction() {}
     timeout: const Timeout(Duration(minutes: 1)),
   );
 
-  test(
-    'later exact transaction failure restores every earlier committed unit',
-    () async {
-      final first = File(p.join(tempDir.path, 'lib', 'src', 'first.dart'));
-      const firstOriginal = '''
+  test('two exact transactions commit through one verification wave', () async {
+    final first = File(p.join(tempDir.path, 'lib', 'src', 'first.dart'));
+    const firstOriginal = '''
 void keepFirst() {}
 
 void selectedFirst() {}
 ''';
-      first.writeAsStringSync(firstOriginal);
-      final second = File(p.join(tempDir.path, 'lib', 'src', 'second.dart'));
-      const secondOriginal = '''
+    first.writeAsStringSync(firstOriginal);
+    final second = File(p.join(tempDir.path, 'lib', 'src', 'second.dart'));
+    const secondOriginal = '''
 void keepSecond() {}
 
 void selectedSecond() {}
 ''';
-      second.writeAsStringSync(secondOriginal);
-      File(p.join(tempDir.path, 'lib', 'main.dart')).writeAsStringSync('''
+    second.writeAsStringSync(secondOriginal);
+    File(p.join(tempDir.path, 'lib', 'main.dart')).writeAsStringSync('''
 import 'src/first.dart';
 import 'src/second.dart';
 
@@ -374,83 +382,200 @@ void main() {
   keepSecond();
 }
 ''');
+    const firstId = 'dart:apply_test/lib/src/first.dart#selectedFirst';
+    const secondId = 'dart:apply_test/lib/src/second.dart#selectedSecond';
+    final reportFile = File(
+      p.join(tempDir.path, 'selector-later-unit-failure.json'),
+    );
+    final verifier = _CombinedStateVerificationRunner(
+      tempDir,
+      first: first,
+      second: second,
+    );
+
+    final exitCode =
+        await FlutterPrunerCommandRunner(verifierFactory: (_) => verifier).run([
+          'apply',
+          '--finding-id',
+          firstId,
+          '--finding-id',
+          secondId,
+          '--report-format',
+          'json',
+          '--report-output',
+          reportFile.path,
+          tempDir.path,
+        ]);
+
+    expect(exitCode, 0);
+    expect(verifier.invocationCount, 2);
+    expect(first.readAsStringSync(), isNot(contains('selectedFirst')));
+    expect(second.readAsStringSync(), isNot(contains('selectedSecond')));
+    final manager = QuarantineManager(tempDir);
+    final quarantine = Directory((await manager.listQuarantines()).single.path);
+    final manifest = await manager.readManifest(quarantine);
+    expect(manifest.selection?.requestedFindingIds, [firstId, secondId]);
+    expect(manifest.transactions, hasLength(2));
+    expect(manifest.transactions.expand((item) => item.findingIds).toSet(), {
+      firstId,
+      secondId,
+    });
+    expect(
+      manifest.transactions,
+      everyElement(
+        isA<QuarantineTransaction>().having(
+          (item) => item.status,
+          'status',
+          QuarantineTransactionStatus.committed,
+        ),
+      ),
+    );
+    expect(manifest.verificationWaves, hasLength(1));
+    expect(manifest.verificationWaves.single.verificationWaveId, 'wave-r001');
+    expect(manifest.verificationWaves.single.transactionIds, [
+      ...manifest.transactions.map((item) => item.transactionId),
+    ]);
+    final report =
+        jsonDecode(reportFile.readAsStringSync()) as Map<String, dynamic>;
+    final candidateAttempt = (report['verificationAttempts'] as List)
+        .cast<Map<String, dynamic>>()
+        .singleWhere((attempt) => attempt['purpose'] == 'candidate');
+    expect(candidateAttempt['waveId'], 'wave-r001');
+    expect(candidateAttempt['transactionIds'], [
+      ...manifest.transactions.map((item) => item.transactionId),
+    ]);
+    expect(candidateAttempt, isNot(contains('transactionId')));
+    final apply = report['apply'] as Map<String, dynamic>;
+    final outcomes = (apply['findingOutcomes'] as List)
+        .cast<Map<String, dynamic>>();
+    expect(outcomes.map((item) => item['findingId']).toSet(), {
+      firstId,
+      secondId,
+    });
+    expect(
+      outcomes,
+      everyElement(
+        isA<Map<String, dynamic>>()
+            .having((item) => item['status'], 'status', 'committed')
+            .having(
+              (item) => item['reason'],
+              'reason',
+              'The verification wave was accepted and the transaction was '
+                  'committed as a member.',
+            ),
+      ),
+    );
+    expect((apply['transactions'] as Map)['committed'], 2);
+    expect((apply['transactions'] as Map)['rolledBackVerified'], 0);
+    expect((apply['findings'] as Map)['remaining'], 0);
+  }, timeout: const Timeout(Duration(minutes: 1)));
+
+  test(
+    'deleted path recreation between wave cases fails closed and preserves bytes',
+    () async {
+      final first = File(p.join(tempDir.path, 'lib', 'src', 'first.dart'));
+      const firstOriginal = '''
+void keepFirst() {}
+
+void selectedFirst() {}
+''';
+      first.writeAsStringSync(firstOriginal);
+      final dead = File(p.join(tempDir.path, 'lib', 'src', 'dead.dart'));
+      const deadOriginal = 'library dead;\n';
+      dead.writeAsStringSync(deadOriginal);
+      final firstOriginalMode = _posixMode(first);
+      final deadOriginalMode = Platform.isLinux || Platform.isMacOS
+          ? _posixMode(dead)
+          : null;
+      File(p.join(tempDir.path, 'lib', 'main.dart')).writeAsStringSync('''
+import 'src/first.dart';
+
+void main() => keepFirst();
+''');
+      const deadId = 'dart:apply_test/lib/src/dead.dart';
       const firstId = 'dart:apply_test/lib/src/first.dart#selectedFirst';
-      const secondId = 'dart:apply_test/lib/src/second.dart#selectedSecond';
-      final reportFile = File(
-        p.join(tempDir.path, 'selector-later-unit-failure.json'),
-      );
-      final verifier = _QueuedVerificationRunner(tempDir, [
-        _verification(passed: true),
-        _verification(passed: true),
-        _verification(passed: false, output: 'error • later unit regression'),
-        _verification(passed: true),
+      const recreated = 'external recreation\n';
+      var injected = false;
+      final verifier = _AlwaysPassingVerificationRunner(tempDir);
+      final runner = args.CommandRunner<int>('flutter_pruner', 'test runner')
+        ..argParser.addFlag('verbose', negatable: false)
+        ..addCommand(
+          ApplyCommand(
+            verifierFactory: (_) => verifier,
+            quarantineManagerFactory: (projectRoot) => QuarantineManager(
+              projectRoot,
+              displacementHook: (context) {
+                if (!injected &&
+                    context.point ==
+                        QuarantineDisplacementPoint.afterCandidateJournal &&
+                    p.equals(context.source.path, dead.path)) {
+                  injected = true;
+                  context.source.writeAsStringSync(recreated, flush: true);
+                  if (Platform.isLinux || Platform.isMacOS) {
+                    _chmod(context.source, 0x1a0);
+                  }
+                }
+              },
+            ),
+          ),
+        );
+
+      final exitCode = await runner.run([
+        'apply',
+        '--finding-id',
+        deadId,
+        '--finding-id',
+        firstId,
+        tempDir.path,
       ]);
 
-      final exitCode =
-          await FlutterPrunerCommandRunner(
-            verifierFactory: (_) => verifier,
-          ).run([
-            'apply',
-            '--finding-id',
-            firstId,
-            '--finding-id',
-            secondId,
-            '--report-format',
-            'json',
-            '--report-output',
-            reportFile.path,
-            tempDir.path,
-          ]);
-
-      expect(exitCode, 2);
-      expect(verifier.invocationCount, 4);
+      expect(exitCode, 1);
+      expect(injected, isTrue);
+      expect(verifier.invocationCount, 1);
+      expect(dead.readAsStringSync(), recreated);
+      if (Platform.isLinux || Platform.isMacOS) {
+        expect(_posixMode(dead), 0x1a0);
+      }
       expect(first.readAsStringSync(), firstOriginal);
-      expect(second.readAsStringSync(), secondOriginal);
+      expect(_posixMode(first), firstOriginalMode);
       final manager = QuarantineManager(tempDir);
       final quarantine = Directory(
         (await manager.listQuarantines()).single.path,
       );
       final manifest = await manager.readManifest(quarantine);
-      expect(manifest.selection?.requestedFindingIds, [firstId, secondId]);
-      expect(manifest.transactions, hasLength(2));
-      expect(manifest.transactions.expand((item) => item.findingIds).toSet(), {
-        firstId,
-        secondId,
-      });
+      expect(manifest.verificationWaves, isEmpty);
       expect(
-        manifest.transactions,
-        everyElement(
-          isA<QuarantineTransaction>().having(
-            (item) => item.status,
-            'status',
-            QuarantineTransactionStatus.rolledBackVerified,
-          ),
-        ),
+        manifest.transactions.map((transaction) => transaction.status),
+        everyElement(QuarantineTransactionStatus.recoveryRequired),
       );
-      final report =
-          jsonDecode(reportFile.readAsStringSync()) as Map<String, dynamic>;
-      final apply = report['apply'] as Map<String, dynamic>;
-      final outcomes = (apply['findingOutcomes'] as List)
-          .cast<Map<String, dynamic>>();
-      expect(outcomes.map((item) => item['findingId']).toSet(), {
-        firstId,
-        secondId,
-      });
       expect(
-        outcomes,
-        everyElement(
-          isA<Map<String, dynamic>>()
-              .having((item) => item['status'], 'status', 'rejectedRecovered')
-              .having(
-                (item) => item['rollbackVerified'],
-                'rollbackVerified',
-                isTrue,
-              ),
-        ),
+        await manager.readRunLifecycleState(quarantine),
+        QuarantineRunLifecycleState.recoveryRequired,
       );
-      expect((apply['transactions'] as Map)['committed'], 0);
-      expect((apply['transactions'] as Map)['rolledBackVerified'], 2);
-      expect((apply['findings'] as Map)['remaining'], 2);
+      expect(manifest.cases, hasLength(1));
+      expect(manifest.transactions, hasLength(1));
+      expect(manifest.transactions.single.findingIds, [deadId]);
+      expect(
+        manifest.transactions.single.failureReason,
+        contains('Wave path was recreated after deletion'),
+      );
+      final deadCase = manifest.cases.single;
+      expect(deadCase.entry.originalPath, dead.path);
+      expect(deadCase.entry.modifiedSha256, isNull);
+      expect(
+        deadCase.entry.sha256,
+        sha256.convert(utf8.encode(deadOriginal)).toString(),
+      );
+      expect(deadCase.entry.posixMode, deadOriginalMode);
+      final deadBackup = await manager.promotedBackupForCase(
+        quarantineDir: quarantine,
+        caseId: deadCase.caseId,
+      );
+      expect(deadBackup, isNotNull);
+      expect(deadBackup!.readAsStringSync(), deadOriginal);
+      if (Platform.isLinux || Platform.isMacOS) {
+        expect(_posixMode(deadBackup), deadOriginalMode);
+      }
     },
     timeout: const Timeout(Duration(minutes: 1)),
   );
@@ -1466,7 +1591,7 @@ void unusedThree() {}
   );
 
   test(
-    'rejected consumer records its unattempted dependency as skipped',
+    'rejected wave restores both consumer and dependency transactions',
     () async {
       File(
         p.join(tempDir.path, 'lib', 'src', 'helper.dart'),
@@ -1502,28 +1627,25 @@ void unusedConsumer() {
         (await manager.listQuarantines()).single.path,
       );
       final manifest = await manager.readManifest(quarantine);
-      expect(manifest.transactions, hasLength(1));
+      expect(manifest.transactions, hasLength(2));
       final report =
           jsonDecode(
                 _latestCommittedCanonicalReport(quarantine).readAsStringSync(),
               )
               as Map;
       final apply = report['apply'] as Map;
-      expect((apply['findings'] as Map)['rejectedRecovered'], 1);
-      expect((apply['findings'] as Map)['skippedDependency'], 1);
+      expect((apply['findings'] as Map)['rejectedRecovered'], 2);
+      expect((apply['findings'] as Map)['skippedDependency'], 0);
       final outcomes = (apply['findingOutcomes'] as List)
           .cast<Map<String, dynamic>>();
-      final rejected = outcomes.singleWhere(
-        (outcome) => outcome['status'] == 'rejectedRecovered',
+      expect(
+        outcomes.map((outcome) => outcome['status']),
+        everyElement('rejectedRecovered'),
       );
-      final skipped = outcomes.singleWhere(
-        (outcome) => outcome['status'] == 'skippedDependency',
+      expect(
+        outcomes.map((outcome) => outcome['rollbackVerified']),
+        everyElement(isTrue),
       );
-      expect(rejected['findingId'], contains('#unusedConsumer'));
-      expect(rejected['rollbackVerified'], isTrue);
-      expect(skipped['findingId'], contains('#unusedDependency'));
-      expect(skipped.containsKey('transactionId'), isFalse);
-      expect(skipped['relatedNodeIds'], contains(rejected['findingId']));
     },
     timeout: const Timeout(Duration(minutes: 1)),
   );
@@ -1551,7 +1673,7 @@ void removableUnused() {}
       ).run(['apply', tempDir.path]);
 
       expect(exitCode, 0);
-      expect(verifier.invocationCount, 3);
+      expect(verifier.invocationCount, 2);
       final result = helperFile.readAsStringSync();
       expect(result, contains('unusedOne = 1, unusedTwo = 2'));
       expect(result, isNot(contains('removableUnused')));
@@ -1575,7 +1697,7 @@ void removableUnused() {}
     timeout: const Timeout(Duration(minutes: 1)),
   );
 
-  test('later transaction regression restores every earlier commit', () async {
+  test('combined transaction wave regression restores every member', () async {
     final helperFile = File(p.join(tempDir.path, 'lib', 'src', 'helper.dart'));
     helperFile.writeAsStringSync('''
 void usedFunction() {}
@@ -1593,7 +1715,6 @@ void removableUnused() {}
         'error • Existing baseline • lib/src/helper.dart:1:1 • baseline_error';
     final verifier = _QueuedVerificationRunner(tempDir, [
       _verification(passed: false, output: originalDiagnostic),
-      _verification(passed: true),
       _verification(passed: false, output: 'error • second transaction'),
       _verification(passed: false, output: originalDiagnostic),
     ]);
@@ -1603,7 +1724,7 @@ void removableUnused() {}
     ).run(['apply', '--adapter', 'dart', tempDir.path]);
 
     expect(exitCode, 2);
-    expect(verifier.invocationCount, 4);
+    expect(verifier.invocationCount, 3);
     expect(helperFile.readAsBytesSync(), helperBytes);
     expect(independentFile.readAsBytesSync(), independentBytes);
     final manager = QuarantineManager(tempDir);
@@ -1670,7 +1791,7 @@ void removableUnused() {}
 
       expect(exitCode, 2);
       expect(cleanup.invocationCount, 2);
-      expect(verifier.invocationCount, 3);
+      expect(verifier.invocationCount, 2);
       expect(helperFile.readAsBytesSync(), helperBytes);
       expect(independentFile.readAsBytesSync(), independentBytes);
       final manager = QuarantineManager(tempDir);
@@ -1718,7 +1839,6 @@ void removableUnused() {}
       final helperBytes = helperFile.readAsBytesSync();
       final independentBytes = independentFile.readAsBytesSync();
       final verifier = _QueuedVerificationRunner(tempDir, [
-        _verification(passed: true),
         _verification(passed: true),
         _verification(passed: false, output: 'error • second transaction'),
         _verification(passed: false, output: 'error • rollback baseline'),
@@ -2482,6 +2602,7 @@ void editedDuringDisplacement() {}
     final quarantine = Directory((await manager.listQuarantines()).single.path);
     final manifest = await manager.readManifest(quarantine);
     expect(manifest.fullRollbackVerified, isTrue);
+    expect(manifest.verificationWaves, hasLength(1));
     expect(
       manifest.transactions.single.status,
       QuarantineTransactionStatus.rolledBackVerified,
@@ -2755,9 +2876,11 @@ void editedDuringDisplacement() {}
       ).writeAsStringSync('void usedFunction() {}\n');
       final publicFile = File(p.join(tempDir.path, 'lib', 'public_api.dart'))
         ..writeAsStringSync('class UnusedPublicApi {}\n');
+      final rejectionPrompt = _FakeApplyPrompt(['n']);
       final verifier = _AlwaysPassingVerificationRunner(tempDir);
 
       final withoutOptIn = await FlutterPrunerCommandRunner(
+        applyPrompt: rejectionPrompt,
         verifierFactory: (_) => verifier,
       ).run(['apply', '--adapter', 'dart', tempDir.path]);
       expect(withoutOptIn, 2);
@@ -2833,9 +2956,11 @@ void _selectedCanary() {}
     ).writeAsStringSync('void usedFunction() {}\n');
     final publicLibrary = File(p.join(tempDir.path, 'lib', 'empty_public.dart'))
       ..writeAsStringSync('\n');
+    final rejectionPrompt = _FakeApplyPrompt(['n']);
     final verifier = _AlwaysPassingVerificationRunner(tempDir);
 
     final withoutOptIn = await FlutterPrunerCommandRunner(
+      applyPrompt: rejectionPrompt,
       verifierFactory: (_) => verifier,
     ).run(['apply', '--adapter', 'dart', tempDir.path]);
     expect(withoutOptIn, 2);
@@ -3088,7 +3213,7 @@ void _selectedCanary() {}
     final manager = QuarantineManager(tempDir);
     final quarantine = Directory((await manager.listQuarantines()).single.path);
     final manifest = await manager.readManifest(quarantine);
-    expect(manifest.cases, hasLength(1));
+    expect(manifest.cases, hasLength(3));
     expect(
       manifest.cases.map((item) => item.status),
       everyElement(QuarantineCaseStatus.rolledBack),
@@ -3333,6 +3458,34 @@ class _AlwaysPassingVerificationRunner extends VerificationRunner {
     invocationCount++;
     return _verification(
       passed: true,
+      workingDirectory: p.normalize(p.absolute(projectRoot.path)),
+    );
+  }
+}
+
+class _CombinedStateVerificationRunner extends VerificationRunner {
+  _CombinedStateVerificationRunner(
+    super.projectRoot, {
+    required this.first,
+    required this.second,
+  });
+
+  final File first;
+  final File second;
+  var invocationCount = 0;
+
+  @override
+  Future<VerificationResult> verify({
+    VerificationPolicy policy = VerificationPolicy.flutterDefault,
+    Duration timeout = VerificationRunner.defaultTimeout,
+  }) async {
+    invocationCount++;
+    final firstRemoved = !first.readAsStringSync().contains('selectedFirst');
+    final secondRemoved = !second.readAsStringSync().contains('selectedSecond');
+    final passed = firstRemoved == secondRemoved;
+    return _verification(
+      passed: passed,
+      output: passed ? '' : 'error • incomplete combined state',
       workingDirectory: p.normalize(p.absolute(projectRoot.path)),
     );
   }

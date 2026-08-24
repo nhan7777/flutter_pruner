@@ -972,7 +972,10 @@ class JsonFormatter implements ReportFormatter {
   ) => {
     'purpose': attempt.purpose.name,
     if (attempt.round != null) 'round': attempt.round,
+    if (attempt.waveId != null) 'waveId': attempt.waveId,
     if (attempt.transactionId != null) 'transactionId': attempt.transactionId,
+    if (attempt.transactionIds.isNotEmpty)
+      'transactionIds': attempt.transactionIds,
     'complete': attempt.complete,
     'available': attempt.available,
     'accepted': attempt.accepted,

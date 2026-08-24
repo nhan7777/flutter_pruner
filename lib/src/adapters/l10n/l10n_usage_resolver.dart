@@ -10,7 +10,10 @@ import 'package:path/path.dart' as p;
 
 import '../../core/project/project_context.dart';
 import '../dart/dart_analysis_workspace.dart';
+import '../dart/dart_directive_resolver.dart';
+import '../dart/dart_execution_reachability_service.dart';
 import '../dart/dart_ids.dart';
+import '../dart/dart_package_ownership.dart';
 import 'arb_inventory.dart';
 import 'l10n_config.dart';
 
@@ -89,6 +92,13 @@ final class L10nUsageResolver {
   /// Immutable exact modeled caller-to-ARB references.
   List<L10nReference> get references => List.unmodifiable(_references);
 
+  /// Exact ARB uses from execution-selected external package sources.
+  final Set<String> _externallyUsedNodeIds = <String>{};
+
+  /// ARB nodes that must be retained because an external dependency uses them.
+  Set<String> get externallyUsedNodeIds =>
+      Set.unmodifiable(_externallyUsedNodeIds);
+
   /// Bounded configuration, generated-output, and consumer uncertainty.
   final List<L10nBlocker> _blockers = [];
 
@@ -114,6 +124,7 @@ final class L10nUsageResolver {
   Future<void> analyzeProject({
     required DartAnalysisWorkspace workspace,
     Set<String>? includedUnitPaths,
+    DartExecutionReachabilitySnapshot? executionReachability,
   }) async {
     _generatedDartNamespaces.add(
       _dartNamespaceFor(project, config.generatedLibraryPath),
@@ -125,6 +136,9 @@ final class L10nUsageResolver {
     }
 
     final units = <String, ResolvedUnitResult>{};
+    final admittedUnitPaths = includedUnitPaths == null
+        ? null
+        : <String>{...includedUnitPaths};
     for (final path in workspace.dartFiles) {
       if (project.pathPolicy.shouldExclude(path)) continue;
       if (includedUnitPaths != null &&
@@ -151,11 +165,38 @@ final class L10nUsageResolver {
       }
     }
 
+    final boundedClosure = await workspace.boundedClosureSnapshot();
+    final admittedExternalLibraries = executionReachability == null
+        ? const <ResolvedLibraryResult>[]
+        : _executionSelectedExternalLibraries(
+            boundedClosure,
+            executionReachability,
+          );
+    for (final result in admittedExternalLibraries) {
+      for (final unit in result.units) {
+        final path = _normalizedPath(unit.path);
+        units[path] = unit;
+        admittedUnitPaths?.add(path);
+      }
+    }
+    for (final issue in boundedClosure.issues) {
+      _addNamespaceBlocker(switch (issue.kind) {
+        DartBoundedClosureIssueKind.uninspectable =>
+          'external Dart closure could not be inspected for localization uses',
+        DartBoundedClosureIssueKind.conditionalDirective =>
+          'conditional external Dart closure may use configured localization members',
+        DartBoundedClosureIssueKind.selectedConditionalDirective =>
+          'conditional selected Dart import/export may expose localization consumers',
+        DartBoundedClosureIssueKind.unknownOwnershipBoundary =>
+          'unknown Dart ownership boundary may use configured localization members',
+      }, location: project.relative(issue.location));
+    }
+
     final paths = units.keys.toList()..sort();
     for (final path in paths) {
       final unit = units[path]!;
       if (_generatedOutputPaths.contains(path)) continue;
-      if (includedUnitPaths != null && !includedUnitPaths.contains(path)) {
+      if (admittedUnitPaths != null && !admittedUnitPaths.contains(path)) {
         continue;
       }
       if (unit.diagnostics.isNotEmpty) {
@@ -167,6 +208,55 @@ final class L10nUsageResolver {
       unit.unit.accept(_L10nUseVisitor(this, index, unit));
     }
     _sortAndDedupe();
+  }
+
+  List<ResolvedLibraryResult> _executionSelectedExternalLibraries(
+    DartBoundedClosureSnapshot closure,
+    DartExecutionReachabilitySnapshot reachability,
+  ) {
+    final ownership = DartPackageOwnership.discover(project);
+    final librariesByPath = <String, ResolvedLibraryResult>{
+      for (final library in closure.libraries)
+        _normalizedPath(library.element.firstFragment.source.fullName): library,
+    };
+    final pending = <String>{
+      for (final edge in reachability.directives.edges)
+        if (_edgeSourceIsRetained(reachability, edge) &&
+            ownership.ownerOf(edge.targetPath).ownership ==
+                DartSourceOwnership.externalPackage)
+          _normalizedPath(edge.targetPath),
+    };
+    final admitted = <String, ResolvedLibraryResult>{};
+    while (pending.isNotEmpty) {
+      final path = pending.reduce(
+        (left, right) => left.compareTo(right) <= 0 ? left : right,
+      );
+      pending.remove(path);
+      if (admitted.containsKey(path)) continue;
+      final library = librariesByPath[path];
+      if (library == null) continue;
+      admitted[path] = library;
+      for (final dependency in <LibraryElement>{
+        ...library.element.firstFragment.importedLibraries,
+        ...library.element.exportedLibraries,
+      }) {
+        final source = dependency.firstFragment.source;
+        if (source.uri.isScheme('dart') ||
+            ownership.ownerOf(source.fullName).ownership !=
+                DartSourceOwnership.externalPackage) {
+          continue;
+        }
+        final dependencyPath = _normalizedPath(source.fullName);
+        if (!admitted.containsKey(dependencyPath)) {
+          pending.add(dependencyPath);
+        }
+      }
+    }
+    return admitted.values.toList()..sort(
+      (left, right) => left.element.firstFragment.source.fullName.compareTo(
+        right.element.firstFragment.source.fullName,
+      ),
+    );
   }
 
   Future<_MemberIndex?> _loadExpectedMembers(
@@ -636,6 +726,11 @@ extension on L10nUsageResolver {
     if (key == null) return;
     final callerId = _callerId(node, index.outputPath, unit: unit);
     if (callerId == null) {
+      final owner = DartPackageOwnership.discover(project).ownerOf(unit.path);
+      if (owner.ownership == DartSourceOwnership.externalPackage) {
+        _externallyUsedNodeIds.add(key.nodeId);
+        return;
+      }
       _addBlocker(
         reason:
             'localization use occurs in an unmodeled or generated Dart source',
@@ -666,6 +761,29 @@ InterfaceElement? _interfaceOwner(Element element) {
 
 bool _belongsTo(ExecutableElement element, InterfaceElement owner) =>
     _interfaceOwner(element.baseElement) == owner;
+
+bool _edgeSourceIsRetained(
+  DartExecutionReachabilitySnapshot reachability,
+  DartDirectiveEdge edge,
+) {
+  for (final target in edge.condition.exactTargets) {
+    if (reachability.configuredRetainedUnitPaths[target]?.contains(
+          edge.sourcePath,
+        ) ??
+        false) {
+      return true;
+    }
+  }
+  for (final target in edge.condition.exactAuxiliaryTargets) {
+    if (reachability.auxiliaryRetainedUnitPaths[target.id]?.contains(
+          edge.sourcePath,
+        ) ??
+        false) {
+      return true;
+    }
+  }
+  return false;
+}
 
 String? _constantString(AstNode node) {
   if (node is StringLiteral) return node.stringValue;

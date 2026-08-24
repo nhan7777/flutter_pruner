@@ -8,6 +8,7 @@ import 'package:path/path.dart' as p;
 
 import '../../core/graph/execution_target.dart';
 import '../../core/project/project_context.dart';
+import 'dart_adapter_profile.dart';
 import 'dart_analysis_workspace.dart';
 import 'dart_directive_resolver.dart';
 import 'dart_execution_context_service.dart';
@@ -97,6 +98,7 @@ final class DefaultDartExecutionReachabilityService
   DefaultDartExecutionReachabilityService({
     required this.workspace,
     required this.contexts,
+    this.profile,
   });
 
   /// Pass-shared analyzer workspace.
@@ -104,6 +106,9 @@ final class DefaultDartExecutionReachabilityService
 
   /// Exact immutable context object established for this pass.
   final DartExecutionContextSnapshot contexts;
+
+  /// Optional benchmark-only phase timings.
+  final DartAdapterProfile? profile;
 
   Future<DartExecutionReachabilitySnapshot>? _snapshotFuture;
   ProjectContext? _project;
@@ -157,13 +162,19 @@ final class DefaultDartExecutionReachabilityService
           right.element.firstFragment.source.fullName,
         ),
       );
-    final directives = await DartDirectiveResolver(
+    final directiveResolver = DartDirectiveResolver(
       project: project,
       workspace: workspace,
       ownership: ownership,
       contexts: contexts,
       libraries: libraries,
-    ).resolve();
+    );
+    final directives = profile == null
+        ? await directiveResolver.resolve()
+        : await profile!.measureAsync(
+            'directiveResolution',
+            directiveResolver.resolve,
+          );
     final publicSurface = DartPublicSurfaceResolver(
       project: project,
       ownership: ownership,
@@ -279,7 +290,12 @@ final class DefaultDartExecutionReachabilityService
       while (pending.isNotEmpty) {
         final current = pending.removeLast();
         reachedUnits.addAll(unitPathsByLibraryPath[current] ?? const {});
-        for (final edge in outgoing[current] ?? const <DartDirectiveEdge>[]) {
+        final candidateEdges = outgoing[current] ?? const <DartDirectiveEdge>[];
+        profile?.addCount(
+          'executionClosureCandidateEdges',
+          candidateEdges.length,
+        );
+        for (final edge in candidateEdges) {
           if (!follows(edge)) continue;
           if (!librariesByPath.containsKey(edge.targetPath)) continue;
           if (reachedLibraries.add(edge.targetPath)) {
@@ -290,6 +306,23 @@ final class DefaultDartExecutionReachabilityService
       return Set.unmodifiable(reachedUnits);
     }
 
+    Set<String> measuredClosure({
+      required Iterable<String> rootLibraryIds,
+      required bool Function(DartDirectiveEdge edge) follows,
+      required bool contextComplete,
+      required bool proven,
+    }) {
+      Set<String> run() => closure(
+        rootLibraryIds: rootLibraryIds,
+        follows: follows,
+        contextComplete: contextComplete,
+        proven: proven,
+      );
+      return profile == null
+          ? run()
+          : profile!.measure('executionClosure', run);
+    }
+
     final configuredProven = <BuildTarget, Set<String>>{};
     final configuredRetained = <BuildTarget, Set<String>>{};
     for (final target in contexts.configuredTargets) {
@@ -298,13 +331,13 @@ final class DefaultDartExecutionReachabilityService
           .map((root) => root.owningLibraryId)
           .toSet();
       bool applies(DartDirectiveEdge edge) => edge.condition.appliesTo(target);
-      configuredProven[BuildTarget.snapshot(target)] = closure(
+      configuredProven[BuildTarget.snapshot(target)] = measuredClosure(
         rootLibraryIds: roots,
         follows: (edge) => edge.exact && applies(edge),
         contextComplete: true,
         proven: true,
       );
-      configuredRetained[BuildTarget.snapshot(target)] = closure(
+      configuredRetained[BuildTarget.snapshot(target)] = measuredClosure(
         rootLibraryIds: roots,
         follows: applies,
         contextComplete: true,
@@ -321,13 +354,13 @@ final class DefaultDartExecutionReachabilityService
           .toSet();
       bool applies(DartDirectiveEdge edge) =>
           edge.condition.exactAuxiliaryTargets.contains(target);
-      auxiliaryProven[target.id] = closure(
+      auxiliaryProven[target.id] = measuredClosure(
         rootLibraryIds: roots,
         follows: (edge) => edge.exact && applies(edge),
         contextComplete: target.environmentComplete,
         proven: true,
       );
-      auxiliaryRetained[target.id] = closure(
+      auxiliaryRetained[target.id] = measuredClosure(
         rootLibraryIds: roots,
         follows: applies,
         contextComplete: true,

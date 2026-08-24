@@ -3698,7 +3698,149 @@ void removalCandidate() {}
     );
 
     test(
-      'G5 conditional external closure blocks the selected Dart namespace',
+      'G5 auxiliary-only external closure does not block unrelated application library',
+      () async {
+        final externalRoot = await Directory.systemTemp.createTemp(
+          'dart_auxiliary_external_conditional_test_',
+        );
+        addTearDown(() => externalRoot.delete(recursive: true));
+        File(p.join(externalRoot.path, 'pubspec.yaml'))
+          ..createSync(recursive: true)
+          ..writeAsStringSync('''
+name: conditional_test_support
+publish_to: none
+environment:
+  sdk: ^3.9.0
+''');
+        File(p.join(externalRoot.path, 'lib', 'conditional.dart'))
+          ..createSync(recursive: true)
+          ..writeAsStringSync('''
+import 'bridge.dart';
+
+void externalEntry() => bridgeEntry();
+''');
+        File(p.join(externalRoot.path, 'lib', 'bridge.dart'))
+          ..createSync(recursive: true)
+          ..writeAsStringSync('''
+import 'conditional_branch.dart';
+
+void bridgeEntry() => conditionalEntry();
+''');
+        File(p.join(externalRoot.path, 'lib', 'conditional_branch.dart'))
+          ..createSync(recursive: true)
+          ..writeAsStringSync('''
+import 'vm.dart'
+    if (dart.library.html) 'web.dart';
+
+void conditionalEntry() => branchEntry();
+''');
+        File(p.join(externalRoot.path, 'lib', 'vm.dart'))
+          ..createSync(recursive: true)
+          ..writeAsStringSync('void branchEntry() {}\n');
+        File(p.join(externalRoot.path, 'lib', 'web.dart'))
+          ..createSync(recursive: true)
+          ..writeAsStringSync('void branchEntry() {}\n');
+        await createProject({
+          'pubspec.yaml':
+              '''
+name: test_app
+publish_to: none
+environment:
+  sdk: ^3.9.0
+dev_dependencies:
+  conditional_test_support:
+    path: ${p.relative(externalRoot.path, from: tempDir.path)}
+''',
+          '.dart_tool/package_config.json':
+              '''
+{"configVersion":2,"packages":[
+  {"name":"test_app","rootUri":"../","packageUri":"lib/","languageVersion":"3.9"},
+  {"name":"conditional_test_support","rootUri":"${externalRoot.absolute.uri}","packageUri":"lib/","languageVersion":"3.9"}
+]}
+''',
+          'dart_test.yaml': 'platforms: [vm]\n',
+          'lib/main.dart': '''
+import 'src/unit.dart';
+
+void main() => retained();
+''',
+          'lib/src/unit.dart': '''
+void retained() {}
+void _unused() {}
+''',
+          'lib/test_support.dart': '''
+void usedByTest() {}
+void _auxiliaryCandidate() {}
+''',
+          'test/smoke_test.dart': '''
+import 'package:conditional_test_support/conditional.dart';
+import '../lib/test_support.dart';
+
+void main() {
+  externalEntry();
+  usedByTest();
+}
+''',
+        });
+        project = ProjectContext(
+          root: tempDir,
+          pubspec: const {'name': 'test_app'},
+          packageName: 'test_app',
+          targets: [
+            BuildTarget(
+              name: 'production',
+              platform: 'android',
+              entrypoint: 'lib/main.dart',
+            ),
+          ],
+          rootCoverage: RootCoverage.applicationApi(),
+        );
+
+        final snapshot = await ProjectAnalyzer(
+          project: project,
+          only: const {'dart'},
+        ).analyze();
+
+        final candidate = snapshot.findings.singleWhere(
+          (finding) =>
+              finding.node.id == 'dart:test_app/lib/src/unit.dart#_unused',
+        );
+        expect(candidate.confidence, Confidence.safe);
+        expect(candidate.proposedAction, isNotNull);
+        final blocker = snapshot.graph.blockers.singleWhere(
+          (blocker) =>
+              blocker.reason ==
+              'conditional Dart imports/exports are not modelled per target',
+        );
+        expect(blocker.affectedNamespace, isNull);
+        expect(blocker.affectedNodeIds, {
+          'dart:test_app/lib/test_support.dart',
+          'dart:test_app/lib/test_support.dart#_auxiliaryCandidate',
+          'dart:test_app/lib/test_support.dart#usedByTest',
+          'dart:test_app/test/smoke_test.dart',
+          'dart:test_app/test/smoke_test.dart#main',
+        });
+        expect(p.basename(blocker.location!), 'conditional_branch.dart');
+        expect(
+          snapshot.graph.blockersFor(candidate.node.id),
+          isNot(contains(blocker)),
+        );
+        final auxiliaryCandidate = snapshot.findings.singleWhere(
+          (finding) =>
+              finding.node.id ==
+              'dart:test_app/lib/test_support.dart#_auxiliaryCandidate',
+        );
+        expect(auxiliaryCandidate.confidence, Confidence.review);
+        expect(auxiliaryCandidate.proposedAction, isNull);
+        expect(
+          snapshot.graph.blockersFor(auxiliaryCandidate.node.id),
+          contains(blocker),
+        );
+      },
+    );
+
+    test(
+      'G5 conditional external closure blocks its selected caller closure',
       () async {
         final externalRoot = await Directory.systemTemp.createTemp(
           'dart_external_conditional_test_',
@@ -3782,8 +3924,15 @@ void privateCandidate() {}
               'conditional Dart imports/exports are not modelled per target',
         );
         expect(blocker.sourceNodeId, isNull);
-        expect(blocker.affectedNamespace, 'dart:test_app/');
-        expect(p.equals(blocker.location!, conditionalPath), isTrue);
+        expect(blocker.affectedNamespace, isNull);
+        expect(blocker.affectedNodeIds, {
+          'dart:test_app/lib/main.dart',
+          'dart:test_app/lib/main.dart#main',
+        });
+        expect(
+          File(blocker.location!).resolveSymbolicLinksSync(),
+          File(conditionalPath).resolveSymbolicLinksSync(),
+        );
         expect(
           snapshot.graph.blockers.map((blocker) => blocker.reason),
           isNot(contains('external package can address selected Dart library')),
@@ -3804,13 +3953,10 @@ void privateCandidate() {}
         expect(snapshot.graph.danglingRootIdsFor(project.targets), isEmpty);
         expect(snapshot.findings, isNotEmpty);
         expect(
-          snapshot.findings.every(
-            (finding) =>
-                finding.confidence != Confidence.safe &&
-                finding.confidence != Confidence.high &&
-                finding.proposedAction == null,
+          snapshot.graph.blockersFor(
+            'dart:test_app/lib/unused.dart#removalCandidate',
           ),
-          isTrue,
+          isNot(contains(blocker)),
         );
       },
     );
@@ -4045,7 +4191,7 @@ void unknownPartEntry() => selectedCandidate();
     });
 
     test(
-      'G5 incomplete external closure blocks the selected namespace',
+      'G5 incomplete external closure blocks its selected caller closure',
       () async {
         await createProject({
           'pubspec.yaml': '''
@@ -4088,7 +4234,15 @@ environment:
               'external package closure could not be inspected',
         );
         expect(blocker.sourceNodeId, isNull);
-        expect(blocker.affectedNamespace, 'dart:test_app/');
+        expect(blocker.affectedNamespace, isNull);
+        expect(blocker.affectedNodeIds, {
+          'dart:test_app/lib/main.dart',
+          'dart:test_app/lib/main.dart#main',
+        });
+        expect(
+          graph.blockersFor('dart:test_app/lib/unused.dart#unused'),
+          isNot(contains(blocker)),
+        );
       },
     );
 

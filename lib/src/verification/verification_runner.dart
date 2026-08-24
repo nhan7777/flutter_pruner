@@ -337,10 +337,19 @@ class VerificationResult {
       }
     }
 
-    return VerificationComparison(
+    final accepted = infrastructureFailures.isEmpty && newFailures.isEmpty;
+    return VerificationComparison._(
       candidate: this,
       newFailures: newFailures,
       infrastructureFailures: infrastructureFailures,
+      acceptedEvidence: accepted
+          ? AcceptedVerificationEvidence._(
+              comparisonBaselineSha256: verificationBaselineEvidenceSha256(
+                baseline,
+              ),
+              candidateEvidence: toBaselineEvidence(),
+            )
+          : null,
     );
   }
 
@@ -425,7 +434,7 @@ class VerificationResult {
       }
     }
 
-    return VerificationComparison(
+    return VerificationComparison._(
       candidate: this,
       newFailures: newFailures,
       infrastructureFailures: infrastructureFailures,
@@ -466,11 +475,11 @@ bool _sameParserKindLists(
 
 /// Delta between a candidate verification and its accumulated baseline.
 class VerificationComparison {
-  /// Creates a verification comparison.
-  const VerificationComparison({
+  const VerificationComparison._({
     required this.candidate,
     required this.newFailures,
     required this.infrastructureFailures,
+    this.acceptedEvidence,
   });
 
   /// Verification output after applying the current case.
@@ -482,11 +491,79 @@ class VerificationComparison {
   /// Process failures that make verification unavailable.
   final List<String> infrastructureFailures;
 
+  /// Sanitized authority for an accepted stored-baseline comparison.
+  final AcceptedVerificationEvidence? acceptedEvidence;
+
   /// Whether the candidate can safely become the next baseline.
   bool get accepted => infrastructureFailures.isEmpty && newFailures.isEmpty;
 
   /// Whether verification itself failed to execute reliably.
   bool get unavailable => infrastructureFailures.isNotEmpty;
+}
+
+/// Sanitized authority produced only by an accepted stored-baseline
+/// comparison.
+final class AcceptedVerificationEvidence {
+  AcceptedVerificationEvidence._({
+    required this.comparisonBaselineSha256,
+    required this.candidateEvidence,
+  });
+
+  /// Canonical digest of the exact rolling baseline used for comparison.
+  final String comparisonBaselineSha256;
+
+  /// Complete sanitized evidence for the accepted candidate.
+  final VerificationBaselineEvidence candidateEvidence;
+}
+
+/// Returns the canonical SHA-256 digest of sanitized verification evidence.
+String verificationBaselineEvidenceSha256(
+  VerificationBaselineEvidence evidence,
+) => sha256.convert(utf8.encode(jsonEncode(evidence.toJson()))).toString();
+
+/// Whether sanitized [candidate] evidence is an accepted continuation of
+/// sanitized [baseline] evidence.
+///
+/// This replays the persisted subset of [VerificationResult]
+/// comparison semantics without reconstructing raw verifier output.
+bool verificationBaselineEvidenceAcceptsCandidate({
+  required VerificationBaselineEvidence baseline,
+  required VerificationBaselineEvidence candidate,
+}) {
+  if (!baseline.isComplete || !candidate.isComplete) return false;
+  if (candidate.policyHash != baseline.policyHash ||
+      !_sameOrderedStrings(
+        candidate.requiredStepIds,
+        baseline.requiredStepIds,
+      ) ||
+      !_sameParserKindLists(
+        candidate.requiredParserKinds,
+        baseline.requiredParserKinds,
+      ) ||
+      candidate.workingDirectory != baseline.workingDirectory ||
+      candidate.toolchainIdentity != baseline.toolchainIdentity) {
+    return false;
+  }
+
+  final baselineByName = {for (final step in baseline.steps) step.name: step};
+  for (final candidateStep in candidate.steps) {
+    final baselineStep = baselineByName[candidateStep.name];
+    if (baselineStep == null ||
+        candidateStep.parserKind != baselineStep.parserKind) {
+      return false;
+    }
+    if (baselineStep.passed) {
+      if (!candidateStep.passed) return false;
+      continue;
+    }
+    if (candidateStep.passed) continue;
+    for (final failure in candidateStep.fingerprintDigests.entries) {
+      if (failure.value > (baselineStep.fingerprintDigests[failure.key] ?? 0)) {
+        return false;
+      }
+    }
+  }
+  return true;
 }
 
 /// Sanitized, immutable verification baseline suitable for a quarantine

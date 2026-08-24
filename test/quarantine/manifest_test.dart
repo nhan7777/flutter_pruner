@@ -227,6 +227,113 @@ void main() {
     expect(restored.transactions.single.observedStepIds, ['analyze', 'test']);
   });
 
+  test('V3 manifest round-trips immutable accepted verification waves', () {
+    final candidate = _waveCandidateEvidence();
+    final transactionIds = <String>['tx-r001-a', 'tx-r001-b'];
+    final manifest = QuarantineManifest(
+      runId: 'run-wave',
+      timestamp: DateTime.utc(2026, 8, 23),
+      caseJournal: true,
+      transactionJournal: true,
+      transactions: [
+        for (final transactionId in transactionIds)
+          QuarantineTransaction(
+            transactionId: transactionId,
+            round: 1,
+            componentId: 'unit:$transactionId',
+            findingIds: ['finding:$transactionId'],
+            caseIds: ['case:$transactionId'],
+            status: QuarantineTransactionStatus.committed,
+            verificationWaveId: 'wave-r001',
+          ),
+      ],
+      verificationWaves: [
+        QuarantineVerificationWave(
+          verificationWaveId: 'wave-r001',
+          round: 1,
+          transactionIds: transactionIds,
+          comparisonBaselineSha256: 'a' * 64,
+          candidateEvidence: candidate,
+        ),
+      ],
+    );
+
+    transactionIds.add('external');
+    final json = manifest.toJson();
+    final restored = QuarantineManifest.fromJson(json);
+    final wave = restored.verificationWaves.single;
+
+    expect(json['version'], '3.0.0');
+    expect(wave.verificationWaveId, 'wave-r001');
+    expect(wave.round, 1);
+    expect(wave.transactionIds, ['tx-r001-a', 'tx-r001-b']);
+    expect(wave.candidateEvidence.toJson(), candidate.toJson());
+    expect(() => wave.transactionIds.add('external'), throwsUnsupportedError);
+  });
+
+  test('legacy V3 omits empty verification-wave fields', () {
+    final manifest = QuarantineManifest(
+      runId: 'legacy-v3',
+      timestamp: DateTime.utc(2026, 8, 23),
+      transactionJournal: true,
+      transactions: const [
+        QuarantineTransaction(
+          transactionId: 'tx-legacy',
+          round: 1,
+          componentId: 'unit:legacy',
+          findingIds: ['finding-legacy'],
+          caseIds: ['case-legacy'],
+          status: QuarantineTransactionStatus.applied,
+        ),
+      ],
+    );
+
+    final json = manifest.toJson();
+
+    expect(json, isNot(contains('verificationWaves')));
+    expect(
+      (json['transactions'] as List).single,
+      isNot(contains('verificationWaveId')),
+    );
+  });
+
+  test('malformed or duplicated verification-wave membership fails closed', () {
+    Map<String, dynamic> document({required String waveId}) => {
+      'version': '3.0.0',
+      'runId': 'wave-validation',
+      'timestamp': DateTime.utc(2026, 8, 23).toIso8601String(),
+      'entries': <Object>[],
+      'cases': <Object>[],
+      'transactions': <Object>[],
+      'verificationWaves': <Object>[
+        {
+          'verificationWaveId': waveId,
+          'round': 1,
+          'transactionIds': ['tx-a'],
+          'comparisonBaselineSha256': 'a' * 64,
+          'candidateEvidence': _waveCandidateEvidence().toJson(),
+        },
+      ],
+    };
+
+    expect(
+      () => QuarantineManifest.fromJson(document(waveId: 'wave-r002')),
+      throwsFormatException,
+    );
+    final duplicated = document(waveId: 'wave-r001');
+    (duplicated['verificationWaves'] as List).add(
+      Map<String, dynamic>.from(
+          (duplicated['verificationWaves'] as List).single as Map,
+        )
+        ..['verificationWaveId'] = 'wave-r002'
+        ..['round'] = 2,
+    );
+    expect(
+      () => QuarantineManifest.fromJson(duplicated),
+      throwsFormatException,
+    );
+  });
+
   test('selection evidence snapshots inputs and JSON output', () {
     final requested = <String>['finding-a'];
     final evidence = QuarantineSelectionEvidence(
@@ -337,3 +444,24 @@ void main() {
     expect(() => evidence.observedStepIds.clear(), throwsUnsupportedError);
   });
 }
+
+VerificationBaselineEvidence _waveCandidateEvidence() =>
+    VerificationBaselineEvidence(
+      policyHash: 'policy-hash',
+      requiredStepIds: const ['analyze'],
+      requiredParserKinds: const [VerificationOutputParserKind.humanAnalyzer],
+      workingDirectory: '/workspace/example',
+      toolchainIdentity: 'toolchain-hash',
+      steps: [
+        VerificationStepBaselineEvidence(
+          name: 'analyze',
+          parserKind: VerificationOutputParserKind.humanAnalyzer,
+          passed: true,
+          exitCode: 0,
+          failureEvidenceComplete: false,
+          reportedFailureCount: null,
+          fingerprintCount: 0,
+          fingerprintDigests: const {},
+        ),
+      ],
+    );

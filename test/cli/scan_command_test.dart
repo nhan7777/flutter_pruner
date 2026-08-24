@@ -419,6 +419,7 @@ dependencies:
 import 'package:direct_pkg/direct.dart';
 
 void main() => callIndirect();
+void sameClosureCandidate() {}
 ''');
       File(
         p.join(project.path, 'lib', 'unused.dart'),
@@ -460,13 +461,34 @@ target_matrix:
             'external package closure could not be inspected',
       );
       expect(blocker.containsKey('sourceNodeId'), isFalse);
-      expect(blocker['affectedNamespace'], 'dart:scan_test/');
+      expect(blocker.containsKey('affectedNamespace'), isFalse);
+      expect(blocker['affectedNodeIds'], [
+        'dart:scan_test/lib/main.dart',
+        'dart:scan_test/lib/main.dart#main',
+        'dart:scan_test/lib/main.dart#sameClosureCandidate',
+      ]);
       final statistics = report['statistics']! as Map<String, Object?>;
       final findingStatistics = statistics['findings']! as Map<String, Object?>;
       final byTier = findingStatistics['byTier']! as Map<String, Object?>;
-      expect(byTier['SAFE'], 0);
+      expect(byTier['SAFE'], greaterThan(0));
       expect(byTier['HIGH'], 0);
       expect(byTier['REVIEW'], greaterThan(0));
+      final findings = (report['findings']! as List<Object?>)
+          .cast<Map<String, Object?>>();
+      final affectedCandidate = findings.singleWhere(
+        (finding) =>
+            (finding['node']! as Map<String, Object?>)['id'] ==
+            'dart:scan_test/lib/main.dart#sameClosureCandidate',
+      );
+      expect(affectedCandidate['confidence'], 'REVIEW');
+      expect(affectedCandidate['applyEligible'], isFalse);
+      final candidate = findings.singleWhere(
+        (finding) =>
+            (finding['node']! as Map<String, Object?>)['id'] ==
+            'dart:scan_test/lib/unused.dart#removalCandidate',
+      );
+      expect(candidate['confidence'], 'SAFE');
+      expect(candidate['applyEligible'], isTrue);
     },
   );
 

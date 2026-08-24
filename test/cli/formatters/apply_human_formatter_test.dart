@@ -261,6 +261,10 @@ void main() {
               ),
               VerificationAttemptReport(
                 purpose: VerificationAttemptPurpose.candidate,
+                round: 1,
+                waveId: 'wave-r001',
+                transactionId: 'tx-r001-a',
+                transactionIds: const ['tx-r001-a'],
                 complete: true,
                 available: true,
                 accepted: false,
@@ -297,6 +301,10 @@ void main() {
 
       expect(verified, contains('Baseline'));
       expect(verified, contains('Candidate'));
+      expect(
+        verified,
+        contains('wave-r001 · round 1 · 1 transaction(s) · REJECTED'),
+      );
       expect(verified, contains('Rollback'));
       expect(verified, contains('APPLY VERIFICATION UNAVAILABLE'));
       expect(verified, contains('ACCEPTED'));

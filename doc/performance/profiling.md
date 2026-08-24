@@ -20,10 +20,12 @@ The JSON field `project` is `<redacted>` by default. The local-only
 not use it for output that will be committed, attached to an issue, or pasted
 into a pull request.
 
-Add `--profile` to include cumulative Dart-adapter subphase timings in each
-sample. This mode measures file enumeration, library resolution, declaration
-and reference visitors, unresolved-reference indexing, session diagnostics,
-the lint-inclusive CLI analyzer, and the final wait for that process:
+Add `--profile` to include cumulative Dart-pipeline subphase timings in each
+sample. This mode measures execution-context discovery, conditional-directive
+resolution, per-context reachability closure, execution-edge graph emission,
+file enumeration, library resolution, declaration and reference visitors,
+unresolved-reference indexing, session diagnostics, the lint-inclusive CLI
+analyzer, and the final wait for that process:
 
 ```bash
 dart run benchmark/scan_benchmark.dart \
@@ -37,6 +39,17 @@ dart run benchmark/scan_benchmark.dart \
 Profiling adds Stopwatch bookkeeping and is intended for bottleneck diagnosis,
 not release thresholds. Use an ordinary non-profiled run for before/after wall
 time comparisons.
+
+`executionClosure.invocations` records two traversals per execution context:
+one proven closure and one fail-closed retained closure. Context discovery runs
+before the Dart adapter stopwatch, while directive resolution and closure run
+inside it. Some phases are nested or overlap the CLI analyzer, so do not add
+all subphase durations and compare that sum directly with wall time.
+
+Profile snapshots also expose deterministic diagnostic counters under
+`counters`. `executionClosureCandidateEdges` counts the directive edges
+examined by all proven and retained closure traversals; it is useful for
+detecting cross-context scan amplification independently of wall-clock noise.
 
 Every ordinary benchmark sample also measures JSON v3 report construction and
 serialization as `reportElapsedMicros`, `reportBytes`, and
