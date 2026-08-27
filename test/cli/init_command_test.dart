@@ -498,6 +498,58 @@ void main() {
   );
 
   test(
+    'non-interactive configuration is independent of prompt ANSI support',
+    () async {
+      final plainProject = _project(
+        'plain_non_interactive',
+        name: 'non_interactive_app',
+        application: true,
+      );
+      final styledProject = _project(
+        'styled_non_interactive',
+        name: 'non_interactive_app',
+        application: true,
+      );
+      final plain = _FakeInitPrompt(const [], supportsAnsiEscapes: false);
+      final styled = _FakeInitPrompt(const [], supportsAnsiEscapes: true);
+
+      final plainExitCode = await FlutterPrunerCommandRunner(
+        initPrompt: plain,
+      ).run(['init', '--no-interactive', plainProject.path]);
+      final styledExitCode = await FlutterPrunerCommandRunner(
+        initPrompt: styled,
+      ).run(['init', '--no-interactive', styledProject.path]);
+
+      expect(plainExitCode, 0);
+      expect(styledExitCode, 0);
+      expect(plain.responsesRead, 0);
+      expect(styled.responsesRead, 0);
+      expect(plain.transcript, isEmpty);
+      expect(styled.transcript, isEmpty);
+      expect(
+        File(
+          p.join(plainProject.path, '.flutter_pruner', 'config.yaml'),
+        ).readAsBytesSync(),
+        orderedEquals(
+          File(
+            p.join(styledProject.path, '.flutter_pruner', 'config.yaml'),
+          ).readAsBytesSync(),
+        ),
+      );
+      expect(
+        File(
+          p.join(plainProject.path, '.flutter_pruner', '.gitignore'),
+        ).readAsBytesSync(),
+        orderedEquals(
+          File(
+            p.join(styledProject.path, '.flutter_pruner', '.gitignore'),
+          ).readAsBytesSync(),
+        ),
+      );
+    },
+  );
+
+  test(
     'interactive ANSI errors and cancellation preserve the plain contract',
     () async {
       final plainProject = _project(
@@ -547,7 +599,7 @@ void main() {
           ),
           contains(
             '\x1B[1m\x1B[33m!\x1B[0m '
-            '\x1B[33mCancelled; no files were written.\x1B[0m',
+            '\x1B[33mCancelled.\x1B[0m',
           ),
         ),
       );
@@ -643,7 +695,7 @@ void main() {
       Directory(p.join(project.path, '.flutter_pruner')).existsSync(),
       isFalse,
     );
-    expect(prompt.transcript, contains('Cancelled; no files were written.'));
+    expect(prompt.transcript, contains('Cancelled.'));
   });
 
   test(
@@ -705,7 +757,7 @@ void main() {
       Directory(p.join(project.path, '.flutter_pruner')).existsSync(),
       isFalse,
     );
-    expect(prompt.transcript, contains('Cancelled; no files were written.'));
+    expect(prompt.transcript, contains('Cancelled.'));
   });
 
   test(
@@ -793,7 +845,7 @@ void main() {
     ], workingDirectory: project.path);
 
     expect(result.exitCode, 0, reason: result.stderr as String);
-    expect(result.stdout, contains('Next: flutter_pruner scan'));
+    expect(result.stdout, contains("Next: flutter_pruner 'scan'"));
     expect(result.stdout, isNot(contains('scan --project')));
   }, timeout: const Timeout(Duration(minutes: 1)));
 }

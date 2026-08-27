@@ -2,6 +2,9 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_pruner/src/adapters/adapter_report_definition.dart';
+import 'package:flutter_pruner/src/apply/finding_action_builder.dart';
+import 'package:flutter_pruner/src/apply/finding_selection.dart';
+import 'package:flutter_pruner/src/apply/removal_planner.dart';
 import 'package:flutter_pruner/src/cli/formatters/json_formatter.dart';
 import 'package:flutter_pruner/src/cli/formatters/report_formatter.dart';
 import 'package:flutter_pruner/src/core/confidence/classification_reason.dart';
@@ -15,9 +18,78 @@ import 'package:flutter_pruner/src/reporting/run_report.dart';
 import 'package:test/test.dart';
 
 void main() {
+  test(
+    'inventory binds reviewed JSON presentation values without rewriting v2',
+    () {
+      final inventory =
+          jsonDecode(
+                File(
+                  'test/cli/fixtures/cli_surface_inventory.json',
+                ).readAsStringSync(),
+              )
+              as Map<String, Object?>;
+      final entries = (inventory['surfaces']! as List<Object?>)
+          .cast<Map<String, Object?>>();
+      final v2 = const JsonFormatter(
+        version: 2,
+      ).format(_v2WireContractReport());
+      final v3 = const JsonFormatter().format(_v2WireContractReport());
+
+      for (final command in ['saved json v2 report', 'saved json v3 report']) {
+        final output = switch (command) {
+          'saved json v2 report' => v2,
+          'saved json v3 report' => v3,
+          _ => throw StateError('unreachable'),
+        };
+        final semanticValues = _classifyReviewedJsonSemantics(output);
+        final expected = entries
+            .where((entry) => entry['command'] == command)
+            .map((entry) => entry['semanticPath']! as String)
+            .toSet();
+        _expectSemanticInventory(semanticValues, expected, command);
+
+        final document = jsonDecode(output) as Map<String, Object?>;
+        final removed = Map<String, Object?>.of(document)..remove('version');
+        expect(
+          () => _expectSemanticInventory(
+            _classifyReviewedJsonSemantics(jsonEncode(removed)),
+            expected,
+            command,
+          ),
+          throwsA(isA<TestFailure>()),
+          reason: 'the semantic classifier must reject artifact removal',
+        );
+        final added = Map<String, Object?>.of(document)
+          ..['diagnostics'] = const [
+            {'message': 'C3 reviewed semantic addition'},
+          ];
+        expect(
+          () => _expectSemanticInventory(
+            _classifyReviewedJsonSemantics(jsonEncode(added)),
+            expected,
+            command,
+          ),
+          throwsA(isA<TestFailure>()),
+          reason:
+              'the semantic classifier must reject additions at a reviewed path',
+        );
+      }
+    },
+  );
+
   test('v2 legacy wire contract matches frozen UTF-8 bytes', () {
     final rendered = utf8.encode(
       const JsonFormatter(version: 2).format(_v2WireContractReport()),
+    );
+
+    expect(rendered, _v2WireContractFixture.readAsBytesSync());
+  });
+
+  test('v2 retained fixture ignores A2 apply preview evidence', () {
+    final rendered = utf8.encode(
+      const JsonFormatter(
+        version: 2,
+      ).format(_v2WireContractReport(withApplyPreviewEvidence: true)),
     );
 
     expect(rendered, _v2WireContractFixture.readAsBytesSync());
@@ -891,6 +963,154 @@ void main() {
     ]);
   });
 
+  test('v3 serializes the initial physical plan and preview projection', () {
+    final output =
+        jsonDecode(const JsonFormatter().format(_augmentedApplyReport()))
+            as Map<String, Object?>;
+
+    final apply = output['apply'] as Map<String, Object?>;
+    expect((apply['selection'] as Map<String, Object?>), {
+      'mode': 'exact',
+      'requestedFindingIds': ['finding-a', 'finding-b'],
+      'plannedFindingIds': ['finding-a', 'finding-b'],
+      'planFingerprint': 'a' * 64,
+      'actualPreviewFingerprint': _previewFingerprint,
+      'expectedPreviewFingerprint': _previewFingerprint,
+      'previewComparison': 'matched',
+    });
+    expect(apply['initialPlan'], {
+      'canonicalVersion': 1,
+      'scope': 'complete_exact_selection',
+      'planFingerprint': 'a' * 64,
+      'units': [
+        {
+          'order': 0,
+          'id': 'unit-a',
+          'findingIds': ['finding-a'],
+          'dependencyUnitIds': <String>[],
+          'actions': [
+            {
+              'order': 0,
+              'logicalFindingId': 'finding-a',
+              'journalFindingId': 'finding-a@cleanup',
+              'operation': 'cleanupImports',
+              'projectRelativePath': 'lib/importer.dart',
+              'label': 'cleanup "café ✓"\n',
+              'countsTowardSummary': false,
+              'cleanupTargetPath': 'lib/dead.dart',
+            },
+          ],
+        },
+        {
+          'order': 1,
+          'id': 'unit-b',
+          'findingIds': ['finding-b'],
+          'dependencyUnitIds': ['unit-a'],
+          'actions': [
+            {
+              'order': 0,
+              'logicalFindingId': 'finding-b',
+              'journalFindingId': 'finding-b@variant',
+              'operation': 'deleteFile',
+              'projectRelativePath': 'assets/dead@2x.png',
+              'label': 'resolution variant assets/dead@2x.png',
+              'countsTowardSummary': false,
+            },
+            {
+              'order': 1,
+              'logicalFindingId': 'finding-b',
+              'journalFindingId': 'finding-b',
+              'operation': 'removeFinding',
+              'projectRelativePath': 'lib/dead.dart',
+              'countsTowardSummary': true,
+            },
+            {
+              'order': 2,
+              'logicalFindingId': 'finding-b',
+              'journalFindingId': 'finding-b@generated',
+              'operation': 'deleteFile',
+              'projectRelativePath': 'lib/dead.g.dart',
+              'label': 'generated companion lib/dead.g.dart',
+              'countsTowardSummary': false,
+            },
+          ],
+        },
+      ],
+      'blocked': [
+        {
+          'findingId': 'finding-c',
+          'reason': 'retainedConsumer',
+          'blockedBy': 'dart:consumer',
+        },
+      ],
+      'preview': {
+        'version': 1,
+        'fingerprint': _previewFingerprint,
+        'sources': [
+          {
+            'projectRelativePath': 'assets/dead@2x.png',
+            'canonicalPath': '/project/assets/dead@2x.png',
+            'sha256': '1' * 64,
+            'sizeBytes': 3,
+            'posixMode': 420,
+          },
+          {
+            'projectRelativePath': 'lib/dead.dart',
+            'canonicalPath': '/project/lib/dead.dart',
+            'sha256': '2' * 64,
+            'sizeBytes': 0,
+            'posixMode': null,
+          },
+          {
+            'projectRelativePath': 'lib/dead.g.dart',
+            'canonicalPath': '/project/lib/dead.g.dart',
+            'sha256': '3' * 64,
+            'sizeBytes': 9,
+            'posixMode': 384,
+          },
+          {
+            'projectRelativePath': 'lib/importer.dart',
+            'canonicalPath': '/project/lib/importer.dart',
+            'sha256': '4' * 64,
+            'sizeBytes': 1,
+            'posixMode': 420,
+          },
+        ],
+      },
+    });
+
+    final rendered = const JsonFormatter().format(_augmentedApplyReport());
+    expect(rendered, contains(r'cleanup \"café ✓\"\n'));
+  });
+
+  test('v3 retains mismatched preview expectation tokens', () {
+    final output =
+        jsonDecode(
+              const JsonFormatter().format(
+                _augmentedApplyReport(
+                  expectedPreviewFingerprint: 'v1:${'b' * 64}',
+                ),
+              ),
+            )
+            as Map<String, Object?>;
+
+    final selection =
+        (output['apply'] as Map<String, Object?>)['selection']
+            as Map<String, Object?>;
+    expect(selection['actualPreviewFingerprint'], _previewFingerprint);
+    expect(selection['expectedPreviewFingerprint'], 'v1:${'b' * 64}');
+    expect(selection['previewComparison'], 'mismatched');
+  });
+
+  test('v2 ignores augmented apply preview fields byte-for-byte', () {
+    const formatter = JsonFormatter(version: 2);
+
+    expect(
+      formatter.format(_augmentedApplyReport()),
+      formatter.format(_plainApplyReport()),
+    );
+  });
+
   test('v3 deduplicates blocker identities and streams deterministically', () {
     final first = Blocker(
       producer: 'dart',
@@ -954,6 +1174,70 @@ void main() {
   });
 }
 
+/// Traverses parsed JSON, rather than its source bytes, so indentation, key
+/// ordering, and escaping cannot hide a presentation-contract change.
+Set<String> _classifyReviewedJsonSemantics(String serialized) {
+  final allValues = _extractJsonSemanticValues(serialized);
+  return {
+    for (final value in allValues)
+      if (_isReviewedSemanticPath(value.split('=').first)) value,
+  };
+}
+
+const _reviewedSemanticPathPatterns = <String>[
+  r'^\$\.version$',
+  r'^\$\.findings\[[0-9]+\]\.(?:title|confidence|whyNotSafe|proposedAction)$',
+  r'^\$\.findings\[[0-9]+\]\.blockers\[[0-9]+\]\.reason$',
+  r'^\$\.findings\[[0-9]+\]\.evidence\[[0-9]+\]\.description$',
+  r'^\$\.diagnostics\[[0-9]+\]\.(?:reason|message|label|detail)$',
+];
+
+bool _isReviewedSemanticPath(String path) => _reviewedSemanticPathPatterns.any(
+  (pattern) => RegExp(pattern).hasMatch(path),
+);
+
+void _expectSemanticInventory(
+  Set<String> actual,
+  Set<String> expected,
+  String command,
+) {
+  expect(
+    actual,
+    expected,
+    reason:
+        '$command semantic inventory must exactly equal the independently '
+        'classified reviewed path/value set',
+  );
+}
+
+Set<String> _extractJsonSemanticValues(String serialized) {
+  final values = <String>{};
+
+  void visit(Object? value, String path) {
+    switch (value) {
+      case final Map<Object?, Object?> map:
+        for (final entry in map.entries) {
+          visit(entry.value, '$path.${entry.key}');
+        }
+      case final List<Object?> list:
+        for (final (index, item) in list.indexed) {
+          visit(item, '$path[$index]');
+        }
+      case final String string:
+        values.add('$path=${jsonEncode(string)}');
+      case final num number:
+        values.add('$path=$number');
+      case final bool boolean:
+        values.add('$path=$boolean');
+      case null:
+        values.add('$path=null');
+    }
+  }
+
+  visit(jsonDecode(serialized), r'$');
+  return values;
+}
+
 final _v2WireContractFixture = File('test/fixtures/v2_json_wire_contract.json');
 
 final class _StringOnlyFormatter extends ReportFormatter {
@@ -993,7 +1277,7 @@ final class _ChunkObservingSink implements StringSink {
   String toString() => chunks.join();
 }
 
-RunReport _v2WireContractReport() {
+RunReport _v2WireContractReport({bool withApplyPreviewEvidence = false}) {
   final emptyIds = Blocker(
     producer: 'route/api',
     reason: 'unresolved "route" \\ name',
@@ -1079,10 +1363,21 @@ RunReport _v2WireContractReport() {
       notRetained: true,
     ),
   );
+  final initialPlan = withApplyPreviewEvidence ? _initialPlanReport() : null;
+  final selection = initialPlan == null
+      ? null
+      : ApplySelectionReport(
+          mode: FindingSelectionMode.exact,
+          requestedFindingIds: const ['finding-a', 'finding-b'],
+          plannedFindingIds: const ['finding-a', 'finding-b'],
+          planFingerprint: 'a' * 64,
+          actualPreviewFingerprint: initialPlan.preview!.fingerprint,
+          expectedPreviewFingerprint: initialPlan.preview!.fingerprint,
+        );
   return RunReport(
     identity: RunIdentity(
       id: 'v2-wire-contract',
-      command: RunCommand.scan,
+      command: withApplyPreviewEvidence ? RunCommand.apply : RunCommand.scan,
       toolVersion: 'legacy-v2',
       startedAtUtc: DateTime.utc(2026, 8, 20),
       finishedAtUtc: DateTime.utc(2026, 8, 20, 0, 0, 1),
@@ -1092,6 +1387,7 @@ RunReport _v2WireContractReport() {
     exitCode: 0,
     partialApplied: false,
     projectRoot: '/project',
+    canonicalProjectRoot: initialPlan?.preview?.canonicalProjectRoot,
     packageName: 'wire-contract',
     requestedAdapters: const ['assets', 'dart'],
     targetMatrix: TargetMatrix(
@@ -1124,6 +1420,8 @@ RunReport _v2WireContractReport() {
     analysisPasses: const [],
     findings: [protected, safe],
     diagnostics: const [],
+    applySelection: selection,
+    applyInitialPlan: initialPlan,
   );
 }
 
@@ -1470,4 +1768,155 @@ final _localesDefinition = AdapterReportDefinition(
       ],
     ),
   ],
+);
+
+String get _previewFingerprint => _initialPlanReport().preview!.fingerprint;
+
+RunReport _augmentedApplyReport({String? expectedPreviewFingerprint}) {
+  final initialPlan = _initialPlanReport();
+  return _applyReportWith(
+    selection: ApplySelectionReport(
+      mode: FindingSelectionMode.exact,
+      requestedFindingIds: const ['finding-a', 'finding-b'],
+      plannedFindingIds: const ['finding-a', 'finding-b'],
+      planFingerprint: 'a' * 64,
+      actualPreviewFingerprint: initialPlan.preview!.fingerprint,
+      expectedPreviewFingerprint:
+          expectedPreviewFingerprint ?? initialPlan.preview!.fingerprint,
+    ),
+    initialPlan: initialPlan,
+  );
+}
+
+RunReport _plainApplyReport() => _applyReportWith();
+
+RunReport _applyReportWith({
+  ApplySelectionReport? selection,
+  ApplyInitialPlanReport? initialPlan,
+}) => RunReport(
+  identity: RunIdentity(
+    id: 'apply-preview-report',
+    command: RunCommand.apply,
+    toolVersion: 'test',
+    startedAtUtc: DateTime.utc(2026, 8, 25),
+    finishedAtUtc: DateTime.utc(2026, 8, 25, 0, 0, 1),
+    elapsedMicros: 1000000,
+  ),
+  status: RunStatus.dryRun,
+  exitCode: 0,
+  partialApplied: false,
+  projectRoot: '/project',
+  canonicalProjectRoot: initialPlan?.preview?.canonicalProjectRoot,
+  packageName: 'test',
+  requestedAdapters: const ['dart'],
+  targetMatrix: TargetMatrix.declared(const []),
+  rootCoverage: RootCoverage.applicationApi(),
+  analysisPasses: const [],
+  findings: const [],
+  diagnostics: const [],
+  applySelection: selection,
+  applyInitialPlan: initialPlan,
+  applyStatistics: ApplyStatistics.empty,
+);
+
+ApplyInitialPlanReport _initialPlanReport() => ApplyInitialPlanReport(
+  canonicalVersion: 1,
+  scope: ApplyInitialPlanScope.completeExactSelection,
+  planFingerprint: 'a' * 64,
+  units: [
+    ApplyPlanUnitReport(
+      order: 0,
+      id: 'unit-a',
+      findingIds: const ['finding-a'],
+      dependencyUnitIds: const [],
+      actions: [
+        ApplyPlanActionReport(
+          order: 0,
+          logicalFindingId: 'finding-a',
+          journalFindingId: 'finding-a@cleanup',
+          operation: FindingActionOperation.cleanupImports,
+          projectRelativePath: 'lib/importer.dart',
+          label: 'cleanup "café ✓"\n',
+          countsTowardSummary: false,
+          cleanupTargetPath: 'lib/dead.dart',
+        ),
+      ],
+    ),
+    ApplyPlanUnitReport(
+      order: 1,
+      id: 'unit-b',
+      findingIds: const ['finding-b'],
+      dependencyUnitIds: const ['unit-a'],
+      actions: [
+        ApplyPlanActionReport(
+          order: 0,
+          logicalFindingId: 'finding-b',
+          journalFindingId: 'finding-b@variant',
+          operation: FindingActionOperation.deleteFile,
+          projectRelativePath: 'assets/dead@2x.png',
+          label: 'resolution variant assets/dead@2x.png',
+          countsTowardSummary: false,
+        ),
+        ApplyPlanActionReport(
+          order: 1,
+          logicalFindingId: 'finding-b',
+          journalFindingId: 'finding-b',
+          operation: FindingActionOperation.removeFinding,
+          projectRelativePath: 'lib/dead.dart',
+          countsTowardSummary: true,
+        ),
+        ApplyPlanActionReport(
+          order: 2,
+          logicalFindingId: 'finding-b',
+          journalFindingId: 'finding-b@generated',
+          operation: FindingActionOperation.deleteFile,
+          projectRelativePath: 'lib/dead.g.dart',
+          label: 'generated companion lib/dead.g.dart',
+          countsTowardSummary: false,
+        ),
+      ],
+    ),
+  ],
+  blocked: [
+    ApplyPlanBlockReport(
+      findingId: 'finding-c',
+      reason: PlanBlockReason.retainedConsumer,
+      blockedBy: 'dart:consumer',
+    ),
+  ],
+  preview: ApplyPreviewReport(
+    version: 1,
+    canonicalProjectRoot: '/project',
+    planFingerprint: 'a' * 64,
+    sources: [
+      ApplySourceSnapshotReport(
+        projectRelativePath: 'assets/dead@2x.png',
+        canonicalPath: '/project/assets/dead@2x.png',
+        sha256: '1' * 64,
+        sizeBytes: 3,
+        posixMode: 420,
+      ),
+      ApplySourceSnapshotReport(
+        projectRelativePath: 'lib/dead.dart',
+        canonicalPath: '/project/lib/dead.dart',
+        sha256: '2' * 64,
+        sizeBytes: 0,
+        posixMode: null,
+      ),
+      ApplySourceSnapshotReport(
+        projectRelativePath: 'lib/dead.g.dart',
+        canonicalPath: '/project/lib/dead.g.dart',
+        sha256: '3' * 64,
+        sizeBytes: 9,
+        posixMode: 384,
+      ),
+      ApplySourceSnapshotReport(
+        projectRelativePath: 'lib/importer.dart',
+        canonicalPath: '/project/lib/importer.dart',
+        sha256: '4' * 64,
+        sizeBytes: 1,
+        posixMode: 420,
+      ),
+    ],
+  ),
 );

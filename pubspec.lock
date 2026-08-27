@@ -17,6 +17,22 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "12.1.0"
+  ansi_regex:
+    dependency: transitive
+    description:
+      name: ansi_regex
+      sha256: ca4f2b24a85e797a1512e1d3fe34d5f8429648f78e2268b6a8b5628c8430e643
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.1.2"
+  ansi_strip:
+    dependency: transitive
+    description:
+      name: ansi_strip
+      sha256: "9bb54e10962ac1de86b9b64a278a5b8965a28a2f741975eac7fe9fb0ebe1aaac"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.1.1+1"
   args:
     dependency: "direct main"
     description:
@@ -41,6 +57,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.1.2"
+  characters:
+    dependency: "direct main"
+    description:
+      name: characters
+      sha256: faf38497bda5ead2a8c7615f4f7939df04333478bf32e4173fcb06d428b5716b
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.4.1"
   checked_yaml:
     dependency: transitive
     description:
@@ -89,6 +113,22 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "3.0.7"
+  east_asian_width:
+    dependency: transitive
+    description:
+      name: east_asian_width
+      sha256: a13c5487dab7ddbad48875789819f0ea38a61cbaaa3024ebe7b199521e6f5788
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.0.1"
+  emoji_regex:
+    dependency: transitive
+    description:
+      name: emoji_regex
+      sha256: "3a25dd4d16f98b6f76dc37cc9ae49b8511891ac4b87beac9443a1e9f4634b6c7"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.0.5"
   file:
     dependency: transitive
     description:
@@ -313,6 +353,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.4.1"
+  string_width:
+    dependency: "direct main"
+    description:
+      name: string_width
+      sha256: "0ea481fbb6d5e2d70937fea303d8cc9296048da107dffeecf2acb675c8b47e7f"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.1.5"
   term_glyph:
     dependency: transitive
     description:

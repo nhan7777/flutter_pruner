@@ -7,6 +7,7 @@ import 'package:flutter_pruner/src/adapters/get_it/get_it_adapter.dart';
 import 'package:flutter_pruner/src/adapters/go_router/go_router_adapter.dart';
 import 'package:flutter_pruner/src/adapters/l10n/l10n_adapter.dart';
 import 'package:flutter_pruner/src/analysis/project_analyzer.dart';
+import 'package:flutter_pruner/src/cli/usage_error.dart';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
@@ -119,6 +120,19 @@ environment:
   });
 
   group('selection', () {
+    test('CLI unknown-adapter errors name the registered --adapter option', () {
+      expect(
+        () => validateRequestedAdapterIds({'not_registered'}),
+        throwsA(
+          isA<UnknownAdapterIdUsageException>().having(
+            (error) => error.message,
+            'message',
+            'Unknown adapter id requested by --adapter: not_registered.',
+          ),
+        ),
+      );
+    });
+
     test('resolves all adapters when unfiltered', () {
       final resolved = AdapterRegistry.resolve(
         adapters: const [_FakeAdapter('a'), _FakeAdapter('b')],

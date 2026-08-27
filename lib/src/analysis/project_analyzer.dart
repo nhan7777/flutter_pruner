@@ -1,5 +1,7 @@
 import '../adapters/adapter_report_definition.dart';
 import '../adapters/analyzer_adapter.dart';
+import '../adapters/dart/analyzer_diagnostic_collector.dart';
+import '../adapters/dart/dart_adapter.dart';
 import '../adapters/dart/dart_adapter_profile.dart';
 import '../adapters/dart/dart_analysis_workspace.dart';
 import '../adapters/dart/dart_execution_context_service.dart';
@@ -7,19 +9,31 @@ import '../adapters/dart/dart_execution_reachability_service.dart';
 import '../adapters/registry.dart';
 import '../core/confidence/finding_generator.dart';
 import '../core/graph/reachability_graph.dart';
+import '../core/process/managed_process_runner.dart';
 import '../core/project/project_context.dart';
 import '../reporting/run_report.dart';
 import 'analysis_snapshot.dart';
 
+/// Observes how one applicable adapter attempt finished.
+typedef AdapterFinishedCallback =
+    void Function(AnalyzerAdapter adapter, AdapterRunStatus status);
+
 /// Builds one graph and finding set for both scan and apply.
 class ProjectAnalyzer {
   /// Creates an analyzer for [project] and an optional adapter filter.
-  ProjectAnalyzer({required this.project, Set<String>? only, this.dartProfile})
-    : _requestedAdapterIds = only,
-      _reportingNodeSchemes = _reportingSchemes(only),
-      adapters = AdapterRegistry.resolve(
-        only: only == null ? null : _withDependencies(only),
-      ) {
+  ProjectAnalyzer({
+    required this.project,
+    Set<String>? only,
+    this.dartProfile,
+    ProcessExecutionRunner? analyzerDiagnosticProcessRunner,
+  }) : _requestedAdapterIds = only,
+       _reportingNodeSchemes = _reportingSchemes(only),
+       adapters = AdapterRegistry.resolve(
+         only: only == null ? null : _withDependencies(only),
+         adapters: _adaptersWithDiagnosticRunner(
+           analyzerDiagnosticProcessRunner,
+         ),
+       ) {
     adapterReportDefinitions = List.unmodifiable(
       adapters.map((adapter) => adapter.reportDefinition.snapshot()),
     );
@@ -45,6 +59,7 @@ class ProjectAnalyzer {
   /// Runs every applicable adapter and classifies the resulting graph.
   Future<AnalysisSnapshot> analyze({
     void Function(AnalyzerAdapter adapter)? onAdapter,
+    AdapterFinishedCallback? onAdapterFinished,
   }) async {
     project.pathPolicy.resetObservations();
     final analysisStopwatch = Stopwatch()..start();
@@ -134,7 +149,7 @@ class ProjectAnalyzer {
             blockersAdded: graph.blockers.length - blockerCount,
           ),
         );
-      } catch (_) {
+      } catch (error, stackTrace) {
         stopwatch.stop();
         adapterRuns.add(
           AdapterRunReport(
@@ -149,8 +164,14 @@ class ProjectAnalyzer {
             reason: 'adapter analysis failed',
           ),
         );
-        rethrow;
+        try {
+          onAdapterFinished?.call(adapter, AdapterRunStatus.failed);
+        } on Object {
+          // An observer cannot replace the adapter failure being reported.
+        }
+        Error.throwWithStackTrace(error, stackTrace);
       }
+      onAdapterFinished?.call(adapter, AdapterRunStatus.executed);
     }
     final graphIntegrity = graph.integrityFor(project.targets);
     final findingStopwatch = Stopwatch()..start();
@@ -198,6 +219,20 @@ class ProjectAnalyzer {
       add(id);
     }
     return expanded;
+  }
+
+  static List<AnalyzerAdapter>? _adaptersWithDiagnosticRunner(
+    ProcessExecutionRunner? runner,
+  ) {
+    if (runner == null) return null;
+    final collector = AnalyzerDiagnosticCollector(processRunner: runner);
+    return <AnalyzerAdapter>[
+      for (final adapter in AdapterRegistry.builtIn)
+        if (adapter is DartAdapter)
+          DartAdapter(collectAnalyzerDiagnostics: collector.collect)
+        else
+          adapter,
+    ];
   }
 
   static Set<String>? _reportingSchemes(Set<String>? requested) {

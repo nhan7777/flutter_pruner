@@ -4,25 +4,35 @@ import 'package:args/command_runner.dart';
 
 import '../../analysis/analysis_snapshot.dart';
 import '../../analysis/project_analyzer.dart';
+import '../../core/process/managed_process_runner.dart';
 import '../../core/project/analysis_mode.dart';
 import '../../core/project/project_context.dart';
+import '../../core/project/project_operation_lock.dart';
 import '../../core/project/tool_workspace.dart';
 import '../../reporting/immutable_report_store.dart';
 import '../../reporting/io_report_object_backend.dart';
 import '../../reporting/report_object_backend.dart';
 import '../../reporting/report_output_identity.dart';
+import '../../reporting/reportable_command_failure.dart';
 import '../../reporting/run_recorder.dart';
 import '../../reporting/run_report.dart';
 import '../../version.dart';
+import '../cli_exit_code.dart';
+import '../cli_signal_coordinator.dart';
 import '../formatters/html_formatter.dart';
 import '../formatters/human_formatter.dart';
 import '../formatters/json_formatter.dart';
 import '../formatters/report_formatter.dart';
 import '../project_command_support.dart';
 import '../terminal_progress.dart';
+import '../usage_error.dart';
 
 /// Creates the JSON formatter selected by a scan invocation.
 typedef JsonFormatterFactory = JsonFormatter Function(int version);
+
+/// Creates the analyzer used by one scan invocation.
+typedef ScanProjectAnalyzerFactory =
+    ProjectAnalyzer Function(ProjectContext project, Set<String>? only);
 
 /// Analyses a project and reports findings without modifying project sources.
 ///
@@ -33,44 +43,62 @@ class ScanCommand extends Command<int> {
   ScanCommand({
     ReportObjectBackend? reportBackend,
     JsonFormatterFactory? jsonFormatterFactory,
+    ScanProjectAnalyzerFactory? analyzerFactory,
+    CliSignalCoordinator? signalCoordinator,
+    ManagedProcessCancellationController? processCancellation,
+    ManagedProcessStarter? analyzerProcessStarter,
+    ManagedProcessTreeTerminator? analyzerProcessTreeTerminator,
   }) : _reportBackend = reportBackend,
+       _signalCoordinator = signalCoordinator,
        _jsonFormatterFactory =
-           jsonFormatterFactory ?? _defaultJsonFormatterFactory {
+           jsonFormatterFactory ?? _defaultJsonFormatterFactory,
+       _analyzerFactory =
+           analyzerFactory ??
+           ((project, only) => ProjectAnalyzer(
+             project: project,
+             only: only,
+             analyzerDiagnosticProcessRunner: ManagedProcessRunner(
+               cancellationController: processCancellation,
+               processStarter: analyzerProcessStarter,
+               processTreeTerminator: analyzerProcessTreeTerminator,
+             ),
+           )) {
     argParser
       ..addOption(
         'format',
         allowed: ['human', 'json', 'html'],
         defaultsTo: 'html',
         help:
-            'Saved report format. Defaults to self-contained interactive HTML.',
+            'Saved report format; defaults to self-contained interactive HTML',
       )
       ..addOption(
         'output',
         abbr: 'o',
         help:
-            'Override the automatic .flutter_pruner/reports destination. '
-            'Absolute paths remain supported.',
+            'Override automatic .flutter_pruner/reports destination; '
+            'absolute paths remain supported',
       )
       ..addOption(
         'json-version',
         allowed: ['2', '3'],
         defaultsTo: '3',
-        help: 'JSON report schema. Version 2 is compatibility-only.',
+        help: 'JSON report schema; version 2 is legacy',
       )
       ..addMultiOption(
         'adapter',
-        help: 'Only run these adapters, by id. Defaults to all registered.',
+        help: 'Run only these adapter IDs; defaults to all registered',
       )
       ..addOption(
         'config',
-        help:
-            'Configuration path. Relative paths start at the selected project.',
+        help: 'Configuration path; relative paths start at selected project',
       );
     addProjectOption(argParser);
   }
 
   final ReportObjectBackend? _reportBackend;
+  final CliSignalCoordinator? _signalCoordinator;
   final JsonFormatterFactory _jsonFormatterFactory;
+  final ScanProjectAnalyzerFactory _analyzerFactory;
 
   @override
   String get invocation => '${super.invocation} [project-path]';
@@ -80,17 +108,40 @@ class ScanCommand extends Command<int> {
 
   @override
   String get description =>
-      'Analyse without changing project sources. Always saves a report.';
+      'Analyse without changing project sources; always saves a report';
+
+  @override
+  String get usageFooter => '''Examples:
+  flutter_pruner scan
+  flutter_pruner scan --format json --output scan.json
+  flutter_pruner scan --project ./example
+
+Scan may persist tool state and reports''';
 
   @override
   Future<int> run() async {
     final args = argResults!;
     final outputPath = args.option('output');
+    final only = args.multiOption('adapter').toSet();
+
+    if (args.wasParsed('json-version') && args.option('format') != 'json') {
+      throw commandUsageError(this, '--json-version requires --format json.');
+    }
 
     final rest = args.rest;
     if (rest.length > 1) {
-      stderr.writeln('Error: expected at most one project path.');
-      return 64;
+      throw commandUsageError(this, 'Expected at most one project path.');
+    }
+    if (args.option('project') != null && rest.isNotEmpty) {
+      throw commandUsageError(
+        this,
+        'Pass the project once, using either --project or [project-path].',
+      );
+    }
+    try {
+      validateRequestedAdapterIds(only);
+    } on UnknownAdapterIdUsageException catch (e) {
+      throw commandUsageError(this, e.message);
     }
 
     late final ToolWorkspace workspace;
@@ -101,7 +152,7 @@ class ScanCommand extends Command<int> {
       );
     } on ProjectSelectionException catch (e) {
       stderr.writeln('Error: $e');
-      return 64;
+      return CliExitCode.operationalFailure;
     }
     final targetDir = workspace.projectRoot;
     late final File? requestedOutputFile;
@@ -117,7 +168,7 @@ class ScanCommand extends Command<int> {
       configFile = requireProjectConfig(workspace, explicitConfig);
     } on ToolWorkspaceException catch (e) {
       stderr.writeln('Error: $e');
-      return 64;
+      return CliExitCode.operationalFailure;
     } on ProjectConfigPreflightException catch (e) {
       stderr.writeln('Error: $e');
       return 1;
@@ -154,27 +205,17 @@ class ScanCommand extends Command<int> {
     final progress = TerminalProgress(
       sink: stderr,
       animated: stderr.hasTerminal,
+      signalCoordinator: _signalCoordinator,
     )..writeProject(project.root.path);
     if (project.analysisMode == AnalysisMode.packageInternal) {
       stderr.writeln(packageInternalWarning(project.packageName));
     }
 
-    final only = args.multiOption('adapter').toSet();
     final verbose = globalResults?.flag('verbose') ?? false;
-    late final ProjectAnalyzer analyzer;
-    try {
-      analyzer = ProjectAnalyzer(
-        project: project,
-        only: only.isEmpty ? null : only,
-      );
-    } on StateError catch (e) {
-      stderr.writeln('Error: ${e.message}');
-      return 64;
-    }
+    final analyzer = _analyzerFactory(project, only.isEmpty ? null : only);
 
     if (analyzer.adapters.isEmpty) {
-      stderr.writeln('Error: no matching adapters were selected.');
-      return 64;
+      throw StateError('No matching adapters were selected.');
     }
 
     final recorder = RunRecorder(
@@ -209,9 +250,27 @@ class ScanCommand extends Command<int> {
               backend: backend,
               identity: provisionalIdentity,
             );
-    } on Object catch (error) {
+    } on FileSystemException catch (error) {
       stderr.writeln('Error: report was not saved: $error');
       return 1;
+    } on ReportObjectBackendException catch (error) {
+      stderr.writeln('Error: report was not saved: $error');
+      return 1;
+    }
+    late final ProjectOperationLock operationLock;
+    try {
+      operationLock = await ProjectOperationLock.acquire(
+        workspace: workspace,
+        operation: 'scan-analysis',
+      );
+    } on ProjectOperationLockException catch (error) {
+      try {
+        await preparedOutput.close();
+      } on Object {
+        // The retained process-authority failure remains primary.
+      }
+      stderr.writeln('Error: $error');
+      return CliExitCode.operationalFailure;
     }
     if (project.analysisMode == AnalysisMode.packageInternal) {
       recorder.addDiagnostic(
@@ -224,47 +283,109 @@ class ScanCommand extends Command<int> {
         ),
       );
     }
-    recorder.registerAdapterReportDefinitions(
-      analyzer.adapterReportDefinitions,
-    );
     final writeContext = _ReportWriteContext();
     Object? primaryError;
     StackTrace? primaryStackTrace;
     int? failureExitCode;
+    Object? reportPersistenceError;
     RunReport? completedReport;
     CommittedReport? committedReport;
+    ReportableCommandFailure? commandFailure;
+    Object? postCommitCloseError;
     try {
       late final AnalysisSnapshot snapshot;
       var analysisSucceeded = false;
+      String? currentAdapterId;
+      String? currentAdapterName;
       try {
-        snapshot = await analyzer.analyze(
-          onAdapter: (adapter) => progress.start(adapter.name),
+        recorder.registerAdapterReportDefinitions(
+          analyzer.adapterReportDefinitions,
+        );
+        snapshot = await operationLock.guardManagedProcessUncertainty(
+          incidentId: recorder.runId,
+          phase: 'analysis',
+          body: () => analyzer.analyze(
+            onAdapter: (adapter) {
+              final context = _validatedAdapterContext(
+                id: adapter.id,
+                name: adapter.name,
+              );
+              currentAdapterId = context?.id;
+              currentAdapterName = context?.name;
+              progress.start(context?.name ?? 'adapter analysis');
+            },
+            onAdapterFinished: (adapter, status) {
+              if (status == AdapterRunStatus.failed) return;
+              currentAdapterId = null;
+              currentAdapterName = null;
+            },
+          ),
         );
         analysisSucceeded = true;
+      } on ProcessCancellationBeforeLaunchException catch (error) {
+        commandFailure = _scanCancellationFailure(error.originalSignal);
+      } on ProcessCancellationConfirmedException catch (error) {
+        commandFailure = _scanCancellationFailure(error.originalSignal);
+      } on ProcessTerminationUnconfirmedException catch (error) {
+        commandFailure = _scanUnconfirmedProcessFailure(
+          error,
+          exactEvidenceRetained:
+              operationLock.hasRetainedExactProcessIdentityEvidence,
+        );
+      } on Object {
+        commandFailure = currentAdapterId == null
+            ? ReportableCommandFailure(
+                code: 'analysis_failed',
+                phase: 'analysis',
+                message: 'Project analysis did not complete.',
+                exitCode: CliExitCode.internal,
+                status: RunStatus.internalError,
+              )
+            : ReportableCommandFailure(
+                code: 'adapter_analysis_failed',
+                phase: 'analysis:adapter:$currentAdapterId',
+                message:
+                    'Analysis failed after adapter $currentAdapterName '
+                    '($currentAdapterId) started.',
+                exitCode: CliExitCode.internal,
+                status: RunStatus.internalError,
+              );
       } finally {
-        progress.finish(succeeded: analysisSucceeded);
+        try {
+          progress.finish(succeeded: analysisSucceeded);
+        } finally {
+          await operationLock.release();
+        }
       }
-      recorder.addAnalysisPass(
-        snapshot.toPassReport(
-          id: 'analysis-001',
-          purpose: AnalysisPassPurpose.initial,
-        ),
-      );
+      if (commandFailure case final failure?) {
+        completedReport = recorder.finishFailure(
+          project: project,
+          failure: failure,
+        );
+        stderr.writeln('Error: ${failure.message}');
+      } else {
+        recorder.addAnalysisPass(
+          snapshot.toPassReport(
+            id: 'analysis-001',
+            purpose: AnalysisPassPurpose.initial,
+          ),
+        );
 
-      if (verbose) {
-        stderr.writeln(
-          'Graph: ${snapshot.graph.nodeCount} nodes, '
-          '${snapshot.graph.edgeCount} edges, '
-          '${snapshot.graph.blockers.length} blockers.',
+        if (verbose) {
+          stderr.writeln(
+            'Graph: ${snapshot.graph.nodeCount} nodes, '
+            '${snapshot.graph.edgeCount} edges, '
+            '${snapshot.graph.blockers.length} blockers.',
+          );
+        }
+
+        completedReport = recorder.finish(
+          project: project,
+          status: RunStatus.completed,
+          exitCode: 0,
+          findings: snapshot.findings,
         );
       }
-
-      completedReport = recorder.finish(
-        project: project,
-        status: RunStatus.completed,
-        exitCode: 0,
-        findings: snapshot.findings,
-      );
       final ReportFormatter formatter = switch (format) {
         'json' => _jsonFormatterFactory(
           int.parse(args.option('json-version')!),
@@ -275,6 +396,11 @@ class ScanCommand extends Command<int> {
           lineWidth: _humanLineWidth(writesToFile: true),
         ),
       };
+      if (commandFailure != null &&
+          formatter is JsonFormatter &&
+          formatter.version == 2) {
+        throw const _FailureReportCompatibilityException();
+      }
       if (formatter is JsonFormatter) formatter.preflight(completedReport);
       committedReport = await preparedOutput.writeBatch(
         identity: ReportCommitIdentity(
@@ -302,29 +428,53 @@ class ScanCommand extends Command<int> {
     } on JsonV2CompatibilityLimitException catch (error) {
       stderr.writeln('Error: $error');
       failureExitCode = 1;
+      reportPersistenceError = error;
     } on ImmutableReportStoreException catch (error) {
       final formatterFailure = writeContext.formatterFailure(error);
       if (formatterFailure == null) {
-        stderr.writeln('Error: report was not saved: $error');
         failureExitCode = 1;
+        reportPersistenceError = error;
       } else {
         primaryError = formatterFailure.error;
         primaryStackTrace = formatterFailure.stackTrace;
+        reportPersistenceError = formatterFailure.error;
       }
     } on Object catch (error, stackTrace) {
       primaryError = error;
       primaryStackTrace = stackTrace;
+      reportPersistenceError = error;
     }
 
     try {
       await preparedOutput.close();
     } on Object catch (error, stackTrace) {
-      if (primaryError == null && failureExitCode == null) {
+      if (committedReport != null) {
+        postCommitCloseError = error;
+      } else if (primaryError == null && failureExitCode == null) {
         primaryError = error;
         primaryStackTrace = stackTrace;
-        stderr.writeln('Error: report was not saved: $error');
-        failureExitCode = 1;
+        reportPersistenceError = error;
       }
+    }
+    if (reportPersistenceError case final error?) {
+      stderr.writeln('Error: report was not saved: $error');
+    }
+    if (commandFailure case final failure?) {
+      if (reportPersistenceError != null) return failure.exitCode;
+      final actualPath = committedReport!.actualObjectPaths['primary']!;
+      if (postCommitCloseError case final error?) {
+        stderr.writeln(
+          'Error: report output close failed after commit: $error',
+        );
+      }
+      stderr.writeln('Failure report saved: $actualPath');
+      return failure.exitCode;
+    }
+    if (postCommitCloseError case final error?) {
+      final actualPath = committedReport!.actualObjectPaths['primary']!;
+      stderr.writeln('Error: report output close failed after commit: $error');
+      stderr.writeln('Report saved: $actualPath');
+      return CliExitCode.internal;
     }
     if (primaryError != null) {
       Error.throwWithStackTrace(primaryError, primaryStackTrace!);
@@ -364,8 +514,13 @@ final class _ReportWriteContext {
   final Set<Object> _sinkFailures = Set<Object>.identity();
   final Map<Object, StackTrace> _formatterFailures =
       Map<Object, StackTrace>.identity();
+  var _writeStarted = false;
 
   void write(ReportFormatter formatter, RunReport report, StringSink sink) {
+    if (_writeStarted) {
+      throw StateError('A report formatter callback cannot be reused.');
+    }
+    _writeStarted = true;
     try {
       formatter.writeTo(
         report,
@@ -429,3 +584,63 @@ final class _SinkFailureTrackingStringSink implements StringSink {
 
 JsonFormatter _defaultJsonFormatterFactory(int version) =>
     JsonFormatter(version: version);
+
+ReportableCommandFailure _scanCancellationFailure(ProcessSignal signal) =>
+    ReportableCommandFailure(
+      code: 'process_cancelled_before_mutation',
+      phase: 'analysis',
+      message: 'Scan was interrupted while an owned process tree was active.',
+      exitCode: conventionalSignalExitCode(signal),
+      status: RunStatus.interrupted,
+    );
+
+ReportableCommandFailure _scanUnconfirmedProcessFailure(
+  ProcessTerminationUnconfirmedException error, {
+  required bool exactEvidenceRetained,
+}) => ReportableCommandFailure(
+  code: 'process_termination_unconfirmed',
+  phase: 'analysis',
+  message: exactEvidenceRetained
+      ? 'An analyzer process rooted at PID ${error.processId} may still be '
+            'running. Scan did not mutate project sources. Future mutating '
+            'commands remain blocked until every exact recorded process '
+            'identity is absent; rerun the command to recheck.'
+      : 'An analyzer process rooted at PID ${error.processId} may still be '
+            'running, and complete identity evidence was not retained. Scan '
+            'did not mutate project sources. Future mutating commands remain '
+            'blocked; preserve operation.lock and inspect the process before '
+            'recovery.',
+  exitCode: CliExitCode.operationalFailure,
+  status: RunStatus.infrastructureFailure,
+);
+
+final class _FailureReportCompatibilityException implements Exception {
+  const _FailureReportCompatibilityException();
+
+  @override
+  String toString() =>
+      'JSON v2 cannot represent failed run reports. Use --json-version 3.';
+}
+
+({String id, String name})? _validatedAdapterContext({
+  required String id,
+  required String name,
+}) {
+  final stableId = id.length <= 64 && RegExp(r'^[A-Za-z0-9_.-]+$').hasMatch(id);
+  final safeName =
+      name.isNotEmpty &&
+      name.length <= 128 &&
+      name.trim() == name &&
+      !name.runes.any(
+        (rune) =>
+            rune < 0x20 ||
+            (rune >= 0x7f && rune <= 0x9f) ||
+            (rune >= 0x200b && rune <= 0x200f) ||
+            rune == 0x2028 ||
+            rune == 0x2029 ||
+            (rune >= 0x202a && rune <= 0x202e) ||
+            (rune >= 0x2066 && rune <= 0x2069) ||
+            rune == 0xfeff,
+      );
+  return stableId && safeName ? (id: id, name: name) : null;
+}

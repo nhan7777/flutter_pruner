@@ -648,6 +648,88 @@ Future<void> main(List<String> arguments) async {
     }
   });
 
+  for (final cancellation in <Exception>[
+    const ProcessCancellationBeforeLaunchException(ProcessSignal.sigint),
+    const ProcessCancellationConfirmedException(ProcessSignal.sigterm, 4242),
+    const ProcessTerminationUnconfirmedException(
+      processId: 4242,
+      message: 'fixture termination unconfirmed',
+      triggerSignal: ProcessSignal.sigint,
+    ),
+  ]) {
+    test(
+      'rethrows ${cancellation.runtimeType} from command execution',
+      () async {
+        final project = Directory.systemTemp.createTempSync(
+          'verification_cancel_command_',
+        );
+        try {
+          final runner = VerificationRunner(
+            project,
+            processRunner: _PhaseCancellationRunner(
+              cancellation,
+              cancelVersionProbe: false,
+            ),
+          );
+
+          await expectLater(
+            runner.verify(policy: _policy),
+            throwsA(same(cancellation)),
+          );
+        } finally {
+          if (project.existsSync()) project.deleteSync(recursive: true);
+        }
+      },
+    );
+
+    test(
+      'rethrows ${cancellation.runtimeType} from toolchain identity',
+      () async {
+        final project = Directory.systemTemp.createTempSync(
+          'verification_cancel_identity_',
+        );
+        try {
+          final runner = VerificationRunner(
+            project,
+            processRunner: _PhaseCancellationRunner(
+              cancellation,
+              cancelVersionProbe: true,
+            ),
+          );
+
+          await expectLater(
+            runner.verify(policy: _policy),
+            throwsA(same(cancellation)),
+          );
+        } finally {
+          if (project.existsSync()) project.deleteSync(recursive: true);
+        }
+      },
+    );
+
+    test(
+      'rethrows ${cancellation.runtimeType} from Flutter availability',
+      () async {
+        final project = Directory.systemTemp.createTempSync(
+          'verification_cancel_flutter_',
+        );
+        try {
+          final runner = VerificationRunner(
+            project,
+            processRunner: _ThrowingRunner(cancellation),
+          );
+
+          await expectLater(
+            runner.isFlutterAvailable(),
+            throwsA(same(cancellation)),
+          );
+        } finally {
+          if (project.existsSync()) project.deleteSync(recursive: true);
+        }
+      },
+    );
+  }
+
   test('rejects a changed parser contract for the same step ID', () {
     final baseline = _result(
       passed: false,
@@ -736,6 +818,55 @@ class _TruncatingRunner implements ProcessExecutionRunner {
         capturedBytes: 0,
         omittedBytes: 0,
       ),
+    );
+  }
+}
+
+class _ThrowingRunner implements ProcessExecutionRunner {
+  const _ThrowingRunner(this.error);
+
+  final Exception error;
+
+  @override
+  Future<ManagedProcessResult> run(
+    String executable,
+    List<String> arguments, {
+    required String workingDirectory,
+    required Duration timeout,
+    required int maxOutputBytesPerStream,
+  }) async {
+    throw error;
+  }
+}
+
+class _PhaseCancellationRunner implements ProcessExecutionRunner {
+  const _PhaseCancellationRunner(
+    this.error, {
+    required this.cancelVersionProbe,
+  });
+
+  final Exception error;
+  final bool cancelVersionProbe;
+
+  @override
+  Future<ManagedProcessResult> run(
+    String executable,
+    List<String> arguments, {
+    required String workingDirectory,
+    required Duration timeout,
+    required int maxOutputBytesPerStream,
+  }) async {
+    final isVersionProbe =
+        arguments.length == 1 && arguments.single == '--version';
+    if (isVersionProbe == cancelVersionProbe) throw error;
+    return const ManagedProcessResult(
+      exitCode: 0,
+      stdout: BoundedProcessOutput(
+        text: 'No issues found!',
+        capturedBytes: 16,
+        omittedBytes: 0,
+      ),
+      stderr: BoundedProcessOutput(text: '', capturedBytes: 0, omittedBytes: 0),
     );
   }
 }

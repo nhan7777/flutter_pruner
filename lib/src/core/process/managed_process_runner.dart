@@ -16,10 +16,116 @@ abstract interface class ProcessExecutionRunner {
   });
 }
 
+/// Starts one process without invoking a shell.
+///
+/// The injectable boundary lets process-lifecycle tests hold a launch between
+/// the OS spawn and the runner observing the returned [Process].
+typedef ManagedProcessStarter =
+    Future<Process> Function(
+      String executable,
+      List<String> arguments, {
+      required String workingDirectory,
+    });
+
+/// One-shot cancellation authority shared by every production managed runner.
+///
+/// A launch reservation is created synchronously before [Process.start] is
+/// awaited. This keeps the CLI in coordinated-cancellation mode while a spawn
+/// is pending and prevents a signal from orphaning a child whose handle has not
+/// yet reached [ManagedProcessRunner].
+final class ManagedProcessCancellationController {
+  final Completer<ProcessSignal> _request = Completer<ProcessSignal>();
+  final Set<_ManagedProcessLaunchReservation> _reservations =
+      <_ManagedProcessLaunchReservation>{};
+
+  /// Completes with the first requested signal and never resets.
+  Future<ProcessSignal> get requested => _request.future;
+
+  /// Whether coordinated cancellation has been requested.
+  bool get isRequested => _request.isCompleted;
+
+  /// Number of process launches pending or process trees still being observed.
+  int get pendingOrActiveTreeCount => _reservations.length;
+
+  /// Requests cancellation using the first triggering signal.
+  ///
+  /// Returns `true` only for the first request. Later signals are handled by
+  /// the CLI coordinator's hard-stop path rather than replacing this signal.
+  bool requestCancellation(ProcessSignal signal) {
+    if (_request.isCompleted) return false;
+    _recordSignal(signal);
+    _request.complete(signal);
+    return true;
+  }
+
+  _ManagedProcessLaunchReservation _reserveLaunch() {
+    if (_request.isCompleted) {
+      throw ProcessCancellationBeforeLaunchException(_requestedSignal);
+    }
+    final reservation = _ManagedProcessLaunchReservation._(this);
+    _reservations.add(reservation);
+    return reservation;
+  }
+
+  ProcessSignal get _requestedSignal {
+    if (!_request.isCompleted) {
+      throw StateError('Managed process cancellation was not requested.');
+    }
+    return _completedRequestSignal!;
+  }
+
+  ProcessSignal? _completedRequestSignal;
+
+  void _recordSignal(ProcessSignal signal) {
+    _completedRequestSignal ??= signal;
+  }
+
+  void _release(_ManagedProcessLaunchReservation reservation) {
+    _reservations.remove(reservation);
+  }
+}
+
+final class _ManagedProcessLaunchReservation {
+  _ManagedProcessLaunchReservation._(this._controller);
+
+  final ManagedProcessCancellationController _controller;
+  int? rootPid;
+  var _released = false;
+
+  void bind(int pid) {
+    if (_released) {
+      throw StateError('Cannot bind a released process launch reservation.');
+    }
+    rootPid = pid;
+  }
+
+  void release() {
+    if (_released) return;
+    _released = true;
+    _controller._release(this);
+  }
+}
+
 /// Default process executor used by mutating and verification workflows.
 class ManagedProcessRunner implements ProcessExecutionRunner {
   /// Creates a managed process runner.
-  const ManagedProcessRunner();
+  const ManagedProcessRunner({
+    this.cancellationController,
+    ManagedProcessStarter? processStarter,
+    ManagedProcessTreeTerminator? processTreeTerminator,
+    ProcessIdentityInspector processIdentityInspector =
+        const ManagedProcessIdentityInspector(),
+  }) : _processStarter = processStarter,
+       _processTreeTerminator = processTreeTerminator,
+       _processIdentityInspector = processIdentityInspector;
+
+  /// Shared cancellation authority, or `null` for embedding/tests that do not
+  /// participate in CLI signal coordination.
+  final ManagedProcessCancellationController? cancellationController;
+
+  final ManagedProcessStarter? _processStarter;
+  final ManagedProcessTreeTerminator? _processTreeTerminator;
+  final ProcessIdentityInspector _processIdentityInspector;
 
   @override
   Future<ManagedProcessResult> run(
@@ -40,12 +146,33 @@ class ManagedProcessRunner implements ProcessExecutionRunner {
       );
     }
 
-    final process = await Process.start(
-      executable,
-      List<String>.unmodifiable(arguments),
-      workingDirectory: workingDirectory,
-      mode: ProcessStartMode.normal,
-    );
+    final reservation = cancellationController?._reserveLaunch();
+    late final Process process;
+    try {
+      final immutableArguments = List<String>.unmodifiable(arguments);
+      process =
+          await (_processStarter?.call(
+                executable,
+                immutableArguments,
+                workingDirectory: workingDirectory,
+              ) ??
+              Process.start(
+                executable,
+                immutableArguments,
+                workingDirectory: workingDirectory,
+                mode: ProcessStartMode.normal,
+              ));
+    } catch (_) {
+      reservation?.release();
+      final controller = cancellationController;
+      if (controller != null && controller.isRequested) {
+        throw ProcessCancellationBeforeLaunchException(
+          controller._requestedSignal,
+        );
+      }
+      rethrow;
+    }
+    reservation?.bind(process.pid);
     final exitCode = process.exitCode;
     final stdoutOutput = _collectBounded(
       process.stdout,
@@ -55,31 +182,72 @@ class ManagedProcessRunner implements ProcessExecutionRunner {
       process.stderr,
       maxOutputBytesPerStream,
     );
-    final observer = _ProcessTreeObserver(process.pid)..start();
+    final observer = _ProcessTreeObserver(
+      process.pid,
+      identityInspector: _processIdentityInspector,
+    );
 
     try {
-      final completed = await Future.wait<Object>([
+      // Bind the PID above before this first await, then capture its first
+      // observable start identity before racing completion and cancellation.
+      await observer.captureInitialIdentityAndStart();
+      final completion = Future.wait<Object>([
         exitCode,
         stdoutOutput,
         stderrOutput,
-      ]).timeout(timeout);
-      await observer.stop();
-      return ManagedProcessResult(
-        exitCode: completed[0] as int,
-        stdout: completed[1] as BoundedProcessOutput,
-        stderr: completed[2] as BoundedProcessOutput,
-      );
-    } on TimeoutException {
-      final observationReliable = await observer.stop();
-      final terminated = await _terminateProcessTree(
-        process,
-        exitCode,
-        observedProcesses: observer.observedProcesses,
-        observationReliable: observationReliable,
-      );
-      if (!terminated) {
+      ]);
+      final outcome = await Future.any<_ManagedProcessOutcome>([
+        completion.then(_ManagedProcessOutcome.completed),
+        Future<void>.delayed(
+          timeout,
+        ).then((_) => const _ManagedProcessOutcome.timedOut()),
+        if (cancellationController case final controller?)
+          controller.requested.then(_ManagedProcessOutcome.cancelled),
+      ]);
+
+      late final bool observationReliable;
+      if (outcome.signal == null && !outcome.timedOut) {
+        observationReliable = await observer.stop();
+        final controller = cancellationController;
+        if (controller == null || !controller.isRequested) {
+          final completed = outcome.completed!;
+          return ManagedProcessResult(
+            exitCode: completed[0] as int,
+            stdout: completed[1] as BoundedProcessOutput,
+            stderr: completed[2] as BoundedProcessOutput,
+          );
+        }
+      } else {
+        observationReliable = await observer.stop();
+      }
+
+      final terminationEvidence =
+          await (_processTreeTerminator?.call(
+                process,
+                exitCode,
+                observedProcesses: observer.observedProcesses,
+                observationReliable: observationReliable,
+              ) ??
+              _terminateProcessTree(
+                process,
+                exitCode,
+                observedProcesses: observer.observedProcesses,
+                observationReliable: observationReliable,
+                identityInspector: _processIdentityInspector,
+              ));
+      final cancellationSignal =
+          outcome.signal ??
+          (cancellationController?.isRequested ?? false
+              ? cancellationController!._requestedSignal
+              : null);
+      if (!terminationEvidence.terminationConfirmed) {
         throw ProcessTerminationUnconfirmedException(
           processId: process.pid,
+          triggerSignal: cancellationSignal,
+          observedProcesses: terminationEvidence.observedProcesses,
+          observationReliable:
+              terminationEvidence.observationReliable &&
+              terminationEvidence.observedProcesses.containsKey(process.pid),
           message:
               'Could not confirm termination of the process tree rooted at '
               'PID ${process.pid}.',
@@ -91,6 +259,12 @@ class ManagedProcessRunner implements ProcessExecutionRunner {
           stdoutOutput,
           stderrOutput,
         ]).timeout(_processTerminationTimeout);
+        if (cancellationSignal != null) {
+          throw ProcessCancellationConfirmedException(
+            cancellationSignal,
+            process.pid,
+          );
+        }
         return ManagedProcessResult(
           exitCode: -1,
           stdout: output[0],
@@ -100,6 +274,11 @@ class ManagedProcessRunner implements ProcessExecutionRunner {
       } on TimeoutException {
         throw ProcessTerminationUnconfirmedException(
           processId: process.pid,
+          triggerSignal: cancellationSignal,
+          observedProcesses: terminationEvidence.observedProcesses,
+          observationReliable:
+              terminationEvidence.observationReliable &&
+              terminationEvidence.observedProcesses.containsKey(process.pid),
           message:
               'PID ${process.pid} and its observed descendants stopped, but '
               'their output streams did not close after termination.',
@@ -111,8 +290,65 @@ class ManagedProcessRunner implements ProcessExecutionRunner {
       // rollback-safe infrastructure failure.
       await observer.stop();
       rethrow;
+    } finally {
+      reservation?.release();
     }
   }
+}
+
+/// Test seam for deterministically exercising confirmed and unconfirmed tree
+/// termination without weakening the production identity-checked terminator.
+typedef ManagedProcessTreeTerminator =
+    Future<ManagedProcessTerminationEvidence> Function(
+      Process process,
+      Future<int> exitCode, {
+      required Map<int, PosixProcessIdentity> observedProcesses,
+      required bool observationReliable,
+    });
+
+/// Immutable final process-tree evidence produced by a termination attempt.
+///
+/// [observedProcesses] is the terminator's final identity set, including any
+/// descendants discovered after the continuous observer stopped. A reliable
+/// set proves that inspection remained complete through a frozen descendant
+/// closure; it does not by itself claim that every recorded process exited.
+final class ManagedProcessTerminationEvidence {
+  /// Creates final termination evidence and freezes its identity map.
+  ManagedProcessTerminationEvidence({
+    required this.terminationConfirmed,
+    required Map<int, PosixProcessIdentity> observedProcesses,
+    required this.observationReliable,
+  }) : observedProcesses = Map<int, PosixProcessIdentity>.unmodifiable(
+         observedProcesses,
+       );
+
+  /// Whether the complete identity-checked tree was confirmed absent.
+  final bool terminationConfirmed;
+
+  /// Final root and descendant identities at the termination boundary.
+  final Map<int, PosixProcessIdentity> observedProcesses;
+
+  /// Whether inspection proved a complete frozen descendant closure.
+  final bool observationReliable;
+}
+
+final class _ManagedProcessOutcome {
+  const _ManagedProcessOutcome.completed(this.completed)
+    : timedOut = false,
+      signal = null;
+
+  const _ManagedProcessOutcome.timedOut()
+    : completed = null,
+      timedOut = true,
+      signal = null;
+
+  const _ManagedProcessOutcome.cancelled(this.signal)
+    : completed = null,
+      timedOut = false;
+
+  final List<Object>? completed;
+  final bool timedOut;
+  final ProcessSignal? signal;
 }
 
 /// A completed process execution.
@@ -169,6 +405,9 @@ class ProcessTerminationUnconfirmedException implements Exception {
   const ProcessTerminationUnconfirmedException({
     required this.processId,
     required this.message,
+    this.triggerSignal,
+    this.observedProcesses = const <int, PosixProcessIdentity>{},
+    this.observationReliable = false,
   });
 
   /// Root process identifier.
@@ -177,8 +416,49 @@ class ProcessTerminationUnconfirmedException implements Exception {
   /// Human-readable failure detail.
   final String message;
 
+  /// Signal that triggered termination, or `null` for a timeout.
+  final ProcessSignal? triggerSignal;
+
+  /// Exact start-time identities observed for the root and descendants.
+  final Map<int, PosixProcessIdentity> observedProcesses;
+
+  /// Whether observation covered the root and complete discovered tree.
+  final bool observationReliable;
+
   @override
   String toString() => message;
+}
+
+/// Cancellation was already requested before a later process could launch.
+final class ProcessCancellationBeforeLaunchException implements Exception {
+  /// Creates a before-launch cancellation outcome.
+  const ProcessCancellationBeforeLaunchException(this.originalSignal);
+
+  /// First signal that requested coordinated cancellation.
+  final ProcessSignal originalSignal;
+
+  @override
+  String toString() =>
+      'Process launch cancelled before start by $originalSignal.';
+}
+
+/// The complete observed process tree was confirmed stopped after a signal.
+final class ProcessCancellationConfirmedException implements Exception {
+  /// Creates a confirmed cancellation outcome for [rootPid].
+  const ProcessCancellationConfirmedException(
+    this.originalSignal,
+    this.rootPid,
+  );
+
+  /// First signal that requested coordinated cancellation.
+  final ProcessSignal originalSignal;
+
+  /// Non-null root PID whose observed tree was confirmed stopped.
+  final int rootPid;
+
+  @override
+  String toString() =>
+      'Process tree rooted at PID $rootPid was cancelled by $originalSignal.';
 }
 
 const _processTerminationTimeout = Duration(seconds: 5);
@@ -216,9 +496,14 @@ Future<BoundedProcessOutput> _collectBounded(
 }
 
 class _ProcessTreeObserver {
-  _ProcessTreeObserver(this.rootPid);
+  _ProcessTreeObserver(
+    this.rootPid, {
+    ProcessIdentityInspector identityInspector =
+        const ManagedProcessIdentityInspector(),
+  }) : _identityInspector = identityInspector;
 
   final int rootPid;
+  final ProcessIdentityInspector _identityInspector;
   final Map<int, PosixProcessIdentity> _observedProcesses = {};
   var _inspectionReliable = true;
   var _capturedRootIdentity = false;
@@ -228,9 +513,10 @@ class _ProcessTreeObserver {
   Map<int, PosixProcessIdentity> get observedProcesses =>
       Map.unmodifiable(_observedProcesses);
 
-  void start() {
+  Future<void> captureInitialIdentityAndStart() async {
     if (!Platform.isLinux && !Platform.isMacOS) return;
-    _task = _observe();
+    await _observeOnce();
+    if (!_stopping) _task = _observe();
   }
 
   Future<bool> stop() async {
@@ -241,50 +527,73 @@ class _ProcessTreeObserver {
 
   Future<void> _observe() async {
     while (!_stopping) {
-      try {
-        final processTable = await _readPosixProcessTable();
-        if (processTable == null) {
-          _inspectionReliable = false;
-        } else {
-          final rootIdentity = processTable.identityFor(rootPid);
-          if (rootIdentity != null) {
-            final previousRoot = _observedProcesses[rootPid];
-            if (previousRoot != null && previousRoot != rootIdentity) {
-              _inspectionReliable = false;
-            }
-            _observedProcesses[rootPid] = rootIdentity;
-            _capturedRootIdentity = true;
-          } else if (!_capturedRootIdentity) {
-            // Missing the root before its identity was captured leaves a gap
-            // in which descendants could have detached unobserved.
-            _inspectionReliable = false;
-          }
-
-          _observedProcesses.removeWhere(
-            (pid, identity) =>
-                pid != rootPid && !processTable.containsIdentity(identity),
-          );
-          final liveRoots = _observedProcesses.keys.toSet();
-          for (final pid in processTable.descendantsOf(liveRoots)) {
-            final identity = processTable.identityFor(pid);
-            if (identity != null) _observedProcesses[pid] = identity;
-          }
-        }
-      } catch (_) {
-        _inspectionReliable = false;
-      }
+      await _observeOnce();
       if (!_stopping) {
         await Future<void>.delayed(_processObservationInterval);
       }
     }
   }
+
+  Future<void> _observeOnce() async {
+    try {
+      final processTable = await _identityInspector.snapshot();
+      if (processTable == null) {
+        _inspectionReliable = false;
+        return;
+      }
+      final rootIdentity = processTable.identityFor(rootPid);
+      if (rootIdentity != null) {
+        final previousRoot = _observedProcesses[rootPid];
+        if (previousRoot == null) {
+          _observedProcesses[rootPid] = rootIdentity;
+          _capturedRootIdentity = true;
+        } else if (previousRoot != rootIdentity) {
+          // Do not replace the original lifetime with a reused root PID. The
+          // missing interval could also have hidden a detached descendant.
+          _inspectionReliable = false;
+        }
+      } else if (!_capturedRootIdentity) {
+        // Missing the root before its identity was captured leaves a gap in
+        // which descendants could have detached unobserved.
+        _inspectionReliable = false;
+      }
+
+      for (final identity in _observedProcesses.values) {
+        if (!processTable.containsIdentity(identity)) {
+          // Historical identities are monotonic evidence. Disappearance
+          // between snapshots is an observation gap: the process may have
+          // forked and reparented a child before exiting.
+          _inspectionReliable = false;
+        }
+      }
+      final liveRoots = processTable.matchingPids(_observedProcesses.values);
+      for (final pid in processTable.descendantsOf(liveRoots)) {
+        final identity = processTable.identityFor(pid);
+        if (identity == null) {
+          _inspectionReliable = false;
+          continue;
+        }
+        final previousIdentity = _observedProcesses[pid];
+        if (previousIdentity == null) {
+          _observedProcesses[pid] = identity;
+        } else if (previousIdentity != identity) {
+          // A reused descendant PID cannot replace its historical identity or
+          // become a traversal root for the new, unrelated lifetime.
+          _inspectionReliable = false;
+        }
+      }
+    } catch (_) {
+      _inspectionReliable = false;
+    }
+  }
 }
 
-Future<bool> _terminateProcessTree(
+Future<ManagedProcessTerminationEvidence> _terminateProcessTree(
   Process process,
   Future<int> exitCode, {
   required Map<int, PosixProcessIdentity> observedProcesses,
   required bool observationReliable,
+  required ProcessIdentityInspector identityInspector,
 }) async {
   if (Platform.isWindows) {
     return _terminateWindowsProcessTree(process, exitCode);
@@ -295,14 +604,19 @@ Future<bool> _terminateProcessTree(
       exitCode,
       observedProcesses: observedProcesses,
       observationReliable: observationReliable,
+      identityInspector: identityInspector,
     );
   }
   process.kill();
   await _waitForProcessExit(exitCode);
-  return false;
+  return ManagedProcessTerminationEvidence(
+    terminationConfirmed: false,
+    observedProcesses: observedProcesses,
+    observationReliable: false,
+  );
 }
 
-Future<bool> _terminateWindowsProcessTree(
+Future<ManagedProcessTerminationEvidence> _terminateWindowsProcessTree(
   Process process,
   Future<int> exitCode,
 ) async {
@@ -313,14 +627,19 @@ Future<bool> _terminateWindowsProcessTree(
     '/F',
   ]);
   final rootExited = await _waitForProcessExit(exitCode);
-  return result != null && result.exitCode == 0 && rootExited;
+  return ManagedProcessTerminationEvidence(
+    terminationConfirmed: result != null && result.exitCode == 0 && rootExited,
+    observedProcesses: const <int, PosixProcessIdentity>{},
+    observationReliable: false,
+  );
 }
 
-Future<bool> _terminatePosixProcessTree(
+Future<ManagedProcessTerminationEvidence> _terminatePosixProcessTree(
   Process process,
   Future<int> exitCode, {
   required Map<int, PosixProcessIdentity> observedProcesses,
   required bool observationReliable,
+  required ProcessIdentityInspector identityInspector,
 }) async {
   // Freeze every process observed while the command was running, then close
   // the descendant set before killing it. A process that deliberately
@@ -329,27 +648,48 @@ Future<bool> _terminatePosixProcessTree(
   final trackedProcesses = Map<int, PosixProcessIdentity>.from(
     observedProcesses,
   );
-  var inspectionReliable = observationReliable;
+  var inspectionReliable =
+      observationReliable && trackedProcesses.containsKey(process.pid);
   var treeFrozen = false;
+  final provenStopped = <PosixProcessIdentity>{};
   try {
     for (var pass = 0; pass < 6; pass++) {
-      final processTable = await _readPosixProcessTable();
+      final processTable = await identityInspector.snapshot();
       if (processTable == null) {
         inspectionReliable = false;
         break;
       }
 
+      for (final identity in trackedProcesses.values) {
+        if (!processTable.containsIdentity(identity) &&
+            !provenStopped.contains(identity)) {
+          // A previously observed process disappeared before a snapshot proved
+          // it stopped. It could have forked and reparented a descendant in
+          // that gap, so the retained identity set is not exact.
+          inspectionReliable = false;
+        }
+      }
       final livePids = processTable.matchingPids(trackedProcesses.values);
       final discovered = processTable.descendantsOf(livePids)
         ..removeAll(livePids);
       for (final pid in discovered) {
         final identity = processTable.identityFor(pid);
-        if (identity != null) trackedProcesses[pid] = identity;
+        if (identity == null) {
+          inspectionReliable = false;
+        } else {
+          trackedProcesses[pid] = identity;
+        }
       }
 
       final expandedLivePids = processTable.matchingPids(
         trackedProcesses.values,
       );
+      for (final pid in expandedLivePids) {
+        final identity = trackedProcesses[pid];
+        if (identity != null && processTable.isStopped(pid)) {
+          provenStopped.add(identity);
+        }
+      }
       final allStopped = expandedLivePids.every(processTable.isStopped);
       if (discovered.isEmpty && allStopped) {
         treeFrozen = true;
@@ -363,29 +703,42 @@ Future<bool> _terminatePosixProcessTree(
       }
     }
 
+    if (!treeFrozen) inspectionReliable = false;
+
     final killedFrozenTree = await _killMatchingProcesses(
       trackedProcesses,
       rootPid: process.pid,
       requireStopped: true,
+      identityInspector: identityInspector,
     );
+    if (!killedFrozenTree) inspectionReliable = false;
 
     final rootExited = await _waitForProcessExit(exitCode);
-    if (!rootExited) return false;
-    final trackedExited = await _waitForProcessesToExit(
+    final exitEvidence = await _waitForProcessesToExit(
       trackedProcesses.values,
+      identityInspector: identityInspector,
     );
-    return inspectionReliable &&
-        treeFrozen &&
-        killedFrozenTree &&
-        trackedExited;
+    final finalEvidenceReliable =
+        inspectionReliable && exitEvidence.inspectionReliable;
+    return ManagedProcessTerminationEvidence(
+      terminationConfirmed:
+          finalEvidenceReliable && rootExited && exitEvidence.allAbsent,
+      observedProcesses: trackedProcesses,
+      observationReliable: finalEvidenceReliable,
+    );
   } catch (_) {
     await _killMatchingProcesses(
       trackedProcesses,
       rootPid: process.pid,
       requireStopped: false,
+      identityInspector: identityInspector,
     );
     await _waitForProcessExit(exitCode);
-    return false;
+    return ManagedProcessTerminationEvidence(
+      terminationConfirmed: false,
+      observedProcesses: trackedProcesses,
+      observationReliable: false,
+    );
   }
 }
 
@@ -406,8 +759,9 @@ Future<bool> _killMatchingProcesses(
   Map<int, PosixProcessIdentity> trackedProcesses, {
   required int rootPid,
   required bool requireStopped,
+  required ProcessIdentityInspector identityInspector,
 }) async {
-  final processTable = await _readPosixProcessTable();
+  final processTable = await identityInspector.snapshot();
   if (processTable == null) return false;
   final livePids = processTable.matchingPids(trackedProcesses.values);
   final allStopped = livePids.every(processTable.isStopped);
@@ -433,18 +787,51 @@ Future<bool> _waitForProcessExit(Future<int> exitCode) async {
   }
 }
 
-Future<bool> _waitForProcessesToExit(
-  Iterable<PosixProcessIdentity> identities,
-) async {
+Future<_ProcessExitEvidence> _waitForProcessesToExit(
+  Iterable<PosixProcessIdentity> identities, {
+  required ProcessIdentityInspector identityInspector,
+}) async {
   final expected = identities.toList(growable: false);
   final stopwatch = Stopwatch()..start();
   while (stopwatch.elapsed < _processTerminationTimeout) {
-    final processTable = await _readPosixProcessTable();
-    if (processTable == null) return false;
-    if (processTable.matchingPids(expected).isEmpty) return true;
+    final processTable = await identityInspector.snapshot();
+    if (processTable == null) {
+      return const _ProcessExitEvidence(
+        allAbsent: false,
+        inspectionReliable: false,
+      );
+    }
+    final livePids = processTable.matchingPids(expected);
+    if (livePids.isEmpty) {
+      return const _ProcessExitEvidence(
+        allAbsent: true,
+        inspectionReliable: true,
+      );
+    }
     await Future<void>.delayed(const Duration(milliseconds: 25));
   }
-  return false;
+  final finalSnapshot = await identityInspector.snapshot();
+  if (finalSnapshot == null) {
+    return const _ProcessExitEvidence(
+      allAbsent: false,
+      inspectionReliable: false,
+    );
+  }
+  final livePids = finalSnapshot.matchingPids(expected);
+  return _ProcessExitEvidence(
+    allAbsent: livePids.isEmpty,
+    inspectionReliable: true,
+  );
+}
+
+class _ProcessExitEvidence {
+  const _ProcessExitEvidence({
+    required this.allAbsent,
+    required this.inspectionReliable,
+  });
+
+  final bool allAbsent;
+  final bool inspectionReliable;
 }
 
 Future<PosixProcessTableSnapshot?> _readPosixProcessTable() async {
@@ -458,6 +845,24 @@ Future<PosixProcessTableSnapshot?> _readPosixProcessTable() async {
   } catch (_) {
     return null;
   }
+}
+
+/// Reads exact POSIX process start identities for PID-reuse-safe decisions.
+abstract interface class ProcessIdentityInspector {
+  /// Returns a complete current snapshot, or `null` when inspection is not
+  /// trustworthy on this host or invocation.
+  Future<PosixProcessTableSnapshot?> snapshot();
+}
+
+/// Production identity inspector shared by process termination and retained
+/// project-operation authority.
+final class ManagedProcessIdentityInspector
+    implements ProcessIdentityInspector {
+  /// Creates the system inspector.
+  const ManagedProcessIdentityInspector();
+
+  @override
+  Future<PosixProcessTableSnapshot?> snapshot() => _readPosixProcessTable();
 }
 
 Future<_InspectionResult?> _runInspectionCommand(
@@ -533,6 +938,11 @@ class PosixProcessIdentity {
 /// tested deterministically without signaling real unrelated processes.
 class PosixProcessTableSnapshot {
   PosixProcessTableSnapshot._(this._processes, this._childrenByParent);
+
+  /// Creates an exact empty snapshot for deterministic absence evidence.
+  const PosixProcessTableSnapshot.empty()
+    : _processes = const <int, _PosixProcessRecord>{},
+      _childrenByParent = const <int, Set<int>>{};
 
   /// Parses `ps -axo pid=,ppid=,lstart=,state=` output.
   factory PosixProcessTableSnapshot.parse(String output) {

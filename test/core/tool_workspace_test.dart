@@ -27,8 +27,30 @@ void main() {
       p.join(project.path, '.flutter_pruner', 'quarantine'),
     );
     expect(
+      workspace.retainedCleanDirectory.path,
+      p.join(
+        project.path,
+        '.flutter_pruner',
+        'quarantine',
+        '.clean-retained',
+        'v1',
+      ),
+    );
+    expect(
       workspace.resolveReportFile('scan.json').path,
       p.join(project.path, '.flutter_pruner', 'reports', 'scan.json'),
+    );
+  });
+
+  test('resolves retained clean storage below every selected base', () {
+    final workspace = ToolWorkspace(project);
+    final selected = workspace.resolveQuarantineDirectory(
+      '.flutter_pruner/custom',
+    );
+
+    expect(
+      workspace.retainedCleanDirectoryFor(selected).path,
+      p.join(selected.path, '.clean-retained', 'v1'),
     );
   });
 

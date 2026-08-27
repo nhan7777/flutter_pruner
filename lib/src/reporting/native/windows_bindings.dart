@@ -76,6 +76,10 @@ typedef _GetHandleInformationNative =
     Int32 Function(Pointer<Void>, Int32, Pointer<Void>, Uint32);
 typedef _GetHandleInformationDart =
     int Function(Pointer<Void>, int, Pointer<Void>, int);
+typedef _SetHandleInformationNative =
+    Int32 Function(Pointer<Void>, Int32, Pointer<Void>, Uint32);
+typedef _SetHandleInformationDart =
+    int Function(Pointer<Void>, int, Pointer<Void>, int);
 typedef _GetVolumeInformationNative =
     Int32 Function(
       Pointer<Void>,
@@ -273,6 +277,11 @@ final class WindowsBindings implements WindowsReportBindings {
             _GetHandleInformationNative,
             _GetHandleInformationDart
           >('GetFileInformationByHandleEx'),
+      _setHandleInformation = kernel
+          .lookupFunction<
+            _SetHandleInformationNative,
+            _SetHandleInformationDart
+          >('SetFileInformationByHandle'),
       _getVolumeInformation = kernel
           .lookupFunction<
             _GetVolumeInformationNative,
@@ -307,6 +316,8 @@ final class WindowsBindings implements WindowsReportBindings {
   static const _genericWrite = 0x40000000;
   static const _shareRead = 0x1;
   static const _shareWrite = 0x2;
+  static const _shareDelete = 0x4;
+  static const _delete = 0x00010000;
   static const _openExisting = 3;
   static const _backupSemantics = 0x02000000;
   static const _openReparsePoint = 0x00200000;
@@ -319,6 +330,7 @@ final class WindowsBindings implements WindowsReportBindings {
   static const _nonDirectoryFile = 0x40;
   static const _moveBegin = 0;
   static const _fileStandardInfo = 1;
+  static const _fileRenameInfo = 3;
   static const _fileAttributeTagInfo = 9;
   static const _fileIdInfo = 18;
   static const _reparsePointAttribute = 0x400;
@@ -331,6 +343,7 @@ final class WindowsBindings implements WindowsReportBindings {
   final _HandleBoolDart _flushFileBuffers;
   final _SetFilePointerDart _setFilePointer;
   final _GetHandleInformationDart _getHandleInformation;
+  final _SetHandleInformationDart _setHandleInformation;
   final _GetVolumeInformationDart _getVolumeInformation;
   final _HandleBoolDart _closeHandle;
   final _GetLastErrorDart _getLastError;
@@ -386,6 +399,94 @@ final class WindowsBindings implements WindowsReportBindings {
         options: _synchronousIoNonAlert | _directoryFile | _openReparsePoint,
         operation: 'open-directory-relative',
       );
+
+  /// Opens one absolute directory for recoverable clean mutation.
+  ///
+  /// The returned handle is retained by the clean backend and is opened with
+  /// write authority so its metadata can be flushed after a rename.
+  Pointer<Void> openDirectoryForClean(String path) =>
+      withWideString(path, (widePath) {
+        final handle = _createFile(
+          widePath,
+          _genericRead | _genericWrite,
+          _shareRead | _shareWrite | _shareDelete,
+          nullptr,
+          _openExisting,
+          _backupSemantics | _openReparsePoint,
+          nullptr,
+        );
+        if (_isInvalidHandle(handle)) {
+          throw WindowsNativeFailure('open-clean-directory', _getLastError());
+        }
+        return handle;
+      });
+
+  /// Opens or exclusively creates one directory relative to [parent].
+  ///
+  /// When [renameSource] is true the exact returned handle carries `DELETE`
+  /// authority for [renameDirectoryNoReplace].
+  Pointer<Void> openRelativeDirectoryForClean(
+    Pointer<Void> parent,
+    String component, {
+    required bool create,
+    required bool renameSource,
+  }) => _openRelative(
+    parent,
+    component,
+    desiredAccess: _genericRead | _genericWrite | (renameSource ? _delete : 0),
+    shareAccess: _shareRead | _shareWrite | _shareDelete,
+    disposition: create ? _fileCreate : _fileOpen,
+    options: _synchronousIoNonAlert | _directoryFile | _openReparsePoint,
+    operation: create
+        ? 'create-clean-directory'
+        : renameSource
+        ? 'open-clean-rename-source'
+        : 'open-clean-directory-relative',
+  );
+
+  /// Renames the exact open [source] below [destinationParent].
+  ///
+  /// `ReplaceIfExists` is deliberately false, so an existing destination is
+  /// a hard native failure rather than an overwrite.
+  void renameDirectoryNoReplace(
+    Pointer<Void> source,
+    Pointer<Void> destinationParent,
+    String destinationLeaf,
+  ) {
+    if (destinationLeaf.isEmpty || destinationLeaf.codeUnits.contains(0)) {
+      throw ArgumentError.value(destinationLeaf, 'destinationLeaf');
+    }
+    final nameBytes = destinationLeaf.codeUnits.length * 2;
+    final nameOffset = sizeOf<IntPtr>() == 8 ? 20 : 12;
+    final buffer = allocateBytes(nameOffset + nameBytes);
+    try {
+      final bytes = buffer.asTypedList(nameOffset + nameBytes);
+      final data = bytes.buffer.asByteData();
+      bytes[0] = 0; // FILE_RENAME_INFO.ReplaceIfExists = FALSE.
+      if (sizeOf<IntPtr>() == 8) {
+        data.setUint64(8, destinationParent.address, Endian.host);
+        data.setUint32(16, nameBytes, Endian.host);
+      } else {
+        data.setUint32(4, destinationParent.address, Endian.host);
+        data.setUint32(8, nameBytes, Endian.host);
+      }
+      (buffer + nameOffset)
+          .cast<Uint16>()
+          .asTypedList(destinationLeaf.codeUnits.length)
+          .setAll(0, destinationLeaf.codeUnits);
+      if (_setHandleInformation(
+            source,
+            _fileRenameInfo,
+            buffer.cast<Void>(),
+            nameOffset + nameBytes,
+          ) ==
+          0) {
+        throw WindowsNativeFailure('rename-clean-directory', _getLastError());
+      }
+    } finally {
+      release(buffer.cast<Void>());
+    }
+  }
 
   Pointer<Void> _openRelative(
     Pointer<Void> parent,

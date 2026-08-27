@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
 
 import 'package:args/command_runner.dart';
@@ -8,6 +7,8 @@ import 'package:path/path.dart' as p;
 
 import '../../analysis/analysis_snapshot.dart';
 import '../../analysis/project_analyzer.dart';
+import '../../apply/apply_action_plan.dart';
+import '../../apply/apply_preview_evidence.dart';
 import '../../apply/declaration_remover.dart';
 import '../../apply/file_lifecycle_manager.dart';
 import '../../apply/finding_action_builder.dart';
@@ -31,10 +32,13 @@ import '../../reporting/immutable_report_store.dart';
 import '../../reporting/io_report_object_backend.dart';
 import '../../reporting/report_object_backend.dart';
 import '../../reporting/report_output_identity.dart';
+import '../../reporting/reportable_command_failure.dart';
 import '../../reporting/run_recorder.dart';
 import '../../reporting/run_report.dart';
 import '../../verification/verification_runner.dart';
 import '../../version.dart';
+import '../cli_exit_code.dart';
+import '../cli_signal_coordinator.dart';
 import '../formatters/html_formatter.dart';
 import '../formatters/human_formatter.dart';
 import '../formatters/json_formatter.dart';
@@ -42,6 +46,15 @@ import '../init_prompt.dart';
 import '../project_command_support.dart';
 import '../terminal_progress.dart';
 import '../terminal_workflow.dart';
+import '../usage_error.dart';
+
+/// Testable project-loading boundary for apply preflight.
+typedef ApplyProjectLoader =
+    Future<ProjectContext> Function(
+      Directory directory, {
+      File? configFile,
+      Iterable<String> additionalExcludedPaths,
+    });
 
 /// Applies findings by moving files to quarantine.
 ///
@@ -55,69 +68,114 @@ class ApplyCommand extends Command<int> {
     ImportCleanupRunner Function(Directory)? cleanupRunnerFactory,
     QuarantineManager Function(Directory)? quarantineManagerFactory,
     ReportObjectBackend? reportBackend,
+    ApplyProjectLoader? projectLoader,
     FutureOr<void> Function(Directory)? lifecycleCompletedHook,
+    void Function(File)? sourceSnapshotFirstReadHookForTesting,
     InitPrompt prompt = const StdioInitPrompt(),
-  }) : _verifierFactory = verifierFactory ?? VerificationRunner.new,
+    CliSignalCoordinator? signalCoordinator,
+    ManagedProcessCancellationController? processCancellation,
+    ManagedProcessStarter? analyzerProcessStarter,
+    ManagedProcessTreeTerminator? analyzerProcessTreeTerminator,
+  }) : _verifierFactory =
+           verifierFactory ??
+           ((projectRoot) => VerificationRunner(
+             projectRoot,
+             processRunner: ManagedProcessRunner(
+               cancellationController: processCancellation,
+             ),
+           )),
        _analyzerFactory =
            analyzerFactory ??
-           ((project, only) => ProjectAnalyzer(project: project, only: only)),
+           ((project, only) => ProjectAnalyzer(
+             project: project,
+             only: only,
+             analyzerDiagnosticProcessRunner: ManagedProcessRunner(
+               cancellationController: processCancellation,
+               processStarter: analyzerProcessStarter,
+               processTreeTerminator: analyzerProcessTreeTerminator,
+             ),
+           )),
        _cleanupRunnerFactory =
            cleanupRunnerFactory ??
-           ((projectRoot) =>
-               ImportCleanupRunner(projectRoot: projectRoot.path)),
+           ((projectRoot) => ImportCleanupRunner(
+             projectRoot: projectRoot.path,
+             processRunner: ManagedProcessRunner(
+               cancellationController: processCancellation,
+             ),
+           )),
        _quarantineManagerFactory =
-           quarantineManagerFactory ?? QuarantineManager.new,
+           quarantineManagerFactory ??
+           ((projectRoot) => QuarantineManager(
+             projectRoot,
+             atomicPublishProcessRunner: ManagedProcessRunner(
+               cancellationController: processCancellation,
+             ),
+             permissionProcessRunner: ManagedProcessRunner(
+               cancellationController: processCancellation,
+             ),
+           )),
        _reportBackend = reportBackend ?? createIoReportObjectBackend(),
+       _projectLoader = projectLoader ?? _defaultProjectLoader,
        _lifecycleCompletedHook = lifecycleCompletedHook,
+       _sourceSnapshotFirstReadHookForTesting =
+           sourceSnapshotFirstReadHookForTesting,
+       _signalCoordinator = signalCoordinator,
        _prompt = prompt {
     argParser
       ..addFlag(
         'dry-run',
         abbr: 'n',
         negatable: false,
-        help: 'Preview the dependency-closed plan without changing files.',
+        help: 'Preview dependency-closed plan without changing files',
       )
       ..addFlag(
         'yes',
         negatable: false,
         help:
-            'Accept package-internal external-consumer risk without prompting.',
+            'Accept package-internal external-consumer risk without prompting',
       )
       ..addMultiOption(
         'adapter',
-        help: 'Only run these adapters, by id. Defaults to all registered.',
+        help: 'Run only these adapter IDs; defaults to all registered',
       )
       ..addMultiOption(
         'finding-id',
         splitCommas: false,
         help:
-            'Apply only this exact, case-sensitive finding ID. Repeat for an '
-            'atomic batch.',
+            'Apply only these exact, case-sensitive finding IDs; repeat for '
+            'an atomic batch',
+      )
+      ..addOption(
+        'expect-preview-fingerprint',
+        help:
+            'Require exact v1 preview fingerprint before verification or '
+            'mutation',
       )
       ..addOption(
         'config',
-        help:
-            'Configuration path. Relative paths start at the selected project.',
+        help: 'Configuration path; relative paths start at selected project',
       )
       ..addOption(
         'quarantine',
         help:
-            'Quarantine directory. Defaults to .flutter_pruner/quarantine in '
-            'the selected project.',
+            'Quarantine directory; defaults to .flutter_pruner/quarantine in '
+            'the selected project',
       )
       ..addOption(
         'report-output',
+        aliases: const ['output'],
         help:
-            'Override the automatic .flutter_pruner/reports destination. '
-            'Absolute paths remain supported.',
+            'Override automatic .flutter_pruner/reports destination; '
+            'absolute paths remain supported',
       )
       ..addOption(
         'report-format',
+        aliases: const ['format'],
         allowed: const ['json', 'html'],
         defaultsTo: 'html',
         help:
-            'Saved report format. Defaults to HTML; quarantine also keeps '
-            'canonical JSON.',
+            'Saved report format; defaults to HTML and also keeps canonical '
+            'quarantine JSON',
       );
     addProjectOption(argParser);
   }
@@ -127,8 +185,24 @@ class ApplyCommand extends Command<int> {
   final ImportCleanupRunner Function(Directory) _cleanupRunnerFactory;
   final QuarantineManager Function(Directory) _quarantineManagerFactory;
   final ReportObjectBackend _reportBackend;
+  final ApplyProjectLoader _projectLoader;
   final FutureOr<void> Function(Directory)? _lifecycleCompletedHook;
+
+  // Test-only interposition for deterministic between-read drift. No CLI,
+  // environment, or config surface can set this callback.
+  final void Function(File)? _sourceSnapshotFirstReadHookForTesting;
+  final CliSignalCoordinator? _signalCoordinator;
   final InitPrompt _prompt;
+
+  static Future<ProjectContext> _defaultProjectLoader(
+    Directory directory, {
+    File? configFile,
+    Iterable<String> additionalExcludedPaths = const [],
+  }) => ProjectContext.load(
+    directory,
+    configFile: configFile,
+    additionalExcludedPaths: additionalExcludedPaths,
+  );
   _ApplyReportPersistence? _activeReportPersistence;
 
   @override
@@ -139,8 +213,20 @@ class ApplyCommand extends Command<int> {
 
   @override
   String get description =>
-      'Apply findings. Rollback restores quarantined regular-file bytes and '
-      'POSIX modes where available, subject to verification.';
+      'Apply findings; rollback restores quarantined regular-file bytes and '
+      'POSIX modes where available, subject to verification';
+
+  @override
+  String get usageFooter =>
+      '''Examples:
+  flutter_pruner apply --dry-run
+  flutter_pruner apply --finding-id dart:example/lib/main.dart#unusedFunction --finding-id dart:example/lib/main.dart#unusedClass --dry-run
+  flutter_pruner apply --finding-id dart:example/lib/main.dart#unusedFunction --expect-preview-fingerprint v1:${'0' * 64}
+  flutter_pruner apply --dry-run --format json --output apply.json
+
+The preview fingerprint requires the same exact --finding-id selection
+Apply, including --dry-run, may persist tool state and reports
+--format and --output are aliases for --report-format and --report-output''';
 
   @override
   Future<int> run() async {
@@ -157,19 +243,45 @@ class ApplyCommand extends Command<int> {
         args.multiOption('finding-id'),
       );
     } on FindingSelectionException catch (error) {
-      stderr.writeln('Error: ${error.message}');
-      return 64;
+      throw commandUsageError(this, error.message);
+    }
+    final expectedPreviewFingerprint = args.option(
+      'expect-preview-fingerprint',
+    );
+    if (expectedPreviewFingerprint != null) {
+      if (!isValidApplyPreviewFingerprint(expectedPreviewFingerprint)) {
+        throw commandUsageError(
+          this,
+          'Preview fingerprint must use v1:<64 lowercase hex>.',
+        );
+      }
+      if (!findingSelection.isExact) {
+        throw commandUsageError(
+          this,
+          '--expect-preview-fingerprint requires at least one --finding-id.',
+        );
+      }
+    }
+    final rest = args.rest;
+    if (rest.length > 1) {
+      throw commandUsageError(this, 'Expected at most one project path.');
+    }
+    if (args.option('project') != null && rest.isNotEmpty) {
+      throw commandUsageError(
+        this,
+        'Pass the project once, using either --project or [project-path].',
+      );
+    }
+    try {
+      validateRequestedAdapterIds(only);
+    } on UnknownAdapterIdUsageException catch (e) {
+      throw commandUsageError(this, e.message);
     }
     final recorder = RunRecorder(
       command: RunCommand.apply,
       requestedAdapters: only.toList()..sort(),
       toolVersion: packageVersion,
     );
-    final rest = args.rest;
-    if (rest.length > 1) {
-      stderr.writeln('Error: expected at most one project path.');
-      return 64;
-    }
 
     late final ToolWorkspace workspace;
     try {
@@ -179,7 +291,7 @@ class ApplyCommand extends Command<int> {
       );
     } on ProjectSelectionException catch (e) {
       stderr.writeln('Error: $e');
-      return 64;
+      return CliExitCode.operationalFailure;
     }
     late final Directory quarantineBaseDir;
     late final FrozenReportOutputIdentity reportOutput;
@@ -205,7 +317,7 @@ class ApplyCommand extends Command<int> {
       configFile = requireProjectConfig(workspace, explicitConfig);
     } on ToolWorkspaceException catch (e) {
       stderr.writeln('Error: $e');
-      return 64;
+      return CliExitCode.operationalFailure;
     } on ProjectConfigPreflightException catch (e) {
       stderr.writeln('Error: $e');
       return 1;
@@ -235,7 +347,10 @@ class ApplyCommand extends Command<int> {
         externalOutput: externalOutput,
       );
       _activeReportPersistence = reportPersistence;
-    } on Object catch (error) {
+    } on FileSystemException catch (error) {
+      stderr.writeln('Error: report output could not be prepared: $error');
+      return 1;
+    } on ReportObjectBackendException catch (error) {
       stderr.writeln('Error: report output could not be prepared: $error');
       return 1;
     }
@@ -252,20 +367,41 @@ class ApplyCommand extends Command<int> {
       stderr.writeln('Error: $e');
       return 1;
     }
+    final failureBoundary = _ApplyGenericFailureBoundary();
     try {
-      return await _runLocked(
-        workspace: workspace,
-        quarantineBaseDir: quarantineBaseDir,
-        reportOutput: reportOutput,
-        reportPersistence: reportPersistence,
-        configFile: configFile,
-        dryRun: dryRun,
-        assumeYes: assumeYes,
-        reportFormat: reportFormat,
-        only: only,
-        findingSelection: findingSelection,
-        recorder: recorder,
-      );
+      try {
+        return await _runLocked(
+          workspace: workspace,
+          quarantineBaseDir: quarantineBaseDir,
+          reportOutput: reportOutput,
+          reportPersistence: reportPersistence,
+          configFile: configFile,
+          dryRun: dryRun,
+          assumeYes: assumeYes,
+          reportFormat: reportFormat,
+          only: only,
+          findingSelection: findingSelection,
+          expectedPreviewFingerprint: expectedPreviewFingerprint,
+          recorder: recorder,
+          failureBoundary: failureBoundary,
+          operationLock: operationLock,
+        );
+      } on Object catch (error, stackTrace) {
+        failureBoundary.captureFailure(
+          error,
+          exactEvidenceRetained:
+              operationLock.hasRetainedExactProcessIdentityEvidence,
+        );
+        if (!failureBoundary.canPersistThrough(reportPersistence)) {
+          Error.throwWithStackTrace(error, stackTrace);
+        }
+        return await _persistGenericPreTransactionFailure(
+          boundary: failureBoundary,
+          recorder: recorder,
+          reportPersistence: reportPersistence,
+          outputFormat: reportFormat,
+        );
+      }
     } finally {
       try {
         await reportPersistence.close();
@@ -287,7 +423,10 @@ class ApplyCommand extends Command<int> {
     required _ReportOutputFormat reportFormat,
     required Set<String> only,
     required FindingSelection findingSelection,
+    required String? expectedPreviewFingerprint,
     required RunRecorder recorder,
+    required _ApplyGenericFailureBoundary failureBoundary,
+    required ProjectOperationLock operationLock,
   }) async {
     final ProjectContext project;
     try {
@@ -301,6 +440,7 @@ class ApplyCommand extends Command<int> {
       stderr.writeln(e.message);
       return 1;
     }
+    failureBoundary.project = project;
 
     recorder.recordApplySelection(
       ApplySelectionReport(
@@ -314,12 +454,16 @@ class ApplyCommand extends Command<int> {
     final progress = TerminalProgress(
       sink: stderr,
       animated: stderr.hasTerminal,
+      signalCoordinator: _signalCoordinator,
     )..writeProject(project.root.path);
     final workflow = TerminalWorkflow(sink: stderr, lineWidth: lineWidth);
-    final quarantineManager = _quarantineManagerFactory(project.root);
-    if (!dryRun) {
+    late final QuarantineManager quarantineManager;
+    Future<int?> rejectBlockingHistoricalQuarantines(
+      QuarantineManager manager,
+    ) async {
+      if (dryRun) return null;
       try {
-        await quarantineManager.ensureNoBlockingHistoricalQuarantines(
+        await manager.ensureNoBlockingHistoricalQuarantines(
           quarantineBases: {
             quarantineBaseDir,
             workspace.quarantineDirectory,
@@ -334,6 +478,15 @@ class ApplyCommand extends Command<int> {
         );
         return 1;
       }
+      return null;
+    }
+
+    if (expectedPreviewFingerprint == null) {
+      quarantineManager = _quarantineManagerFactory(project.root);
+      final historicalRejection = await rejectBlockingHistoricalQuarantines(
+        quarantineManager,
+      );
+      if (historicalRejection != null) return historicalRejection;
     }
     if (project.analysisMode == AnalysisMode.packageInternal) {
       _printPackageInternalWarning(project);
@@ -348,17 +501,10 @@ class ApplyCommand extends Command<int> {
       );
     }
 
-    late final ProjectAnalyzer analyzer;
-    try {
-      analyzer = _analyzerFactory(project, only.isEmpty ? null : only);
-    } on StateError catch (e) {
-      stderr.writeln('Error: ${e.message}');
-      return 64;
-    }
+    final analyzer = _analyzerFactory(project, only.isEmpty ? null : only);
 
     if (analyzer.adapters.isEmpty) {
-      stderr.writeln('Error: no matching adapters were selected.');
-      return 64;
+      throw StateError('No matching adapters were selected.');
     }
     recorder.registerAdapterReportDefinitions(
       analyzer.adapterReportDefinitions,
@@ -367,8 +513,19 @@ class ApplyCommand extends Command<int> {
     late AnalysisSnapshot snapshot;
     var analysisSucceeded = false;
     try {
-      snapshot = await analyzer.analyze(
-        onAdapter: (adapter) => progress.start(adapter.name),
+      snapshot = await operationLock.guardManagedProcessUncertainty(
+        incidentId: '${recorder.runId}-analysis-001',
+        phase: 'analysis',
+        body: () => analyzer.analyze(
+          onAdapter: (adapter) {
+            progress.start(
+              failureBoundary.startAdapter(id: adapter.id, name: adapter.name),
+            );
+          },
+          onAdapterFinished: (adapter, status) {
+            failureBoundary.finishAdapter(status);
+          },
+        ),
       );
       analysisSucceeded = true;
     } finally {
@@ -381,6 +538,7 @@ class ApplyCommand extends Command<int> {
         purpose: AnalysisPassPurpose.initial,
       ),
     );
+    failureBoundary.completeAnalysis(snapshot.findings);
     Future<int> stopForSelectionPreflight({
       required String code,
       required String message,
@@ -539,25 +697,18 @@ class ApplyCommand extends Command<int> {
         );
       }
     }
-    var actionPlan = _freezeActionPlan(
-      plan,
+    var actionPlan = const ApplyActionPlanBuilder().build(
+      removalPlan: plan,
       graph: snapshot.graph,
       project: project,
+      selection: findingSelection,
     );
-    final planFingerprint = plan.units.isEmpty
-        ? null
-        : _planFingerprint(
-            plan,
-            actionPlan: actionPlan,
-            project: project,
-            selection: findingSelection,
-          );
     recorder.recordApplySelection(
       ApplySelectionReport(
         mode: findingSelection.mode,
         requestedFindingIds: findingSelection.requestedFindingIds,
         plannedFindingIds: plannedFindingIds,
-        planFingerprint: planFingerprint,
+        planFingerprint: actionPlan.planFingerprint,
       ),
     );
 
@@ -597,7 +748,8 @@ class ApplyCommand extends Command<int> {
       );
     }
 
-    if (findingSelection.isExact) {
+    Future<int?> rejectInvalidExactClosure() async {
+      if (!findingSelection.isExact) return null;
       final missing =
           findingSelection.requestedFindingIds
               .toSet()
@@ -651,6 +803,12 @@ class ApplyCommand extends Command<int> {
           ),
         );
       }
+      return null;
+    }
+
+    if (expectedPreviewFingerprint == null) {
+      final exactClosureRejection = await rejectInvalidExactClosure();
+      if (exactClosureRejection != null) return exactClosureRejection;
     }
 
     final initiallyBlockedIds = plan.blocked
@@ -664,6 +822,140 @@ class ApplyCommand extends Command<int> {
       reason: 'No mutation was attempted for this finding.',
     );
     recordBlockedOutcomes(plan.blocked);
+
+    Future<int> stopForPreviewValidation(
+      _ApplyPreviewValidationException error, {
+      required int verificationAttempts,
+    }) async {
+      recorder.addDiagnostic(
+        RunDiagnostic(
+          code: 'analysis_snapshot_stale',
+          phase: 'applyPreview',
+          message: error.message,
+        ),
+      );
+      recordRemainingOutcomes(
+        applicableFindings.where(
+          (finding) => !initiallyBlockedIds.contains(finding.node.id),
+        ),
+        reasonCode: 'analysis_snapshot_stale',
+        reason: error.message,
+      );
+      workflow.warning(
+        'SAFE STOP',
+        'The initial apply preview could not be validated; no source mutation '
+            'was attempted.',
+        detail: error.message,
+      );
+      await _writeRunReport(
+        recorder.finish(
+          project: project,
+          status: RunStatus.safeStopped,
+          exitCode: 2,
+          findings: snapshot.findings,
+          applyStatistics: ApplyStatistics(
+            rounds: 0,
+            findingsCommitted: 0,
+            findingsRejectedRecovered: 0,
+            findingsBlocked: plan.blocked.length,
+            findingsSkippedDependency: 0,
+            findingsRemaining: applicableFindings.length,
+            actionsDeclared: 0,
+            actionsCommitted: 0,
+            actionsRolledBack: 0,
+            actionsFailedRecovered: 0,
+            transactionsBegun: 0,
+            transactionsCommitted: 0,
+            transactionsRolledBackVerified: 0,
+            transactionsRecoveryRequired: 0,
+            transactionsNonTerminal: 0,
+            verificationAttempts: verificationAttempts,
+            sourceBytesRemoved: 0,
+          ),
+        ),
+        outputIdentity: reportOutput,
+        outputFormat: reportFormat,
+      );
+      return 2;
+    }
+
+    late final ({
+      Map<String, _AnalysisFileSnapshot> snapshots,
+      ApplyPreviewEvidence previewEvidence,
+      ApplyInitialPlanReport initialPlan,
+    })
+    capturedPreview;
+    try {
+      capturedPreview = _captureInitialApplyPreview(
+        actionPlan,
+        project: project,
+        scope: findingSelection.isExact
+            ? ApplyInitialPlanScope.completeExactSelection
+            : ApplyInitialPlanScope.initialRoundOnly,
+      );
+    } on _ApplyPreviewValidationException catch (error) {
+      return stopForPreviewValidation(error, verificationAttempts: 0);
+    }
+    final initialPlanFileSnapshots = capturedPreview.snapshots;
+    final previewEvidence = capturedPreview.previewEvidence;
+    recorder.recordApplySelection(
+      ApplySelectionReport(
+        mode: findingSelection.mode,
+        requestedFindingIds: findingSelection.requestedFindingIds,
+        plannedFindingIds: plannedFindingIds,
+        planFingerprint: actionPlan.planFingerprint,
+        actualPreviewFingerprint: previewEvidence.fingerprint,
+        expectedPreviewFingerprint: expectedPreviewFingerprint,
+      ),
+    );
+    recorder.recordApplyInitialPlan(capturedPreview.initialPlan);
+    var activeRoundFileSnapshots = initialPlanFileSnapshots;
+
+    if (expectedPreviewFingerprint != null &&
+        (actionPlan.units.isEmpty ||
+            previewEvidence.fingerprint != expectedPreviewFingerprint)) {
+      recorder.addDiagnostic(
+        const RunDiagnostic(
+          code: 'preview_fingerprint_mismatch',
+          phase: 'applyPreview',
+          message:
+              'The current initial physical plan or captured source evidence '
+              'does not match the expected preview fingerprint.',
+        ),
+      );
+      recordRemainingOutcomes(
+        applicableFindings,
+        reasonCode: 'preview_fingerprint_mismatch',
+        reason:
+            'The current initial physical plan or captured source evidence '
+            'did not match the expected preview fingerprint; no verification '
+            'or mutation was attempted.',
+      );
+      workflow.warning(
+        'SAFE STOP',
+        'The current initial physical plan does not match the expected preview '
+            'fingerprint; no verification or mutation was attempted.',
+      );
+      await _writeRunReport(
+        recorder.finish(
+          project: project,
+          status: RunStatus.safeStopped,
+          exitCode: 2,
+          findings: snapshot.findings,
+          applyStatistics: _preMutationApplyStatistics(
+            findingsRemaining: applicableFindings.length,
+          ),
+        ),
+        outputIdentity: reportOutput,
+        outputFormat: reportFormat,
+      );
+      return 2;
+    }
+
+    if (expectedPreviewFingerprint != null) {
+      final exactClosureRejection = await rejectInvalidExactClosure();
+      if (exactClosureRejection != null) return exactClosureRejection;
+    }
 
     if (dryRun) {
       recordRemainingOutcomes(
@@ -681,15 +973,6 @@ class ApplyCommand extends Command<int> {
             '${plan.units.length} atomic '
             '${plan.units.length == 1 ? 'transaction' : 'transactions'}.',
       );
-      _printPlannedFindings(plannedFindings, project, workflow);
-      if (plan.blocked.isNotEmpty) {
-        workflow.warning(
-          'BLOCKED',
-          '${plan.blocked.length} '
-              '${plan.blocked.length == 1 ? 'finding is' : 'findings are'} blocked.',
-        );
-        _printBlocked(plan.blocked, project, workflow);
-      }
       await _writeRunReport(
         recorder.finish(
           project: project,
@@ -720,6 +1003,14 @@ class ApplyCommand extends Command<int> {
         outputFormat: reportFormat,
       );
       return 0;
+    }
+
+    if (expectedPreviewFingerprint != null) {
+      quarantineManager = _quarantineManagerFactory(project.root);
+      final historicalRejection = await rejectBlockingHistoricalQuarantines(
+        quarantineManager,
+      );
+      if (historicalRejection != null) return historicalRejection;
     }
 
     if (plan.units.isEmpty) {
@@ -765,64 +1056,6 @@ class ApplyCommand extends Command<int> {
         outputFormat: reportFormat,
       );
       return 2;
-    }
-
-    Future<int> stopForStaleAnalysis(
-      _StaleAnalysisSnapshotException error, {
-      required int verificationAttempts,
-    }) async {
-      recordRemainingOutcomes(
-        applicableFindings.where(
-          (finding) => !initiallyBlockedIds.contains(finding.node.id),
-        ),
-        reasonCode: 'analysis_snapshot_stale',
-        reason: error.message,
-      );
-      workflow.warning(
-        'SAFE STOP',
-        'A planned file changed after analysis; no source mutation was attempted.',
-        detail: error.message,
-      );
-      await _writeRunReport(
-        recorder.finish(
-          project: project,
-          status: RunStatus.safeStopped,
-          exitCode: 2,
-          findings: snapshot.findings,
-          applyStatistics: ApplyStatistics(
-            rounds: 0,
-            findingsCommitted: 0,
-            findingsRejectedRecovered: 0,
-            findingsBlocked: plan.blocked.length,
-            findingsSkippedDependency: 0,
-            findingsRemaining: applicableFindings.length,
-            actionsDeclared: 0,
-            actionsCommitted: 0,
-            actionsRolledBack: 0,
-            actionsFailedRecovered: 0,
-            transactionsBegun: 0,
-            transactionsCommitted: 0,
-            transactionsRolledBackVerified: 0,
-            transactionsRecoveryRequired: 0,
-            transactionsNonTerminal: 0,
-            verificationAttempts: verificationAttempts,
-            sourceBytesRemoved: 0,
-          ),
-        ),
-        outputIdentity: reportOutput,
-        outputFormat: reportFormat,
-      );
-      return 2;
-    }
-
-    late Map<String, _AnalysisFileSnapshot> planFileSnapshots;
-    try {
-      planFileSnapshots = _capturePlanFileSnapshots(
-        actionPlan,
-        project: project,
-      );
-    } on _StaleAnalysisSnapshotException catch (error) {
-      return stopForStaleAnalysis(error, verificationAttempts: 0);
     }
 
     workflow.section(
@@ -921,22 +1154,34 @@ class ApplyCommand extends Command<int> {
     );
 
     try {
-      _validatePlanFileSnapshots(planFileSnapshots, project: project);
+      _validatePlanFileSnapshots(initialPlanFileSnapshots, project: project);
     } on _StaleAnalysisSnapshotException catch (error) {
-      return stopForStaleAnalysis(error, verificationAttempts: 0);
+      return stopForPreviewValidation(
+        _ApplyPreviewValidationException(error.message),
+        verificationAttempts: 0,
+      );
+    } on FileSystemException catch (error) {
+      return stopForPreviewValidation(
+        _ApplyPreviewValidationException.fromFileSystem(error),
+        verificationAttempts: 0,
+      );
     }
 
     final expectedSha256ByPath = <String, String?>{
-      for (final entry in planFileSnapshots.entries)
+      for (final entry in initialPlanFileSnapshots.entries)
         entry.key: entry.value.sha256,
     };
-    VerificationResult? baseline;
+    late final VerificationResult baseline;
     final verifier = _verifierFactory(project.root);
     final verificationPolicy = project.verificationPolicy;
     var verificationAttemptCount = 1;
     progress.start('verification baseline', activity: 'Capturing');
     try {
-      baseline = await verifier.verify(policy: verificationPolicy);
+      baseline = await operationLock.guardManagedProcessUncertainty(
+        incidentId: '${recorder.runId}-verification-baseline',
+        phase: 'verificationBaseline',
+        body: () => verifier.verify(policy: verificationPolicy),
+      );
     } catch (_) {
       progress.finish(succeeded: false);
       rethrow;
@@ -954,10 +1199,15 @@ class ApplyCommand extends Command<int> {
     );
     _printVerification(baseline, workflow);
     try {
-      _validatePlanFileSnapshots(planFileSnapshots, project: project);
+      _validatePlanFileSnapshots(initialPlanFileSnapshots, project: project);
     } on _StaleAnalysisSnapshotException catch (error) {
-      return stopForStaleAnalysis(
-        error,
+      return stopForPreviewValidation(
+        _ApplyPreviewValidationException(error.message),
+        verificationAttempts: verificationAttemptCount,
+      );
+    } on FileSystemException catch (error) {
+      return stopForPreviewValidation(
+        _ApplyPreviewValidationException.fromFileSystem(error),
         verificationAttempts: verificationAttemptCount,
       );
     }
@@ -1036,7 +1286,14 @@ class ApplyCommand extends Command<int> {
       selection: QuarantineSelectionEvidence(
         mode: findingSelection.mode,
         requestedFindingIds: findingSelection.requestedFindingIds,
-        planFingerprint: planFingerprint!,
+        planFingerprint: actionPlan.planFingerprint!,
+        previewFingerprintVersion: expectedPreviewFingerprint == null
+            ? null
+            : 1,
+        previewFingerprint: expectedPreviewFingerprint == null
+            ? null
+            : previewEvidence.fingerprint,
+        expectedPreviewFingerprint: expectedPreviewFingerprint,
       ),
     );
     final remover = DeclarationRemover(project);
@@ -1254,6 +1511,19 @@ class ApplyCommand extends Command<int> {
         // A still-live cleanup process may continue mutating this working
         // copy. Do not inspect, journal, verify, or restore bytes until its
         // process tree is independently known to be stopped.
+        rethrow;
+      } on ProcessCancellationBeforeLaunchException {
+        // Cancellation remains one-shot across recovery. Do not turn the
+        // interrupted case into an ordinary action failure or start another
+        // managed helper from this boundary.
+        rethrow;
+      } on ProcessCancellationConfirmedException {
+        // The helper tree is stopped, but the command-level recovery workflow
+        // must decide whether the journal can reach a truthful terminal state.
+        rethrow;
+      } on ProcessTerminationUnconfirmedException {
+        // The helper tree may still mutate the candidate or working copy.
+        // Never inspect or roll back the case from this boundary.
         rethrow;
       } on QuarantineDisplacementRecoveryRequiredException {
         // Source ownership became ambiguous. The promoted backup, candidate,
@@ -1623,7 +1893,7 @@ class ApplyCommand extends Command<int> {
         final verificationWaveId =
             'wave-r${roundCount.toString().padLeft(3, '0')}';
         activeWavePathStateByPath = {
-          for (final entry in planFileSnapshots.entries)
+          for (final entry in activeRoundFileSnapshots.entries)
             entry.key: _WavePathState.fromSnapshot(entry.value),
         };
         final stagedTransactions = <_StagedTransaction>[];
@@ -1653,7 +1923,7 @@ class ApplyCommand extends Command<int> {
             );
             initialSizeByPath.putIfAbsent(
               item.file.path,
-              () => planFileSnapshots[item.file.path]!.sizeBytes,
+              () => activeRoundFileSnapshots[item.file.path]!.sizeBytes,
             );
           }
           activeUnit = unit;
@@ -1661,6 +1931,7 @@ class ApplyCommand extends Command<int> {
           for (final finding in unit.findings) {
             attemptedFindingsById[finding.node.id] = finding;
           }
+          failureBoundary.enterTransactionAuthority();
           await quarantineManager.beginTransaction(
             quarantineDir: quarantineDir,
             transactionId: transactionId,
@@ -1754,16 +2025,17 @@ class ApplyCommand extends Command<int> {
           graph: currentGraph,
           project: project,
         );
-        actionPlan = _freezeActionPlan(
-          plan,
+        actionPlan = const ApplyActionPlanBuilder().build(
+          removalPlan: plan,
           graph: currentGraph,
           project: project,
+          selection: findingSelection,
         );
-        planFileSnapshots = _capturePlanFileSnapshots(
+        activeRoundFileSnapshots = _capturePlanFileSnapshots(
           actionPlan,
           project: project,
         );
-        for (final entry in planFileSnapshots.entries) {
+        for (final entry in activeRoundFileSnapshots.entries) {
           expectedSha256ByPath[entry.key] = entry.value.sha256;
         }
         recordBlockedOutcomes(plan.blocked, round: roundCount);
@@ -2156,7 +2428,7 @@ class ApplyCommand extends Command<int> {
   }) async {
     final ProjectContext project;
     try {
-      project = await ProjectContext.load(
+      project = await _projectLoader(
         workspace.projectRoot,
         additionalExcludedPaths: [
           quarantineBaseDir.path,
@@ -2164,7 +2436,9 @@ class ApplyCommand extends Command<int> {
         ],
         configFile: configFile,
       );
-    } catch (error) {
+    } on ProjectLoadException catch (error) {
+      throw _ApplyProjectPreflightException('Error loading project: $error');
+    } on FileSystemException catch (error) {
       throw _ApplyProjectPreflightException('Error loading project: $error');
     }
     if (project.analysisMode == AnalysisMode.package) {
@@ -2263,66 +2537,172 @@ class ApplyCommand extends Command<int> {
       ),
   ];
 
-  _FrozenActionPlan _freezeActionPlan(
-    RemovalPlan plan, {
-    required ReachabilityGraph graph,
-    required ProjectContext project,
-  }) {
-    final rawActionsByUnitId = <String, List<FindingActionDescriptor>>{};
-    for (final unit in plan.units) {
-      if (rawActionsByUnitId.containsKey(unit.id)) {
-        throw StateError('Removal plan repeated atomic unit ID ${unit.id}.');
-      }
-      rawActionsByUnitId[unit.id] = const FindingActionBuilder().build(
-        findings: unit.findings,
-        graph: graph,
-        project: project,
-        atomicGroup: unit.id,
-      );
-    }
-    // Consumer-first library units can delete an importer before a dependency
-    // unit runs. Bind that redundancy now; never rediscover it from existsSync
-    // while executing the later unit.
-    final wholeFileRemovalOrder = <String, int>{};
-    for (var unitIndex = 0; unitIndex < plan.units.length; unitIndex++) {
-      for (final action in rawActionsByUnitId[plan.units[unitIndex].id]!) {
-        if (action.countsTowardSummary &&
-            action.operation == FindingActionOperation.deleteFile) {
-          wholeFileRemovalOrder[p.normalize(p.absolute(action.file.path))] =
-              unitIndex;
-        }
-      }
-    }
-    final actionsByUnitId = {
-      for (var unitIndex = 0; unitIndex < plan.units.length; unitIndex++)
-        plan.units[unitIndex].id: rawActionsByUnitId[plan.units[unitIndex].id]!
-            .where((action) {
-              if (action.operation != FindingActionOperation.cleanupImports) {
-                return true;
-              }
-              final removalOrder =
-                  wholeFileRemovalOrder[p.normalize(
-                    p.absolute(action.file.path),
-                  )];
-              return removalOrder == null || removalOrder > unitIndex;
-            })
-            .toList(growable: false),
-    };
-    return _FrozenActionPlan(actionsByUnitId);
-  }
-
   String? _sha256For(File file) {
     if (!file.existsSync()) return null;
     return sha256.convert(file.readAsBytesSync()).toString();
   }
 
+  ({
+    Map<String, _AnalysisFileSnapshot> snapshots,
+    ApplyPreviewEvidence previewEvidence,
+    ApplyInitialPlanReport initialPlan,
+  })
+  _captureInitialApplyPreview(
+    ApplyActionPlan actionPlan, {
+    required ProjectContext project,
+    required ApplyInitialPlanScope scope,
+  }) {
+    late final Map<String, _AnalysisFileSnapshot> snapshots;
+    try {
+      snapshots = Map.unmodifiable(
+        _capturePlanFileSnapshots(actionPlan, project: project),
+      );
+    } on _StaleAnalysisSnapshotException catch (error) {
+      throw _ApplyPreviewValidationException(error.message);
+    } on FileSystemException catch (error) {
+      throw _ApplyPreviewValidationException.fromFileSystem(error);
+    }
+
+    try {
+      final previewEvidence = _buildApplyPreviewEvidence(
+        actionPlan,
+        snapshots: snapshots,
+        project: project,
+      );
+      return (
+        snapshots: snapshots,
+        previewEvidence: previewEvidence,
+        initialPlan: _buildApplyInitialPlanReport(
+          actionPlan,
+          previewEvidence: previewEvidence,
+          project: project,
+          scope: scope,
+        ),
+      );
+    } on StateError catch (error) {
+      final message = _expectedPreviewModelValidationMessage(error);
+      if (message == null) rethrow;
+      throw _ApplyPreviewValidationException.fromModel(message);
+    } on ArgumentError catch (error) {
+      final message = _expectedPreviewModelValidationMessage(error);
+      if (message == null) rethrow;
+      throw _ApplyPreviewValidationException.fromModel(message);
+    } on FileSystemException catch (error) {
+      throw _ApplyPreviewValidationException.fromFileSystem(error);
+    }
+  }
+
+  String? _expectedPreviewModelValidationMessage(Object error) {
+    if (error is StateError) {
+      final message = error.message;
+      if (message.startsWith('Project-relative paths ') ||
+          message.startsWith('Source canonical path ') ||
+          message.startsWith('Canonical project root ') ||
+          message == 'Apply preview sources must be unique.' ||
+          message == 'Preview source path style does not match project root.' ||
+          message == 'Preview source resolves outside the project root.' ||
+          message ==
+              'Preview source relative and canonical paths identify different files.') {
+        return message;
+      }
+      return null;
+    }
+    if (error is ArgumentError &&
+        (error.name == 'path' || error.name == 'from')) {
+      final message = error.message;
+      return message is String && message.isNotEmpty
+          ? message
+          : 'A planned path could not be projected inside the project.';
+    }
+    return null;
+  }
+
+  ApplyPreviewEvidence _buildApplyPreviewEvidence(
+    ApplyActionPlan actionPlan, {
+    required Map<String, _AnalysisFileSnapshot> snapshots,
+    required ProjectContext project,
+  }) => ApplyPreviewEvidence(
+    canonicalProjectRoot: p.normalize(project.root.resolveSymbolicLinksSync()),
+    planFingerprint: actionPlan.planFingerprint,
+    sources: snapshots.entries.map(
+      (entry) => ApplySourceSnapshot(
+        projectRelativePath: _projectRelativePlanPath(entry.key, project),
+        canonicalPath: entry.value.canonicalPath,
+        sha256: entry.value.sha256,
+        sizeBytes: entry.value.sizeBytes,
+        posixMode: entry.value.posixMode,
+      ),
+    ),
+  );
+
+  ApplyInitialPlanReport _buildApplyInitialPlanReport(
+    ApplyActionPlan actionPlan, {
+    required ApplyPreviewEvidence previewEvidence,
+    required ProjectContext project,
+    required ApplyInitialPlanScope scope,
+  }) => ApplyInitialPlanReport(
+    canonicalVersion: ApplyActionPlan.canonicalVersion,
+    scope: scope,
+    planFingerprint: actionPlan.planFingerprint,
+    units: [
+      for (final unit in actionPlan.units)
+        ApplyPlanUnitReport(
+          order: unit.order,
+          id: unit.id,
+          findingIds: unit.findingIds,
+          dependencyUnitIds: unit.dependencyUnitIds,
+          actions: [
+            for (
+              var actionIndex = 0;
+              actionIndex < unit.actions.length;
+              actionIndex++
+            )
+              ApplyPlanActionReport(
+                order: actionIndex,
+                logicalFindingId: unit.actions[actionIndex].finding.node.id,
+                journalFindingId:
+                    unit.actions[actionIndex].findingId ??
+                    unit.actions[actionIndex].finding.node.id,
+                operation: unit.actions[actionIndex].operation,
+                projectRelativePath: _projectRelativePlanPath(
+                  unit.actions[actionIndex].file.path,
+                  project,
+                ),
+                label: unit.actions[actionIndex].label,
+                countsTowardSummary:
+                    unit.actions[actionIndex].countsTowardSummary,
+                cleanupTargetPath:
+                    unit.actions[actionIndex].cleanupTargetPath == null
+                    ? null
+                    : _projectRelativePlanPath(
+                        unit.actions[actionIndex].cleanupTargetPath!,
+                        project,
+                      ),
+              ),
+          ],
+        ),
+    ],
+    blocked: [
+      for (final item in actionPlan.blocked)
+        ApplyPlanBlockReport(
+          findingId: item.findingId,
+          reason: item.reason,
+          blockedBy: item.blockedBy,
+        ),
+    ],
+    preview: ApplyPreviewReport.fromEvidence(previewEvidence),
+  );
+
+  String _projectRelativePlanPath(String path, ProjectContext project) =>
+      project.relative(p.normalize(p.absolute(path))).replaceAll('\\', '/');
+
   Map<String, _AnalysisFileSnapshot> _capturePlanFileSnapshots(
-    _FrozenActionPlan actionPlan, {
+    ApplyActionPlan actionPlan, {
     required ProjectContext project,
   }) {
     final snapshots = <String, _AnalysisFileSnapshot>{};
-    for (final actions in actionPlan.actionsByUnitId.values) {
-      for (final action in actions) {
+    for (final unit in actionPlan.units) {
+      for (final action in unit.actions) {
         snapshots.putIfAbsent(
           action.file.path,
           () => _captureAnalysisFileSnapshot(action.file, project: project),
@@ -2340,6 +2720,7 @@ class ApplyCommand extends Command<int> {
     final posixMode = _readPosixMode(file);
     final bytes = file.readAsBytesSync();
     final sha = sha256.convert(bytes).toString();
+    _sourceSnapshotFirstReadHookForTesting?.call(file);
     final afterCanonical = _validateRegularProjectFile(file, project: project);
     if (canonicalPath != afterCanonical ||
         _readPosixMode(file) != posixMode ||
@@ -2469,71 +2850,6 @@ class ApplyCommand extends Command<int> {
       indexed[findingId] = finding;
     }
     return indexed;
-  }
-
-  String _planFingerprint(
-    RemovalPlan plan, {
-    required _FrozenActionPlan actionPlan,
-    required ProjectContext project,
-    required FindingSelection selection,
-  }) {
-    String relativePath(String path) =>
-        project.relative(p.normalize(p.absolute(path))).replaceAll('\\', '/');
-
-    final units = <Map<String, Object?>>[];
-    for (var unitIndex = 0; unitIndex < plan.units.length; unitIndex++) {
-      final unit = plan.units[unitIndex];
-      final findingIds =
-          unit.findings.map((finding) => finding.node.id).toList()..sort();
-      final dependencies = unit.dependencyUnitIds.toList()..sort();
-      final actions = actionPlan.actionsFor(unit.id);
-      units.add({
-        'order': unitIndex,
-        'id': unit.id,
-        'findingIds': findingIds,
-        'dependencyUnitIds': dependencies,
-        'actions': [
-          for (var actionIndex = 0; actionIndex < actions.length; actionIndex++)
-            {
-              'order': actionIndex,
-              'logicalFindingId': actions[actionIndex].finding.node.id,
-              'journalFindingId':
-                  actions[actionIndex].findingId ??
-                  actions[actionIndex].finding.node.id,
-              'operation': actions[actionIndex].operation.name,
-              'path': relativePath(actions[actionIndex].file.path),
-              'countsTowardSummary': actions[actionIndex].countsTowardSummary,
-              if (actions[actionIndex].cleanupTargetPath != null)
-                'cleanupTargetPath': relativePath(
-                  actions[actionIndex].cleanupTargetPath!,
-                ),
-            },
-        ],
-      });
-    }
-    final blocked =
-        plan.blocked
-            .map(
-              (item) => {
-                'findingId': item.finding.node.id,
-                'reason': item.reason.name,
-                'blockedBy': item.blockedBy,
-              },
-            )
-            .toList()
-          ..sort(
-            (left, right) => (left['findingId'] as String).compareTo(
-              right['findingId'] as String,
-            ),
-          );
-    final payload = <String, Object?>{
-      'version': 1,
-      'selectionMode': selection.mode.name,
-      'requestedFindingIds': selection.requestedFindingIds,
-      'units': units,
-      'blocked': blocked,
-    };
-    return sha256.convert(utf8.encode(jsonEncode(payload))).toString();
   }
 
   List<Finding> _applicableFindings(
@@ -2703,6 +3019,54 @@ class ApplyCommand extends Command<int> {
     }
   }
 
+  Future<int> _persistGenericPreTransactionFailure({
+    required _ApplyGenericFailureBoundary boundary,
+    required RunRecorder recorder,
+    required _ApplyReportPersistence reportPersistence,
+    required _ReportOutputFormat outputFormat,
+  }) async {
+    final project = boundary.project!;
+    final failure = boundary.toReportableFailure();
+    stderr.writeln('Error: ${failure.message}');
+    final report = recorder.finishFailure(
+      project: project,
+      failure: failure,
+      completedFindings: boundary.completedFindings,
+      applyStatistics: ApplyStatistics.empty,
+    );
+    late final CommittedReport committed;
+    try {
+      committed = await reportPersistence.write(
+        report,
+        outputFormat: outputFormat,
+        mutation: false,
+        publishExternal: false,
+      );
+    } on Object catch (persistenceError) {
+      stderr.writeln('Error: report was not saved: $persistenceError');
+      return failure.exitCode;
+    }
+
+    Object? postCommitCloseError;
+    try {
+      await reportPersistence.close();
+    } on Object catch (persistenceError) {
+      postCommitCloseError = persistenceError;
+    }
+    final actualPath = committed.actualObjectPaths['primary'];
+    if (actualPath == null) {
+      stderr.writeln(
+        'Error: the committed failure report has no retained primary path.',
+      );
+      return failure.exitCode;
+    }
+    if (postCommitCloseError case final error?) {
+      stderr.writeln('Error: report output close failed after commit: $error');
+    }
+    stderr.writeln('Failure report saved: $actualPath');
+    return failure.exitCode;
+  }
+
   void _printCanonicalReportFailureSafely(String path, Object error) {
     try {
       TerminalWorkflow(
@@ -2799,9 +3163,11 @@ class ApplyCommand extends Command<int> {
     exitCode: report.exitCode,
     partialApplied: report.partialApplied,
     projectRoot: report.projectRoot,
+    canonicalProjectRoot: report.canonicalProjectRoot,
     packageName: report.packageName,
     analysisMode: report.analysisMode,
     requestedAdapters: report.requestedAdapters,
+    adapterReportDefinitions: report.adapterReportDefinitions,
     targetMatrix: report.targetMatrix,
     rootCoverage: report.rootCoverage,
     analysisPasses: report.analysisPasses,
@@ -2810,11 +3176,168 @@ class ApplyCommand extends Command<int> {
     verificationAttempts: report.verificationAttempts,
     applyFindingOutcomes: report.applyFindingOutcomes,
     applySelection: report.applySelection,
+    applyInitialPlan: report.applyInitialPlan,
     applyStatistics: report.applyStatistics,
     quarantinePath: report.quarantinePath,
     acceptedRiskCodes: report.acceptedRiskCodes,
     riskAcceptanceSource: report.riskAcceptanceSource,
   );
+}
+
+final class _ApplyGenericFailureBoundary {
+  ProjectContext? project;
+  List<Finding>? completedFindings;
+  String? _activeAdapterId;
+  String? _activeAdapterName;
+  var _transactionAuthorityEntered = false;
+  ProcessSignal? _cancellationSignal;
+  ProcessTerminationUnconfirmedException? _unconfirmedTermination;
+  var _unconfirmedExactEvidenceRetained = false;
+
+  void captureFailure(Object error, {required bool exactEvidenceRetained}) {
+    switch (error) {
+      case ProcessCancellationBeforeLaunchException(:final originalSignal):
+        _cancellationSignal = originalSignal;
+        _unconfirmedTermination = null;
+        _unconfirmedExactEvidenceRetained = false;
+      case ProcessCancellationConfirmedException(:final originalSignal):
+        _cancellationSignal = originalSignal;
+        _unconfirmedTermination = null;
+        _unconfirmedExactEvidenceRetained = false;
+      case ProcessTerminationUnconfirmedException():
+        _cancellationSignal = null;
+        _unconfirmedTermination = error;
+        _unconfirmedExactEvidenceRetained = exactEvidenceRetained;
+      default:
+        _cancellationSignal = null;
+        _unconfirmedTermination = null;
+        _unconfirmedExactEvidenceRetained = false;
+    }
+  }
+
+  String startAdapter({required String id, required String name}) {
+    if (_isStableAdapterId(id) && _isSafeAdapterName(name)) {
+      _activeAdapterId = id;
+      _activeAdapterName = name;
+      return name;
+    }
+    _activeAdapterId = null;
+    _activeAdapterName = null;
+    return 'adapter analysis';
+  }
+
+  void completeAnalysis(List<Finding> findings) {
+    completedFindings = List.unmodifiable(findings);
+    _activeAdapterId = null;
+    _activeAdapterName = null;
+  }
+
+  void finishAdapter(AdapterRunStatus status) {
+    if (status == AdapterRunStatus.failed) return;
+    _activeAdapterId = null;
+    _activeAdapterName = null;
+  }
+
+  void enterTransactionAuthority() {
+    _transactionAuthorityEntered = true;
+  }
+
+  bool canPersistThrough(_ApplyReportPersistence persistence) =>
+      project != null &&
+      !_transactionAuthorityEntered &&
+      !persistence.writeAttempted;
+
+  ReportableCommandFailure toReportableFailure() {
+    if (_unconfirmedTermination case final unconfirmed?) {
+      final baselineCompleted = completedFindings != null;
+      return ReportableCommandFailure(
+        code: 'process_termination_unconfirmed_before_mutation',
+        phase: baselineCompleted ? 'verificationBaseline' : 'analysis',
+        message: _unconfirmedExactEvidenceRetained
+            ? baselineCompleted
+                  ? 'A verification process rooted at PID '
+                        '${unconfirmed.processId} may still be running. No '
+                        'source mutation was attempted. Future mutating '
+                        'commands remain blocked until every exact recorded '
+                        'process identity is absent; rerun the command to '
+                        'recheck.'
+                  : 'An analyzer process rooted at PID '
+                        '${unconfirmed.processId} may still be running. No '
+                        'source mutation was attempted. Future mutating '
+                        'commands remain blocked until every exact recorded '
+                        'process identity is absent; rerun the command to '
+                        'recheck.'
+            : 'A managed process rooted at PID ${unconfirmed.processId} may '
+                  'still be running, and complete identity evidence was not '
+                  'retained. No source mutation was attempted. Future mutating '
+                  'commands remain blocked; preserve operation.lock and '
+                  'inspect the process before recovery.',
+        exitCode: CliExitCode.operationalFailure,
+        status: RunStatus.infrastructureFailure,
+      );
+    }
+    if (_cancellationSignal case final signal?) {
+      return ReportableCommandFailure(
+        code: 'process_cancelled_before_mutation',
+        phase: 'applyPlanning',
+        message:
+            'Apply was interrupted before transaction authority was entered.',
+        exitCode: conventionalSignalExitCode(signal),
+        status: RunStatus.interrupted,
+      );
+    }
+    final adapterId = _activeAdapterId;
+    final adapterName = _activeAdapterName;
+    if (adapterId != null &&
+        adapterName != null &&
+        _isStableAdapterId(adapterId) &&
+        _isSafeAdapterName(adapterName)) {
+      return ReportableCommandFailure(
+        code: 'adapter_analysis_failed',
+        phase: 'analysis:adapter:$adapterId',
+        message:
+            'Analysis failed after adapter $adapterName ($adapterId) started.',
+        exitCode: CliExitCode.internal,
+        status: RunStatus.internalError,
+      );
+    }
+    if (completedFindings != null) {
+      return ReportableCommandFailure(
+        code: 'apply_pre_transaction_failed',
+        phase: 'applyPlanning',
+        message:
+            'Apply failed after analysis and before transaction authority.',
+        exitCode: CliExitCode.internal,
+        status: RunStatus.internalError,
+      );
+    }
+    return ReportableCommandFailure(
+      code: 'analysis_failed',
+      phase: 'analysis',
+      message: 'Project analysis did not complete.',
+      exitCode: CliExitCode.internal,
+      status: RunStatus.internalError,
+    );
+  }
+
+  static bool _isStableAdapterId(String value) =>
+      value.length <= 64 && RegExp(r'^[A-Za-z0-9_.-]+$').hasMatch(value);
+
+  static bool _isSafeAdapterName(String value) =>
+      value.isNotEmpty &&
+      value.length <= 128 &&
+      value.trim() == value &&
+      !value.runes.any(
+        (rune) =>
+            rune < 0x20 ||
+            (rune >= 0x7f && rune <= 0x9f) ||
+            (rune >= 0x200b && rune <= 0x200f) ||
+            rune == 0x2028 ||
+            rune == 0x2029 ||
+            (rune >= 0x202a && rune <= 0x202e) ||
+            (rune >= 0x2066 && rune <= 0x2069) ||
+            rune == 0xfeff,
+      );
 }
 
 final class _ApplyReportPersistence {
@@ -2832,6 +3355,8 @@ final class _ApplyReportPersistence {
   var _sequence = 0;
   var _externalAttempted = false;
   var _closed = false;
+
+  bool get writeAttempted => _sequence > 0;
 
   Future<void> prepareMutation(Directory quarantineDirectory) async {
     if (_closed) throw StateError('Apply report persistence is closed.');
@@ -2989,24 +3514,6 @@ void _writeFormattedReport(
       const JsonFormatter().writeTo(report, sink);
     case _ReportOutputFormat.html:
       const HtmlFormatter().writeTo(report, sink);
-  }
-}
-
-class _FrozenActionPlan {
-  _FrozenActionPlan(Map<String, List<FindingActionDescriptor>> actionsByUnitId)
-    : actionsByUnitId = Map.unmodifiable({
-        for (final entry in actionsByUnitId.entries)
-          entry.key: List<FindingActionDescriptor>.unmodifiable(entry.value),
-      });
-
-  final Map<String, List<FindingActionDescriptor>> actionsByUnitId;
-
-  List<FindingActionDescriptor> actionsFor(String unitId) {
-    final actions = actionsByUnitId[unitId];
-    if (actions == null) {
-      throw StateError('Frozen action plan has no atomic unit $unitId.');
-    }
-    return actions;
   }
 }
 
@@ -3174,6 +3681,32 @@ class _AnalysisFileSnapshot {
 
 class _StaleAnalysisSnapshotException implements Exception {
   const _StaleAnalysisSnapshotException(this.message);
+
+  final String message;
+
+  @override
+  String toString() => message;
+}
+
+class _ApplyPreviewValidationException implements Exception {
+  const _ApplyPreviewValidationException(this.message);
+
+  factory _ApplyPreviewValidationException.fromFileSystem(
+    FileSystemException error,
+  ) {
+    final path = error.path;
+    return _ApplyPreviewValidationException(
+      'A planned source could not be read while the initial apply preview was '
+      'validated${path == null ? '.' : ': $path'}',
+    );
+  }
+
+  factory _ApplyPreviewValidationException.fromModel(
+    Object? message,
+  ) => _ApplyPreviewValidationException(
+    'The captured source evidence did not match the frozen initial plan: '
+    '${message is String && message.isNotEmpty ? message : 'preview model validation failed.'}',
+  );
 
   final String message;
 
