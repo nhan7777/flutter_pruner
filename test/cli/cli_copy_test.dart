@@ -191,6 +191,13 @@ void main() {
       ),
       ['apply.outcome.missing-file'],
     );
+    expect(
+      extractor.allLines(
+        ' ! Manifest .flutter_pruner/quarantine/run/manifest.json\n',
+        '',
+      ),
+      ['apply.recovery.manifest'],
+    );
   });
 
   test('wrapped literal ellipses do not accept forged progress', () {
@@ -907,7 +914,7 @@ final _placeholderPatterns = <String, RegExp>{
     r'(?:[A-Za-z0-9_.-]+[\\/])*…[\\/][A-Za-z0-9_.-]+[\\/]manifest\.json',
   ),
   'manifest-path': RegExp(
-    r'(?:(?:/|[A-Za-z]:[\\/])[^\r\n]+|(?:[A-Za-z0-9_.-]+[\\/])*…[\\/][A-Za-z0-9_.-]+[\\/])manifest\.json',
+    r'(?:(?:/|[A-Za-z]:[\\/])?[^\r\n]+[\\/])manifest\.json',
   ),
   'unit-id': RegExp(r'unit:[a-f0-9]{16}'),
   'preview-fingerprint': RegExp(r'v[1-9][0-9]*:[a-f0-9]{64}'),
@@ -1357,7 +1364,7 @@ final class _PresentationExtractor {
         return r'(?:/|[A-Za-z]:)[^\r\n]+';
       case 'truncated-manifest-path':
       case 'manifest-path':
-        return r'(?:/|[A-Za-z]:)[^\r\n]+/manifest\.json';
+        return r'(?:(?:/|[A-Za-z]:[\\/])?[^\r\n]+[\\/])manifest\.json';
       default:
         return _placeholderPatterns[kind]!.pattern;
     }

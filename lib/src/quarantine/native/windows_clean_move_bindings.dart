@@ -121,7 +121,9 @@ final class WindowsSystemCleanMoveBindings implements WindowsCleanMoveBindings {
         destinationLeaf,
       );
     } on WindowsNativeFailure catch (error) {
-      if (error.code == 80 || error.code == 183) {
+      if (error.code == 80 ||
+          error.code == 183 ||
+          (error.ntStatus && (error.code & 0xffffffff) == 0xc0000035)) {
         throw const CleanMoveException(
           category: CleanMoveFailure.collision,
           operation: 'move-directory',

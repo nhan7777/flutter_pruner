@@ -64,9 +64,9 @@
         {"path": "lib/src/quarantine/clean_move_backend.dart", "sha256": "f21fc424bbd38f55c7d525d78d6ef2d44b9d83fbada253b1562529a24f1d093c"},
         {"path": "lib/src/quarantine/native/posix_clean_move_backend.dart", "sha256": "37884b9f23cde1b80afbff5356058fb6e8c94f12dfbb34bd05e550590e47de8e"},
         {"path": "lib/src/quarantine/native/windows_clean_move_backend.dart", "sha256": "decdc988abcefcf35655c188a26f765e5a6e747b880f37384c02f0383a5450b0"},
-        {"path": "lib/src/quarantine/native/windows_clean_move_bindings.dart", "sha256": "609346f2c3eda739e416ca35a0a914eaa4e55dcd4639e04452b534dd6abcbd49"},
+        {"path": "lib/src/quarantine/native/windows_clean_move_bindings.dart", "sha256": "f6976008ef6d0f1fc20c7c73582d876f38c7f6914ec9a062f684475bb954eefe"},
         {"path": "lib/src/quarantine/native/windows_clean_open_mode.dart", "sha256": "438b2bb9d6514241fe1a77486e088032a01af03d42c7083e80a823c1fa496b64"},
-        {"path": "lib/src/reporting/native/windows_bindings.dart", "sha256": "5b9ff29f73e0ea026058d5ef83ed8d0008da0c555aee80ec45125bfef746dd10"},
+        {"path": "lib/src/reporting/native/windows_bindings.dart", "sha256": "fe5ec4a24cf429c6d74ec14c323d3cbb9707dce68af33b689437620b6bedfd8c"},
         {"path": "lib/src/quarantine/recoverable_clean_store.dart", "sha256": "50b734547adf690ddd7bcd681fca6fda4634f3a22c9a2dd3e66c66f19da16a73"},
         {"path": "lib/src/quarantine/recoverable_clean_transaction.dart", "sha256": "1bf1d11f6a724ce403f4e66688ca6088a87b5d2d1b0dfe21e218f2928a49f6e0"}
       ],
@@ -209,7 +209,7 @@
       "requiredArtifacts": [
         {
           "path": "lib/src/reporting/native/windows_bindings.dart",
-          "sha256": "5b9ff29f73e0ea026058d5ef83ed8d0008da0c555aee80ec45125bfef746dd10"
+          "sha256": "fe5ec4a24cf429c6d74ec14c323d3cbb9707dce68af33b689437620b6bedfd8c"
         },
         {
           "path": "lib/src/reporting/native/windows_report_object_backend.dart",

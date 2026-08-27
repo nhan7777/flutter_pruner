@@ -770,7 +770,7 @@ void main() {
       final humanPlain = _stripAnsi(human.stdoutText);
       expect(
         _unwrapVisualLines(humanPlain),
-        contains(_visibleHostileTerminalProjectSegment),
+        contains(_unwrapVisualLines(_visibleHostileTerminalProjectSegment)),
       );
       expect(
         _unwrapVisualLines(humanPlain),
@@ -815,7 +815,7 @@ void main() {
       final inspectHumanPlain = _stripAnsi(inspectHuman.stdoutText);
       expect(
         _unwrapVisualLines(inspectHumanPlain),
-        contains(_visibleHostileTerminalProjectSegment),
+        contains(_unwrapVisualLines(_visibleHostileTerminalProjectSegment)),
       );
       expect(inspectHumanPlain, isNot(contains('\nforged')));
       expect(inspectHumanPlain, isNot(contains(_unsafeRenderedControl)));

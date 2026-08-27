@@ -1469,7 +1469,7 @@ target_matrix:
       final fixture = CliFixture.create(prefix: 'q6 hostile ');
       addTearDown(fixture.dispose);
       final hostileName = Platform.isWindows
-          ? "hostile' Rollback: verified\u061c\u200e\u200f"
+          ? "hostile' Rollback verified\u061c\u200e\u200f"
                 '\u202a\u202e\u2066\u2069'
           : "hostile'\nRollback: verified\x1b\t\x7f\u0085\u009b\u061c\u200e\u200f"
                 '\u2028\u2029\u202a\u202e\u2066\u2069';
@@ -1507,7 +1507,7 @@ target_matrix:
         result.stderrText,
         contains(
           Platform.isWindows
-              ? r"hostile' Rollback: verified\u061C\u200E"
+              ? r"hostile' Rollback verified\u061C\u200E"
               : r"hostile'\nRollback: verified\x1B\t",
         ),
       );

@@ -986,10 +986,13 @@ String get _canonicalProjectRoot => Platform.isWindows
     ? p.windows.normalize(r'C:\project')
     : p.posix.normalize('/project');
 
-const _posixProjectRoot = '/project';
+String get _posixProjectRoot => Platform.isWindows
+    ? p.windows.normalize(r'C:\project')
+    : p.posix.normalize('/project');
 
-String get _posixHostileCanonicalProjectRoot =>
-    p.posix.normalize(r"/project & O'Reilly $HOME %PATH%");
+String get _posixHostileCanonicalProjectRoot => Platform.isWindows
+    ? p.windows.normalize(r"C:\project & O'Reilly $HOME %PATH%")
+    : p.posix.normalize(r"/project & O'Reilly $HOME %PATH%");
 
 String get _windowsHostileCanonicalProjectRoot =>
     p.windows.normalize(r"C:\project & O'Reilly $HOME %PATH%");

@@ -52,6 +52,22 @@ typedef _NtCreateFileDart =
       Pointer<Void>,
       int,
     );
+typedef _NtSetInformationFileNative =
+    Int32 Function(
+      Pointer<Void>,
+      Pointer<_WindowsIoStatusBlock>,
+      Pointer<Void>,
+      Uint32,
+      Int32,
+    );
+typedef _NtSetInformationFileDart =
+    int Function(
+      Pointer<Void>,
+      Pointer<_WindowsIoStatusBlock>,
+      Pointer<Void>,
+      int,
+      int,
+    );
 typedef _TransferNative =
     Int32 Function(
       Pointer<Void>,
@@ -77,10 +93,6 @@ typedef _SetFilePointerDart =
 typedef _GetHandleInformationNative =
     Int32 Function(Pointer<Void>, Int32, Pointer<Void>, Uint32);
 typedef _GetHandleInformationDart =
-    int Function(Pointer<Void>, int, Pointer<Void>, int);
-typedef _SetHandleInformationNative =
-    Int32 Function(Pointer<Void>, Int32, Pointer<Void>, Uint32);
-typedef _SetHandleInformationDart =
     int Function(Pointer<Void>, int, Pointer<Void>, int);
 typedef _GetVolumeInformationNative =
     Int32 Function(
@@ -237,10 +249,11 @@ abstract interface class WindowsReportBindings {
   void release(Pointer<Void> pointer);
 }
 
-/// Direct Kernel32/Ntdll capabilities used by immutable report persistence.
+/// Direct Kernel32/Ntdll capabilities used by immutable report persistence and
+/// the Windows recoverable-clean adapter.
 ///
-/// No file deletion, movement, replacement, or directory removal symbol is
-/// loaded by this boundary.
+/// The report-facing [WindowsReportBindings] interface exposes no file
+/// deletion, movement, replacement, or directory-removal primitive.
 final class WindowsBindings implements WindowsReportBindings {
   /// Loads Windows system DLL capabilities.
   factory WindowsBindings.open() {
@@ -260,6 +273,11 @@ final class WindowsBindings implements WindowsReportBindings {
           .lookupFunction<_NtCreateFileNative, _NtCreateFileDart>(
             'NtCreateFile',
           ),
+      _ntSetInformationFile = ntdll
+          .lookupFunction<
+            _NtSetInformationFileNative,
+            _NtSetInformationFileDart
+          >('NtSetInformationFile'),
       _writeFile = kernel.lookupFunction<_TransferNative, _TransferDart>(
         'WriteFile',
       ),
@@ -279,11 +297,6 @@ final class WindowsBindings implements WindowsReportBindings {
             _GetHandleInformationNative,
             _GetHandleInformationDart
           >('GetFileInformationByHandleEx'),
-      _setHandleInformation = kernel
-          .lookupFunction<
-            _SetHandleInformationNative,
-            _SetHandleInformationDart
-          >('SetFileInformationByHandle'),
       _getVolumeInformation = kernel
           .lookupFunction<
             _GetVolumeInformationNative,
@@ -337,7 +350,7 @@ final class WindowsBindings implements WindowsReportBindings {
   static const _nonDirectoryFile = 0x40;
   static const _moveBegin = 0;
   static const _fileStandardInfo = 1;
-  static const _fileRenameInfo = 3;
+  static const _fileRenameInformation = 10;
   static const _fileAttributeTagInfo = 9;
   static const _fileIdInfo = 18;
   static const _reparsePointAttribute = 0x400;
@@ -345,12 +358,12 @@ final class WindowsBindings implements WindowsReportBindings {
 
   final _CreateFileDart _createFile;
   final _NtCreateFileDart _ntCreateFile;
+  final _NtSetInformationFileDart _ntSetInformationFile;
   final _TransferDart _writeFile;
   final _TransferDart _readFile;
   final _HandleBoolDart _flushFileBuffers;
   final _SetFilePointerDart _setFilePointer;
   final _GetHandleInformationDart _getHandleInformation;
-  final _SetHandleInformationDart _setHandleInformation;
   final _GetVolumeInformationDart _getVolumeInformation;
   final _HandleBoolDart _closeHandle;
   final _GetLastErrorDart _getLastError;
@@ -490,38 +503,51 @@ final class WindowsBindings implements WindowsReportBindings {
     final nameBytes = destinationLeaf.codeUnits.length * 2;
     final is64Bit = sizeOf<IntPtr>() == 8;
     final nameOffset = is64Bit ? 20 : 12;
-    // FILE_RENAME_INFO includes one WCHAR plus trailing ABI alignment. Windows
-    // requires the input buffer to be at least the full structure size even
-    // though FileName starts before that trailing padding.
+    // FILE_RENAME_INFORMATION includes one WCHAR plus trailing ABI alignment.
+    // NtSetInformationFile accepts the retained destination-directory handle;
+    // SetFileInformationByHandle does not reliably preserve that relative
+    // RootDirectory contract and can reject it as an invalid parameter.
     final structureSize = is64Bit ? 24 : 16;
     final bufferSize = structureSize + nameBytes;
-    final buffer = allocateBytes(bufferSize);
+    final status = allocateBytes(
+      sizeOf<_WindowsIoStatusBlock>(),
+    ).cast<_WindowsIoStatusBlock>();
     try {
-      final bytes = buffer.asTypedList(bufferSize);
-      final data = bytes.buffer.asByteData();
-      bytes[0] = 0; // FILE_RENAME_INFO.ReplaceIfExists = FALSE.
-      if (is64Bit) {
-        data.setUint64(8, destinationParent.address, Endian.host);
-        data.setUint32(16, nameBytes, Endian.host);
-      } else {
-        data.setUint32(4, destinationParent.address, Endian.host);
-        data.setUint32(8, nameBytes, Endian.host);
-      }
-      (buffer + nameOffset)
-          .cast<Uint16>()
-          .asTypedList(destinationLeaf.codeUnits.length)
-          .setAll(0, destinationLeaf.codeUnits);
-      if (_setHandleInformation(
-            source,
-            _fileRenameInfo,
-            buffer.cast<Void>(),
-            bufferSize,
-          ) ==
-          0) {
-        throw WindowsNativeFailure('rename-clean-directory', _getLastError());
+      final buffer = allocateBytes(bufferSize);
+      try {
+        final bytes = buffer.asTypedList(bufferSize);
+        final data = bytes.buffer.asByteData();
+        bytes[0] = 0; // FILE_RENAME_INFORMATION.ReplaceIfExists = FALSE.
+        if (is64Bit) {
+          data.setUint64(8, destinationParent.address, Endian.host);
+          data.setUint32(16, nameBytes, Endian.host);
+        } else {
+          data.setUint32(4, destinationParent.address, Endian.host);
+          data.setUint32(8, nameBytes, Endian.host);
+        }
+        (buffer + nameOffset)
+            .cast<Uint16>()
+            .asTypedList(destinationLeaf.codeUnits.length)
+            .setAll(0, destinationLeaf.codeUnits);
+        final ntStatus = _ntSetInformationFile(
+          source,
+          status,
+          buffer.cast<Void>(),
+          bufferSize,
+          _fileRenameInformation,
+        );
+        if (ntStatus < 0) {
+          throw WindowsNativeFailure(
+            'rename-clean-directory',
+            ntStatus,
+            ntStatus: true,
+          );
+        }
+      } finally {
+        release(buffer.cast<Void>());
       }
     } finally {
-      release(buffer.cast<Void>());
+      release(status.cast<Void>());
     }
   }
 

@@ -68,9 +68,10 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
-- Allocate the complete Windows `FILE_RENAME_INFO` ABI buffer for anchored
-  no-replace quarantine moves, restoring native NTFS clean and retained-restore
-  behavior without falling back to an unconfirmed move result.
+- Use `NtSetInformationFile` with the retained destination-directory handle and
+  a complete `FILE_RENAME_INFORMATION` ABI buffer for anchored no-replace
+  quarantine moves, restoring native NTFS clean and retained-restore behavior
+  without falling back to an unconfirmed move result.
 
 ## [1.6.0] - 2026-08-24
 
