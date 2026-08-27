@@ -488,13 +488,19 @@ final class WindowsBindings implements WindowsReportBindings {
       throw ArgumentError.value(destinationLeaf, 'destinationLeaf');
     }
     final nameBytes = destinationLeaf.codeUnits.length * 2;
-    final nameOffset = sizeOf<IntPtr>() == 8 ? 20 : 12;
-    final buffer = allocateBytes(nameOffset + nameBytes);
+    final is64Bit = sizeOf<IntPtr>() == 8;
+    final nameOffset = is64Bit ? 20 : 12;
+    // FILE_RENAME_INFO includes one WCHAR plus trailing ABI alignment. Windows
+    // requires the input buffer to be at least the full structure size even
+    // though FileName starts before that trailing padding.
+    final structureSize = is64Bit ? 24 : 16;
+    final bufferSize = structureSize + nameBytes;
+    final buffer = allocateBytes(bufferSize);
     try {
-      final bytes = buffer.asTypedList(nameOffset + nameBytes);
+      final bytes = buffer.asTypedList(bufferSize);
       final data = bytes.buffer.asByteData();
       bytes[0] = 0; // FILE_RENAME_INFO.ReplaceIfExists = FALSE.
-      if (sizeOf<IntPtr>() == 8) {
+      if (is64Bit) {
         data.setUint64(8, destinationParent.address, Endian.host);
         data.setUint32(16, nameBytes, Endian.host);
       } else {
@@ -509,7 +515,7 @@ final class WindowsBindings implements WindowsReportBindings {
             source,
             _fileRenameInfo,
             buffer.cast<Void>(),
-            nameOffset + nameBytes,
+            bufferSize,
           ) ==
           0) {
         throw WindowsNativeFailure('rename-clean-directory', _getLastError());

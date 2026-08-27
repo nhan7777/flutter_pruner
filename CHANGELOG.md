@@ -66,6 +66,12 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Treat an interrupted process with unconfirmed tree termination, verifier, or
   recovery evidence as recovery-required rather than successful cancellation.
 
+### Fixed
+
+- Allocate the complete Windows `FILE_RENAME_INFO` ABI buffer for anchored
+  no-replace quarantine moves, restoring native NTFS clean and retained-restore
+  behavior without falling back to an unconfirmed move result.
+
 ## [1.6.0] - 2026-08-24
 
 ### Changed

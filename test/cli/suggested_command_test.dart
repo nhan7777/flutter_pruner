@@ -123,7 +123,7 @@ void main(List<String> arguments) {
             ...hostile,
           ]);
 
-          final result = await Process.run('zsh', [
+          final result = await Process.run('/bin/sh', [
             '-c',
             command.render(ShellDialect.posix),
           ]);

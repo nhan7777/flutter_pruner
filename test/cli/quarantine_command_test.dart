@@ -23,12 +23,12 @@ final _unsafeJsonRepresentationControl = RegExp(
 );
 
 final _hostileCleanPathSegment = Platform.isWindows
-    ? 'invalid\u0085\u061c\u200e\u200f\u2028\u2029'
+    ? 'invalid\u061c\u200e\u200f'
           '\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069 FORGED CLEAN ROW'
     : 'invalid\x1b[31m\u0085\u061c\u200e\u200f\u2028\u2029'
           '\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069\nFORGED CLEAN ROW';
 final _visibleHostileCleanPathSegment = Platform.isWindows
-    ? r'invalid\u0085\u061C\u200E\u200F\u2028\u2029'
+    ? r'invalid\u061C\u200E\u200F'
           r'\u202A\u202B\u202C\u202D\u202E\u2066\u2067\u2068\u2069 FORGED CLEAN ROW'
     : r'invalid\x1B[31m\u0085\u061C\u200E\u200F\u2028\u2029'
           r'\u202A\u202B\u202C\u202D\u202E\u2066\u2067\u2068\u2069\nFORGED CLEAN ROW';
@@ -62,6 +62,29 @@ final _visibleHostileLegacyPathSegment = Platform.isWindows
           r'\u0098\u0099\u009A\u009B\u009C\u009D\u009E\u009F'
           r'\u061C\u200E\u200F\u2028\u2029\u202A\u202B\u202C\u202D\u202E'
           r'\u2066\u2067\u2068\u2069\nFORGED LEGACY ROW';
+
+final _hostileTerminalProjectSegment = Platform.isWindows
+    ? 'quarantine terminal \u061c\u200e\u200f\u202a\u202b\u202c\u202d\u202e'
+          '\u2066\u2067\u2068\u2069 forged '
+    : 'quarantine terminal \x1b[31m\u009b31m\u061c\u200e\u200f\u2028\u2029'
+          '\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069\nforged ';
+final _visibleHostileTerminalProjectSegment = Platform.isWindows
+    ? r'\u061C\u200E\u200F\u202A\u202B\u202C\u202D\u202E\u2066\u2067\u2068\u2069 forged'
+    : r'\x1B[31m\u009B31m\u061C\u200E\u200F\u2028\u2029\u202A\u202B\u202C\u202D\u202E\u2066\u2067\u2068\u2069\nforged';
+final _hostileTerminalInvalidSegment = Platform.isWindows
+    ? 'invalid\u061c\u200e\u200f\u202a\u202b\u202c\u202d\u202e'
+          '\u2066\u2067\u2068\u2069 ACTIVE'
+    : 'invalid\x1b[32m\u009b32m\u061c\u200e\u200f\u2028\u2029\u202a'
+          '\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069\nACTIVE';
+final _visibleHostileTerminalInvalidSegment = Platform.isWindows
+    ? r'invalid\u061C\u200E\u200F\u202A\u202B\u202C\u202D\u202E\u2066\u2067\u2068\u2069 ACTIVE'
+    : r'invalid\x1B[32m\u009B32m\u061C\u200E\u200F\u2028\u2029\u202A\u202B\u202C\u202D\u202E\u2066\u2067\u2068\u2069\nACTIVE';
+final _hostileJsonProjectSegment = Platform.isWindows
+    ? 'quarantine JSON controls \u061c\u200e\u200f\u202a\u202b\u202c\u202d'
+          '\u202e\u2066\u2067\u2068\u2069 forged '
+    : 'quarantine JSON controls \x1b[31m\u0085\u0090\u0098\u009b31m'
+          '\u009d\u009e\u009f\u061c\u200e\u200f\u2028\u2029\u202a'
+          '\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069\nforged ';
 
 void main() {
   test(
@@ -328,7 +351,7 @@ void main() {
         'pubspec.yaml': 'name: quarantine_unicode_width\n',
       });
       final manager = QuarantineManager(fixture.root);
-      await manager.createQuarantine(
+      final quarantine = await manager.createQuarantine(
         runId: 'run-long-evidence',
         entries: const <QuarantineEntry>[],
       );
@@ -365,11 +388,7 @@ void main() {
               ((value as Map<String, Object?>)['items']! as List<Object?>)
                   .cast<Map<Object?, Object?>>()
                   .single['path'] ==
-              p.join(
-                fixture.root.path,
-                QuarantineManager.defaultQuarantineDir,
-                'run-long-evidence',
-              ),
+              quarantine.path,
           'JSON keeps the exact unwrapped quarantine path',
         ),
       );
@@ -693,158 +712,154 @@ void main() {
     timeout: processTestTimeout,
   );
 
-  test('human output escapes hostile paths while JSON retains exact path bytes', () async {
-    final fixture = CliFixture.create(
-      prefix:
-          'quarantine terminal \x1b[31m\u009b31m\u061c\u200e\u200f\u2028\u2029\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069\nforged ',
-    );
-    addTearDown(fixture.dispose);
-    await fixture.writeText(<String, String>{
-      'pubspec.yaml': 'name: quarantine_terminal_path\n',
-      '.flutter_pruner/quarantine/invalid\x1b[32m\u009b32m\u061c\u200e\u200f\u2028\u2029\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069\nACTIVE/manifest.json':
-          '{broken',
-    });
-    final manager = QuarantineManager(fixture.root);
-    await manager.createQuarantine(
-      runId: 'valid-run',
-      entries: const <QuarantineEntry>[],
-    );
+  test(
+    'human output escapes hostile paths while JSON retains exact path bytes',
+    () async {
+      final fixture = CliFixture.create(prefix: _hostileTerminalProjectSegment);
+      addTearDown(fixture.dispose);
+      await fixture.writeText(<String, String>{
+        'pubspec.yaml': 'name: quarantine_terminal_path\n',
+        '.flutter_pruner/quarantine/$_hostileTerminalInvalidSegment/manifest.json':
+            '{broken',
+      });
+      final manager = QuarantineManager(fixture.root);
+      await manager.createQuarantine(
+        runId: 'valid-run',
+        entries: const <QuarantineEntry>[],
+      );
 
-    final human = await CliProcessHarness.repository().runQuarantineOnly([
-      'quarantine',
-      'list',
-      '--project',
-      fixture.root.path,
-    ]);
-    final json = await CliProcessHarness.repository().runQuarantineOnly([
-      'quarantine',
-      'list',
-      '--project',
-      fixture.root.path,
-      '--format',
-      'json',
-    ]);
-    final inspectHuman = await CliProcessHarness.repository().runQuarantineOnly(
-      ['quarantine', 'inspect', '--project', fixture.root.path, 'valid-run'],
-      environmentAdditions: const <String, String>{'COLUMNS': '32'},
-    );
-    final inspectJson = await CliProcessHarness.repository().runQuarantineOnly([
-      'quarantine',
-      'inspect',
-      '--project',
-      fixture.root.path,
-      '--format',
-      'json',
-      'valid-run',
-    ]);
-
-    expect(human.exitCode, 0);
-    expect(human.stderrBytes, isEmpty);
-    _expectOnlyStaticSgr(human.stdoutText);
-    final humanPlain = _stripAnsi(human.stdoutText);
-    expect(
-      _unwrapVisualLines(humanPlain),
-      contains(
-        r'\x1B[31m\u009B31m\u061C\u200E\u200F\u2028\u2029\u202A\u202B\u202C\u202D\u202E\u2066\u2067\u2068\u2069\nforged',
-      ),
-    );
-    expect(
-      _unwrapVisualLines(humanPlain),
-      contains(
-        r'invalid\x1B[32m\u009B32m\u061C\u200E\u200F\u2028\u2029\u202A\u202B\u202C\u202D\u202E\u2066\u2067\u2068\u2069\nACTIVE',
-      ),
-    );
-    expect(humanPlain, isNot(contains('\x1b')));
-    expect(humanPlain, isNot(contains('\nforged')));
-    expect(humanPlain, isNot(contains(_unsafeRenderedControl)));
-    expect(json.exitCode, 0);
-    expect(json.stderrBytes, isEmpty);
-    expectJsonStdout(
-      json,
-      predicate((value) {
-        final document = value as Map<String, Object?>;
-        final items = document['items']! as List<Object?>;
-        return document['projectRoot'] == fixture.root.path &&
-            items
-                .cast<Map<Object?, Object?>>()
-                .map((item) => item['path'])
-                .contains(
-                  p.join(
-                    fixture.root.path,
-                    QuarantineManager.defaultQuarantineDir,
-                    'invalid\x1b[32m\u009b32m\u061c\u200e\u200f\u2028\u2029\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069\nACTIVE',
-                  ),
-                ) &&
-            items
-                .cast<Map<Object?, Object?>>()
-                .map((item) => item['path'])
-                .contains(
-                  p.join(
-                    fixture.root.path,
-                    QuarantineManager.defaultQuarantineDir,
-                    'valid-run',
-                  ),
-                );
-      }, 'JSON preserves exact path controls'),
-    );
-    expect(inspectHuman.exitCode, 0);
-    expect(inspectHuman.stderrBytes, isEmpty);
-    _expectOnlyStaticSgr(inspectHuman.stdoutText);
-    final inspectHumanPlain = _stripAnsi(inspectHuman.stdoutText);
-    expect(
-      _unwrapVisualLines(inspectHumanPlain),
-      contains(
-        r'\x1B[31m\u009B31m\u061C\u200E\u200F\u2028\u2029\u202A\u202B\u202C\u202D\u202E\u2066\u2067\u2068\u2069\nforged',
-      ),
-    );
-    expect(inspectHumanPlain, isNot(contains('\nforged')));
-    expect(inspectHumanPlain, isNot(contains(_unsafeRenderedControl)));
-    final canonicalStart = inspectHumanPlain.indexOf('Canonical manifest:\n');
-    expect(canonicalStart, isNonNegative);
-    const metrics = TerminalTextMetrics();
-    final summary = inspectHumanPlain.substring(0, canonicalStart);
-    expect(
-      summary.split('\n').where((line) => line.isNotEmpty),
-      everyElement(
-        predicate<String>((line) => metrics.visibleWidth(line) <= 32),
-      ),
-    );
-    final canonical = inspectHumanPlain.substring(
-      canonicalStart + 'Canonical manifest:\n'.length,
-    );
-    final canonicalDocument = jsonDecode(canonical) as Map<Object?, Object?>;
-    expect(
-      canonicalDocument['projectRoot'],
-      contains(
-        r'\x1B[31m\u009B31m\u061C\u200E\u200F\u2028\u2029\u202A\u202B\u202C\u202D\u202E\u2066\u2067\u2068\u2069\nforged',
-      ),
-    );
-    expect(inspectJson.exitCode, 0);
-    expect(inspectJson.stderrBytes, isEmpty);
-    expectJsonStdout(
-      inspectJson,
-      predicate(
-        (value) =>
-            (value as Map<String, Object?>)['path'] ==
-            p.join(
+      final human = await CliProcessHarness.repository().runQuarantineOnly([
+        'quarantine',
+        'list',
+        '--project',
+        fixture.root.path,
+      ]);
+      final json = await CliProcessHarness.repository().runQuarantineOnly([
+        'quarantine',
+        'list',
+        '--project',
+        fixture.root.path,
+        '--format',
+        'json',
+      ]);
+      final inspectHuman = await CliProcessHarness.repository()
+          .runQuarantineOnly(
+            [
+              'quarantine',
+              'inspect',
+              '--project',
               fixture.root.path,
-              QuarantineManager.defaultQuarantineDir,
               'valid-run',
-            ),
-        'inspect JSON preserves the exact valid path',
-      ),
-    );
-  }, timeout: processTestTimeout);
+            ],
+            environmentAdditions: const <String, String>{'COLUMNS': '32'},
+          );
+      final inspectJson = await CliProcessHarness.repository()
+          .runQuarantineOnly([
+            'quarantine',
+            'inspect',
+            '--project',
+            fixture.root.path,
+            '--format',
+            'json',
+            'valid-run',
+          ]);
+
+      expect(human.exitCode, 0);
+      expect(human.stderrBytes, isEmpty);
+      _expectOnlyStaticSgr(human.stdoutText);
+      final humanPlain = _stripAnsi(human.stdoutText);
+      expect(
+        _unwrapVisualLines(humanPlain),
+        contains(_visibleHostileTerminalProjectSegment),
+      );
+      expect(
+        _unwrapVisualLines(humanPlain),
+        contains(_visibleHostileTerminalInvalidSegment),
+      );
+      expect(humanPlain, isNot(contains('\x1b')));
+      expect(humanPlain, isNot(contains('\nforged')));
+      expect(humanPlain, isNot(contains(_unsafeRenderedControl)));
+      expect(json.exitCode, 0);
+      expect(json.stderrBytes, isEmpty);
+      expectJsonStdout(
+        json,
+        predicate((value) {
+          final document = value as Map<String, Object?>;
+          final items = document['items']! as List<Object?>;
+          return document['projectRoot'] == fixture.root.path &&
+              items
+                  .cast<Map<Object?, Object?>>()
+                  .map((item) => item['path'])
+                  .contains(
+                    p.join(
+                      fixture.root.path,
+                      QuarantineManager.defaultQuarantineDir,
+                      _hostileTerminalInvalidSegment,
+                    ),
+                  ) &&
+              items
+                  .cast<Map<Object?, Object?>>()
+                  .map((item) => item['path'])
+                  .contains(
+                    p.join(
+                      fixture.root.path,
+                      QuarantineManager.defaultQuarantineDir,
+                      'valid-run',
+                    ),
+                  );
+        }, 'JSON preserves exact path controls'),
+      );
+      expect(inspectHuman.exitCode, 0);
+      expect(inspectHuman.stderrBytes, isEmpty);
+      _expectOnlyStaticSgr(inspectHuman.stdoutText);
+      final inspectHumanPlain = _stripAnsi(inspectHuman.stdoutText);
+      expect(
+        _unwrapVisualLines(inspectHumanPlain),
+        contains(_visibleHostileTerminalProjectSegment),
+      );
+      expect(inspectHumanPlain, isNot(contains('\nforged')));
+      expect(inspectHumanPlain, isNot(contains(_unsafeRenderedControl)));
+      final canonicalStart = inspectHumanPlain.indexOf('Canonical manifest:\n');
+      expect(canonicalStart, isNonNegative);
+      const metrics = TerminalTextMetrics();
+      final summary = inspectHumanPlain.substring(0, canonicalStart);
+      expect(
+        summary.split('\n').where((line) => line.isNotEmpty),
+        everyElement(
+          predicate<String>((line) => metrics.visibleWidth(line) <= 32),
+        ),
+      );
+      final canonical = inspectHumanPlain.substring(
+        canonicalStart + 'Canonical manifest:\n'.length,
+      );
+      final canonicalDocument = jsonDecode(canonical) as Map<Object?, Object?>;
+      expect(
+        canonicalDocument['projectRoot'],
+        contains(_visibleHostileTerminalProjectSegment),
+      );
+      expect(inspectJson.exitCode, 0);
+      expect(inspectJson.stderrBytes, isEmpty);
+      expectJsonStdout(
+        inspectJson,
+        predicate(
+          (value) =>
+              (value as Map<String, Object?>)['path'] ==
+              p.join(
+                fixture.root.path,
+                QuarantineManager.defaultQuarantineDir,
+                'valid-run',
+              ),
+          'inspect JSON preserves the exact valid path',
+        ),
+      );
+    },
+    timeout: processTestTimeout,
+  );
 
   test(
     'JSON surfaces escape raw controls without changing decoded path values',
     () async {
-      final fixture = CliFixture.create(
-        prefix:
-            'quarantine JSON controls \x1b[31m\u0085\u0090\u0098\u009b31m'
-            '\u009d\u009e\u009f\u061c\u200e\u200f\u2028\u2029\u202a'
-            '\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069\nforged ',
-      );
+      final fixture = CliFixture.create(prefix: _hostileJsonProjectSegment);
       addTearDown(fixture.dispose);
       await fixture.writeText(<String, String>{
         'pubspec.yaml': 'name: quarantine_json_controls\n',
@@ -1181,7 +1196,10 @@ void main() {
       expect(result.stdoutText, contains('Scope: all'));
       expect(result.stdoutText, contains('Targets: 1'));
       expect(result.stdoutText, contains('dry-run-target'));
-      expect(result.stdoutText, contains(quarantine.path));
+      expect(
+        result.stdoutText,
+        contains(quarantine.resolveSymbolicLinksSync()),
+      );
       expect(
         result.stdoutText,
         contains(RegExp(r'Fingerprint: v2:[0-9a-f]{64}')),
@@ -1384,7 +1402,10 @@ void main() {
         expect(result.exitCode, 1);
         expect(result.stdoutBytes, isEmpty);
         expectNoAnsi(result);
-        expect(result.stderrText, contains(_visibleHostileCleanPathSegment));
+        expect(
+          result.stderrText.replaceAll('\n', ''),
+          contains(_visibleHostileCleanPathSegment),
+        );
         expect(result.stderrText, isNot(contains('\nFORGED CLEAN ROW')));
         expect(result.stderrText, isNot(contains(_unsafeRenderedControl)));
         expect(

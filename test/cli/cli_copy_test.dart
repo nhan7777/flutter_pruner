@@ -425,6 +425,7 @@ Failure report saved: /workspace/failed-scan.json
       'scan.success.completed-singular',
       'scan.success.clean',
       'apply.empty.no-action',
+      'apply.preview.powershell',
       'rollback.success',
       'quarantine.clean.prompt',
     };
@@ -905,6 +906,9 @@ final _placeholderPatterns = <String, RegExp>{
   'truncated-manifest-path': RegExp(
     r'(?:[A-Za-z0-9_.-]+[\\/])*…[\\/][A-Za-z0-9_.-]+[\\/]manifest\.json',
   ),
+  'manifest-path': RegExp(
+    r'(?:(?:/|[A-Za-z]:[\\/])[^\r\n]+|(?:[A-Za-z0-9_.-]+[\\/])*…[\\/][A-Za-z0-9_.-]+[\\/])manifest\.json',
+  ),
   'unit-id': RegExp(r'unit:[a-f0-9]{16}'),
   'preview-fingerprint': RegExp(r'v[1-9][0-9]*:[a-f0-9]{64}'),
   'clean-scope': RegExp(r'(?:targeted|all)'),
@@ -993,7 +997,14 @@ void _expectExactTranscript(
   if (expected == null) {
     throw StateError('missing transcript fixture $scenario');
   }
-  final surfaces = expected
+  final platformExpected = expected
+      .map(
+        (id) => Platform.isWindows && id == 'apply.preview.posix'
+            ? 'apply.preview.powershell'
+            : id,
+      )
+      .toList(growable: false);
+  final surfaces = platformExpected
       .map(
         (id) => inventory.surfaces.singleWhere((surface) => surface.id == id),
       )
@@ -1015,7 +1026,7 @@ void _expectExactTranscript(
   ).allLines(result.stdoutText, result.stderrText);
   expect(
     observed,
-    expected,
+    platformExpected,
     reason:
         '$scenario exact normalized transcript\n'
         'stdout=${result.stdoutText}\n'
@@ -1336,13 +1347,16 @@ final class _PresentationExtractor {
   }
 
   bool _isVisualPathElision(String kind) =>
-      kind == 'elided-path' || kind == 'truncated-manifest-path';
+      kind == 'elided-path' ||
+      kind == 'truncated-manifest-path' ||
+      kind == 'manifest-path';
 
   String _visualWrapPlaceholderPattern(String kind) {
     switch (kind) {
       case 'elided-path':
         return r'(?:/|[A-Za-z]:)[^\r\n]+';
       case 'truncated-manifest-path':
+      case 'manifest-path':
         return r'(?:/|[A-Za-z]:)[^\r\n]+/manifest\.json';
       default:
         return _placeholderPatterns[kind]!.pattern;

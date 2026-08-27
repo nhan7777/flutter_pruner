@@ -462,13 +462,17 @@ void main() {
     test(
       'renders the initial physical plan and exact preview next command',
       () {
+        final plan = _initialPhysicalPlan(
+          canonicalProjectRoot: _posixProjectRoot,
+        );
         final output = _plain(
           const _PosixHumanFormatter(lineWidth: 200).format(
             _applyReport(
+              projectRoot: _posixProjectRoot,
               status: RunStatus.dryRun,
               outcomes: [_outcome(ApplyFindingOutcomeStatus.remaining)],
-              selection: _exactSelection(),
-              initialPlan: _initialPhysicalPlan(),
+              selection: _exactSelection(plan),
+              initialPlan: plan,
             ),
           ),
         );
@@ -495,30 +499,36 @@ void main() {
           contains('edit the declaration or delete an empty file'),
         );
         expect(output, contains('BLOCKED · retainedConsumer'));
-        expect(output, contains(_exactSelection().actualPreviewFingerprint!));
+        expect(
+          output,
+          contains(_exactSelection(plan).actualPreviewFingerprint!),
+        );
         expect(
           output,
           contains(
-            "flutter_pruner 'apply' '--project' '$_canonicalProjectRoot' "
+            "flutter_pruner 'apply' '--project' '$_posixProjectRoot' "
             "'--finding-id' "
             "'finding-a' '--finding-id' 'finding-b' "
             "'--expect-preview-fingerprint' "
-            "'${_exactSelection().actualPreviewFingerprint}'",
+            "'${_exactSelection(plan).actualPreviewFingerprint}'",
           ),
         );
       },
     );
 
     test('marks all-eligible plans as initial-round-only without binding', () {
+      final plan = _initialPhysicalPlan(
+        canonicalProjectRoot: _posixProjectRoot,
+        scope: ApplyInitialPlanScope.initialRoundOnly,
+      );
       final output = _plain(
         const _PosixHumanFormatter(lineWidth: 200).format(
           _applyReport(
+            projectRoot: _posixProjectRoot,
             status: RunStatus.dryRun,
             outcomes: [_outcome(ApplyFindingOutcomeStatus.remaining)],
             selection: _allEligibleSelection(),
-            initialPlan: _initialPhysicalPlan(
-              scope: ApplyInitialPlanScope.initialRoundOnly,
-            ),
+            initialPlan: plan,
           ),
         ),
       );
@@ -529,10 +539,13 @@ void main() {
     });
 
     test('locks the complete initial physical plan transcript order', () {
-      final plan = _initialPhysicalPlan();
+      final plan = _initialPhysicalPlan(
+        canonicalProjectRoot: _posixProjectRoot,
+      );
       final output = _plain(
         const _PosixHumanFormatter(lineWidth: 200).format(
           _applyReport(
+            projectRoot: _posixProjectRoot,
             status: RunStatus.dryRun,
             outcomes: [_outcome(ApplyFindingOutcomeStatus.remaining)],
             selection: _exactSelection(),
@@ -569,7 +582,7 @@ void main() {
         '\n'
         'Apply this exact batch only after reviewing the fingerprint:\n'
         'POSIX shell exact batch:\n'
-        "flutter_pruner 'apply' '--project' '$_canonicalProjectRoot' "
+        "flutter_pruner 'apply' '--project' '$_posixProjectRoot' "
         "'--finding-id' "
         "'finding-a' '--finding-id' 'finding-b' "
         "'--expect-preview-fingerprint' '${plan.preview!.fingerprint}'",
@@ -577,10 +590,13 @@ void main() {
     });
 
     test('uses singular affected-file copy', () {
-      final plan = _singleFileInitialPlan();
+      final plan = _singleFileInitialPlan(
+        canonicalProjectRoot: _posixProjectRoot,
+      );
       final output = _plain(
         const _PosixHumanFormatter(lineWidth: 200).format(
           _applyReport(
+            projectRoot: _posixProjectRoot,
             status: RunStatus.dryRun,
             outcomes: [_outcome(ApplyFindingOutcomeStatus.remaining)],
             selection: _singleFileSelection(plan),
@@ -594,7 +610,7 @@ void main() {
     });
 
     test('labels and quotes hostile exact commands for POSIX shells', () {
-      final projectRoot = _hostileCanonicalProjectRoot;
+      final projectRoot = _posixHostileCanonicalProjectRoot;
       final plan = _initialPhysicalPlan(canonicalProjectRoot: projectRoot);
       final output = _plain(
         const _PosixHumanFormatter(lineWidth: 200).format(
@@ -617,7 +633,7 @@ void main() {
     });
 
     test('labels and quotes hostile exact commands for PowerShell', () {
-      final projectRoot = _hostileCanonicalProjectRoot;
+      final projectRoot = _windowsHostileCanonicalProjectRoot;
       final plan = _initialPhysicalPlan(canonicalProjectRoot: projectRoot);
       final output = _plain(
         const _WindowsHumanFormatter(lineWidth: 200).format(
@@ -692,43 +708,45 @@ RunReport _applyReport({
   quarantinePath: quarantinePath,
 );
 
-ApplyFindingOutcome _outcome(
-  ApplyFindingOutcomeStatus status,
-) => ApplyFindingOutcome(
-  finding: Finding(
-    ruleId: 'PRN-DART-001',
-    node: GraphNode(
-      id: 'dart:test/lib/src/features/very_long_folder/example.dart#${status.name}',
-      kind: NodeKind.declaration,
-      origin: Uri.file(
-        '/project/lib/src/features/very_long_folder/example_${status.name}.dart',
+ApplyFindingOutcome _outcome(ApplyFindingOutcomeStatus status) {
+  final originPath = _canonicalChild(
+    _canonicalProjectRoot,
+    'lib/src/features/very_long_folder/example_${status.name}.dart',
+  );
+  return ApplyFindingOutcome(
+    finding: Finding(
+      ruleId: 'PRN-DART-001',
+      node: GraphNode(
+        id: 'dart:test/lib/src/features/very_long_folder/example.dart#${status.name}',
+        kind: NodeKind.declaration,
+        origin: Uri.file(originPath, windows: Platform.isWindows),
+        displayName: 'example',
       ),
-      displayName: 'example',
+      confidence: Confidence.safe,
+      title: 'Example ${status.name}',
+      predicates: const SafetyPredicates(
+        ruleAllowsAutoFix: true,
+        unreachableAcrossAllTargets: true,
+        noDynamicBlockers: true,
+        notProtected: true,
+        noPublicApiRisk: true,
+        hasDeterministicInverse: true,
+      ),
     ),
-    confidence: Confidence.safe,
-    title: 'Example ${status.name}',
-    predicates: const SafetyPredicates(
-      ruleAllowsAutoFix: true,
-      unreachableAcrossAllTargets: true,
-      noDynamicBlockers: true,
-      notProtected: true,
-      noPublicApiRisk: true,
-      hasDeterministicInverse: true,
-    ),
-  ),
-  status: status,
-  reasonCode: status.name,
-  reason: 'Outcome reason for ${status.name}.',
-  transactionId: switch (status) {
-    ApplyFindingOutcomeStatus.committed ||
-    ApplyFindingOutcomeStatus.rejectedRecovered ||
-    ApplyFindingOutcomeStatus.recoveryRequired => 'transaction-1',
-    _ => null,
-  },
-  rollbackVerified: status == ApplyFindingOutcomeStatus.rejectedRecovered
-      ? true
-      : null,
-);
+    status: status,
+    reasonCode: status.name,
+    reason: 'Outcome reason for ${status.name}.',
+    transactionId: switch (status) {
+      ApplyFindingOutcomeStatus.committed ||
+      ApplyFindingOutcomeStatus.rejectedRecovered ||
+      ApplyFindingOutcomeStatus.recoveryRequired => 'transaction-1',
+      _ => null,
+    },
+    rollbackVerified: status == ApplyFindingOutcomeStatus.rejectedRecovered
+        ? true
+        : null,
+  );
+}
 
 ApplyStatistics _statistics({
   int committed = 0,
@@ -905,44 +923,48 @@ ApplyInitialPlanReport _initialPhysicalPlan({
   ),
 );
 
-ApplyInitialPlanReport _singleFileInitialPlan() => ApplyInitialPlanReport(
-  canonicalVersion: 1,
-  scope: ApplyInitialPlanScope.completeExactSelection,
-  planFingerprint: 'a' * 64,
-  units: [
-    ApplyPlanUnitReport(
-      order: 0,
-      id: 'unit-a',
-      findingIds: const ['finding-a'],
-      dependencyUnitIds: const [],
-      actions: [
-        ApplyPlanActionReport(
+ApplyInitialPlanReport _singleFileInitialPlan({String? canonicalProjectRoot}) =>
+    ApplyInitialPlanReport(
+      canonicalVersion: 1,
+      scope: ApplyInitialPlanScope.completeExactSelection,
+      planFingerprint: 'a' * 64,
+      units: [
+        ApplyPlanUnitReport(
           order: 0,
-          logicalFindingId: 'finding-a',
-          journalFindingId: 'finding-a',
-          operation: FindingActionOperation.removeFinding,
-          projectRelativePath: 'lib/a.dart',
-          countsTowardSummary: true,
+          id: 'unit-a',
+          findingIds: const ['finding-a'],
+          dependencyUnitIds: const [],
+          actions: [
+            ApplyPlanActionReport(
+              order: 0,
+              logicalFindingId: 'finding-a',
+              journalFindingId: 'finding-a',
+              operation: FindingActionOperation.removeFinding,
+              projectRelativePath: 'lib/a.dart',
+              countsTowardSummary: true,
+            ),
+          ],
         ),
       ],
-    ),
-  ],
-  blocked: const [],
-  preview: ApplyPreviewReport(
-    version: 1,
-    canonicalProjectRoot: _canonicalProjectRoot,
-    planFingerprint: 'a' * 64,
-    sources: [
-      ApplySourceSnapshotReport(
-        projectRelativePath: 'lib/a.dart',
-        canonicalPath: _canonicalChild(_canonicalProjectRoot, 'lib/a.dart'),
-        sha256: '1' * 64,
-        sizeBytes: 0,
-        posixMode: null,
+      blocked: const [],
+      preview: ApplyPreviewReport(
+        version: 1,
+        canonicalProjectRoot: canonicalProjectRoot ?? _canonicalProjectRoot,
+        planFingerprint: 'a' * 64,
+        sources: [
+          ApplySourceSnapshotReport(
+            projectRelativePath: 'lib/a.dart',
+            canonicalPath: _canonicalChild(
+              canonicalProjectRoot ?? _canonicalProjectRoot,
+              'lib/a.dart',
+            ),
+            sha256: '1' * 64,
+            sizeBytes: 0,
+            posixMode: null,
+          ),
+        ],
       ),
-    ],
-  ),
-);
+    );
 
 ApplySelectionReport _singleFileSelection(ApplyInitialPlanReport plan) =>
     ApplySelectionReport(
@@ -964,12 +986,19 @@ String get _canonicalProjectRoot => Platform.isWindows
     ? p.windows.normalize(r'C:\project')
     : p.posix.normalize('/project');
 
-String get _hostileCanonicalProjectRoot => Platform.isWindows
-    ? p.windows.normalize(r"C:\project & O'Reilly $HOME %PATH%")
-    : p.posix.normalize(r"/project & O'Reilly $HOME %PATH%");
+const _posixProjectRoot = '/project';
+
+String get _posixHostileCanonicalProjectRoot =>
+    p.posix.normalize(r"/project & O'Reilly $HOME %PATH%");
+
+String get _windowsHostileCanonicalProjectRoot =>
+    p.windows.normalize(r"C:\project & O'Reilly $HOME %PATH%");
 
 String _canonicalChild(String root, String relativePath) {
-  final context = Platform.isWindows ? p.windows : p.posix;
+  final context =
+      RegExp(r'^[A-Za-z]:[\\/]').hasMatch(root) || root.contains(r'\')
+      ? p.windows
+      : p.posix;
   return context.joinAll(<String>[root, ...p.posix.split(relativePath)]);
 }
 
