@@ -987,7 +987,7 @@ String get _canonicalProjectRoot => Platform.isWindows
     : p.posix.normalize('/project');
 
 String get _posixProjectRoot => Platform.isWindows
-    ? p.windows.normalize(r'C:\project')
+    ? p.windows.normalize(r'C:\p')
     : p.posix.normalize('/project');
 
 String get _posixHostileCanonicalProjectRoot => Platform.isWindows

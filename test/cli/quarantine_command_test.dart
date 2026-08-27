@@ -774,7 +774,7 @@ void main() {
       );
       expect(
         _unwrapVisualLines(humanPlain),
-        contains(_visibleHostileTerminalInvalidSegment),
+        contains(_unwrapVisualLines(_visibleHostileTerminalInvalidSegment)),
       );
       expect(humanPlain, isNot(contains('\x1b')));
       expect(humanPlain, isNot(contains('\nforged')));

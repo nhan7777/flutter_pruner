@@ -6,6 +6,10 @@ import 'windows_clean_open_mode.dart';
 
 export 'windows_clean_open_mode.dart' show WindowsCleanDirectoryOpenMode;
 
+const _statusObjectNameCollision = 0xc0000035;
+const _statusObjectNameNotFound = 0xc0000034;
+const _statusObjectPathNotFound = 0xc000003a;
+
 /// Stable identity and type evidence read from a retained Windows handle.
 final class WindowsCleanIdentityData {
   /// Creates one native identity observation.
@@ -84,8 +88,18 @@ final class WindowsSystemCleanMoveBindings implements WindowsCleanMoveBindings {
     try {
       return _delegate.openRelativeDirectoryForClean(parent, leaf, mode: mode);
     } on WindowsNativeFailure catch (error) {
+      final status = error.code.toUnsigned(32);
+      if (error.ntStatus &&
+          (status == _statusObjectNameNotFound ||
+              status == _statusObjectPathNotFound)) {
+        throw const CleanMoveException(
+          category: CleanMoveFailure.notFound,
+          operation: 'open-directory-relative',
+        );
+      }
       if (mode == WindowsCleanDirectoryOpenMode.createExclusive &&
-          (error.code & 0xffffffff) == 0xc0000035) {
+          error.ntStatus &&
+          status == _statusObjectNameCollision) {
         throw const CleanMoveException(
           category: CleanMoveFailure.collision,
           operation: 'create-directory-exclusive',
@@ -123,7 +137,8 @@ final class WindowsSystemCleanMoveBindings implements WindowsCleanMoveBindings {
     } on WindowsNativeFailure catch (error) {
       if (error.code == 80 ||
           error.code == 183 ||
-          (error.ntStatus && (error.code & 0xffffffff) == 0xc0000035)) {
+          (error.ntStatus &&
+              error.code.toUnsigned(32) == _statusObjectNameCollision)) {
         throw const CleanMoveException(
           category: CleanMoveFailure.collision,
           operation: 'move-directory',

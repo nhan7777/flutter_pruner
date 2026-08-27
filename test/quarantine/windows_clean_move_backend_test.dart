@@ -101,6 +101,33 @@ void main() {
   );
 
   test(
+    'Windows NTFS reports an absent relative directory as not found',
+    () async {
+      if (!Platform.isWindows) return;
+      final root = Directory.systemTemp.createTempSync(
+        'windows_clean_missing_',
+      );
+      addTearDown(() {
+        if (root.existsSync()) root.deleteSync(recursive: true);
+      });
+      final base = Directory('${root.path}\\quarantine')..createSync();
+      final anchored = await WindowsRecoverableCleanMoveBackend().anchor(base);
+      addTearDown(anchored.close);
+
+      await expectLater(
+        () => anchored.inspectDirectory(const ['missing-run']),
+        throwsA(
+          isA<CleanMoveException>().having(
+            (error) => error.category,
+            'category',
+            CleanMoveFailure.notFound,
+          ),
+        ),
+      );
+    },
+  );
+
+  test(
     'renames the exact expected source handle without replacement',
     () async {
       final bindings = _FakeWindowsCleanMoveBindings();

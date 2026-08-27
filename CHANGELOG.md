@@ -71,7 +71,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Use `NtSetInformationFile` with the retained destination-directory handle and
   a complete `FILE_RENAME_INFORMATION` ABI buffer for anchored no-replace
   quarantine moves, restoring native NTFS clean and retained-restore behavior
-  without falling back to an unconfirmed move result.
+  without falling back to an unconfirmed move result. Map absent relative NTFS
+  objects to the typed not-found observation used by restart reconciliation.
 
 ## [1.6.0] - 2026-08-24
 
