@@ -91,7 +91,9 @@ void main() {
       final fixtureRoot = Directory.systemTemp.createTempSync(
         'rollback_hostile_action_',
       );
-      const hostileSegment = "project-'quoted\nFORGED ACTION ROW\x1b[31m\u202e";
+      final hostileSegment = Platform.isWindows
+          ? "project-'quoted FORGED ACTION ROW\u0085\u202e"
+          : "project-'quoted\nFORGED ACTION ROW\x1b[31m\u202e";
       final project = Directory(p.join(fixtureRoot.path, hostileSegment));
       try {
         project.createSync(recursive: true);
@@ -562,7 +564,9 @@ void main() {
             ? (Directory(
                 p.join(
                   fixtureRoot.path,
-                  'snapshot\nFORGED SNAPSHOT ROW\x1b[31m\u202e',
+                  Platform.isWindows
+                      ? 'snapshot FORGED SNAPSHOT ROW\u0085\u202e'
+                      : 'snapshot\nFORGED SNAPSHOT ROW\x1b[31m\u202e',
                 ),
               )..createSync())
             : fixtureRoot;
@@ -664,6 +668,7 @@ void main() {
             final visibleSnapshotPath = snapshot.path
                 .replaceAll('\n', r'\n')
                 .replaceAll('\x1b', r'\x1B')
+                .replaceAll('\u0085', r'\u0085')
                 .replaceAll('\u202e', r'\u202E');
             expect(
               result.stderr.replaceAll('\n', ''),
@@ -672,6 +677,7 @@ void main() {
             final visibleQuarantinePath = run.quarantine.path
                 .replaceAll('\n', r'\n')
                 .replaceAll('\x1b', r'\x1B')
+                .replaceAll('\u0085', r'\u0085')
                 .replaceAll('\u202e', r'\u202E');
             expect(
               result.stderr.replaceAll('\n', ''),
@@ -682,7 +688,11 @@ void main() {
             expect(result.stderr, isNot(contains('\x1b')));
             expect(
               result.stderr.replaceAll('\n', ''),
-              contains(r'\nFORGED SNAPSHOT ROW\x1B[31m\u202E'),
+              contains(
+                Platform.isWindows
+                    ? r' FORGED SNAPSHOT ROW\u0085\u202E'
+                    : r'\nFORGED SNAPSHOT ROW\x1B[31m\u202E',
+              ),
             );
             expect(result.stderr, isNot(contains('\u202e')));
           } else {

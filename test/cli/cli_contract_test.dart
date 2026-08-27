@@ -276,7 +276,10 @@ void main() {
       final result = await harness.run(const ['--version']);
 
       expect(result.exitCode, 0);
-      expect(result.stdoutText, 'flutter_pruner 1.6.0\n');
+      expect(
+        result.stdoutText,
+        'flutter_pruner 1.6.0${Platform.isWindows ? '\r\n' : '\n'}',
+      );
       expect(result.stderrBytes, isEmpty);
       expectNoAnsi(result);
     },
@@ -704,7 +707,7 @@ target_matrix:
       expect(scan.stderrText, isNot(contains('\x1B[2K')));
       expect(scan.stdoutText, contains('\x1B['));
       expect(scan.stdoutText, contains('SCAN COMPLETED'));
-      expect(scan.stdoutText, contains(scanReport.path));
+      expect(scan.stdoutText, contains(scanReport.resolveSymbolicLinksSync()));
       expect(() => jsonDecode(scan.stdoutText), throwsFormatException);
       expect(scanReport.existsSync(), isTrue);
       final scanEvidence =
@@ -1459,9 +1462,11 @@ target_matrix:
     () async {
       final fixture = CliFixture.create(prefix: 'q6 hostile ');
       addTearDown(fixture.dispose);
-      const hostileName =
-          "hostile'\nRollback: verified\x1b\t\x7f\u0085\u009b\u061c\u200e\u200f"
-          '\u2028\u2029\u202a\u202e\u2066\u2069';
+      final hostileName = Platform.isWindows
+          ? "hostile' Rollback: verified\u0085\u009b\u061c\u200e\u200f"
+                '\u2028\u2029\u202a\u202e\u2066\u2069'
+          : "hostile'\nRollback: verified\x1b\t\x7f\u0085\u009b\u061c\u200e\u200f"
+                '\u2028\u2029\u202a\u202e\u2066\u2069';
       final project = Directory(
         '${fixture.root.path}${Platform.pathSeparator}$hostileName',
       )..createSync(recursive: true);
@@ -1494,9 +1499,15 @@ target_matrix:
       );
       expect(
         result.stderrText,
-        contains(r"hostile'\nRollback: verified\x1B\t"),
+        contains(
+          Platform.isWindows
+              ? r"hostile' Rollback: verified\u0085\u009B"
+              : r"hostile'\nRollback: verified\x1B\t",
+        ),
       );
-      expect(result.stderrText, contains(r'\x7F'));
+      if (!Platform.isWindows) {
+        expect(result.stderrText, contains(r'\x7F'));
+      }
       final lines = const LineSplitter().convert(result.stderrText);
       final argvLabel = lines.indexOf(
         'Exact action argv (JSON; invoke without a shell):',
@@ -1618,14 +1629,15 @@ void main() => stdout.write(jsonEncode({
         environmentRemovals: const {'W0B_REMOVAL_PROBE'},
       );
 
-      expectJsonStdout(
-        result,
-        equals({
-          'cwd': fixture.root.resolveSymbolicLinksSync(),
-          'added': 'controlled',
-          'removedPresent': false,
-        }),
+      final observed = jsonDecode(result.stdoutText) as Map<String, dynamic>;
+      expect(
+        observed['cwd'],
+        Platform.isWindows
+            ? fixture.root.path
+            : fixture.root.resolveSymbolicLinksSync(),
       );
+      expect(observed['added'], 'controlled');
+      expect(observed['removedPresent'], isFalse);
       expect(result.stderrBytes, isEmpty);
     },
     timeout: processTestTimeout,

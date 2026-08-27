@@ -22,30 +22,46 @@ final _unsafeJsonRepresentationControl = RegExp(
   r'[\x00-\x1F\x7F-\x9F\u061C\u200E\u200F\u2028\u2029\u202A-\u202E\u2066-\u2069]',
 );
 
-const _hostileCleanPathSegment =
-    'invalid\x1b[31m\u0085\u061c\u200e\u200f\u2028\u2029'
-    '\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069\nFORGED CLEAN ROW';
-const _visibleHostileCleanPathSegment =
-    r'invalid\x1B[31m\u0085\u061C\u200E\u200F\u2028\u2029'
-    r'\u202A\u202B\u202C\u202D\u202E\u2066\u2067\u2068\u2069\nFORGED CLEAN ROW';
-const _hostileLegacyPathSegment =
-    'legacy-\x01\x02\x03\x04\x05\x06\x07\x08\t\n\x0b\x0c\r'
-    '\x0e\x0f\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f\x7f'
-    '\u0080\u0081\u0082\u0083\u0084\u0085\u0086\u0087'
-    '\u0088\u0089\u008a\u008b\u008c\u008d\u008e\u008f'
-    '\u0090\u0091\u0092\u0093\u0094\u0095\u0096\u0097'
-    '\u0098\u0099\u009a\u009b\u009c\u009d\u009e\u009f'
-    '\u061c\u200e\u200f\u2028\u2029\u202a\u202b\u202c\u202d\u202e'
-    '\u2066\u2067\u2068\u2069\nFORGED LEGACY ROW';
-const _visibleHostileLegacyPathSegment =
-    r'legacy-\x01\x02\x03\x04\x05\x06\x07\x08\t\n\x0B\x0C\r'
-    r'\x0E\x0F\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1A\x1B\x1C\x1D\x1E\x1F\x7F'
-    r'\u0080\u0081\u0082\u0083\u0084\u0085\u0086\u0087'
-    r'\u0088\u0089\u008A\u008B\u008C\u008D\u008E\u008F'
-    r'\u0090\u0091\u0092\u0093\u0094\u0095\u0096\u0097'
-    r'\u0098\u0099\u009A\u009B\u009C\u009D\u009E\u009F'
-    r'\u061C\u200E\u200F\u2028\u2029\u202A\u202B\u202C\u202D\u202E'
-    r'\u2066\u2067\u2068\u2069\nFORGED LEGACY ROW';
+final _hostileCleanPathSegment = Platform.isWindows
+    ? 'invalid\u0085\u061c\u200e\u200f\u2028\u2029'
+          '\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069 FORGED CLEAN ROW'
+    : 'invalid\x1b[31m\u0085\u061c\u200e\u200f\u2028\u2029'
+          '\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069\nFORGED CLEAN ROW';
+final _visibleHostileCleanPathSegment = Platform.isWindows
+    ? r'invalid\u0085\u061C\u200E\u200F\u2028\u2029'
+          r'\u202A\u202B\u202C\u202D\u202E\u2066\u2067\u2068\u2069 FORGED CLEAN ROW'
+    : r'invalid\x1B[31m\u0085\u061C\u200E\u200F\u2028\u2029'
+          r'\u202A\u202B\u202C\u202D\u202E\u2066\u2067\u2068\u2069\nFORGED CLEAN ROW';
+final _hostileLegacyPathSegment = Platform.isWindows
+    ? 'legacy-\u0080\u0081\u0082\u0083\u0084\u0085\u0086\u0087'
+          '\u0088\u0089\u008a\u008b\u008c\u008d\u008e\u008f'
+          '\u0090\u0091\u0092\u0093\u0094\u0095\u0096\u0097'
+          '\u0098\u0099\u009a\u009b\u009c\u009d\u009e\u009f'
+          '\u061c\u200e\u200f\u2028\u2029\u202a\u202b\u202c\u202d\u202e'
+          '\u2066\u2067\u2068\u2069 FORGED LEGACY ROW'
+    : 'legacy-\x01\x02\x03\x04\x05\x06\x07\x08\t\n\x0b\x0c\r'
+          '\x0e\x0f\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f\x7f'
+          '\u0080\u0081\u0082\u0083\u0084\u0085\u0086\u0087'
+          '\u0088\u0089\u008a\u008b\u008c\u008d\u008e\u008f'
+          '\u0090\u0091\u0092\u0093\u0094\u0095\u0096\u0097'
+          '\u0098\u0099\u009a\u009b\u009c\u009d\u009e\u009f'
+          '\u061c\u200e\u200f\u2028\u2029\u202a\u202b\u202c\u202d\u202e'
+          '\u2066\u2067\u2068\u2069\nFORGED LEGACY ROW';
+final _visibleHostileLegacyPathSegment = Platform.isWindows
+    ? r'legacy-\u0080\u0081\u0082\u0083\u0084\u0085\u0086\u0087'
+          r'\u0088\u0089\u008A\u008B\u008C\u008D\u008E\u008F'
+          r'\u0090\u0091\u0092\u0093\u0094\u0095\u0096\u0097'
+          r'\u0098\u0099\u009A\u009B\u009C\u009D\u009E\u009F'
+          r'\u061C\u200E\u200F\u2028\u2029\u202A\u202B\u202C\u202D\u202E'
+          r'\u2066\u2067\u2068\u2069 FORGED LEGACY ROW'
+    : r'legacy-\x01\x02\x03\x04\x05\x06\x07\x08\t\n\x0B\x0C\r'
+          r'\x0E\x0F\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1A\x1B\x1C\x1D\x1E\x1F\x7F'
+          r'\u0080\u0081\u0082\u0083\u0084\u0085\u0086\u0087'
+          r'\u0088\u0089\u008A\u008B\u008C\u008D\u008E\u008F'
+          r'\u0090\u0091\u0092\u0093\u0094\u0095\u0096\u0097'
+          r'\u0098\u0099\u009A\u009B\u009C\u009D\u009E\u009F'
+          r'\u061C\u200E\u200F\u2028\u2029\u202A\u202B\u202C\u202D\u202E'
+          r'\u2066\u2067\u2068\u2069\nFORGED LEGACY ROW';
 
 void main() {
   test(
@@ -3308,7 +3324,7 @@ void main() {
         final exitCode = await process.exitCode;
 
         expect(exitCode, 1);
-        expect(stderrText, contains('invalid-run'));
+        expect(_unwrapVisualLines(stderrText), contains('invalid-run'));
         expect(cleanable.existsSync(), isTrue);
         expect(invalid.existsSync(), isTrue);
       } finally {

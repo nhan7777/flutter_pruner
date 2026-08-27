@@ -251,6 +251,7 @@ Future<void> main(List<String> arguments) async {
 }
 ''');
       final cancellation = ManagedProcessCancellationController();
+      int? launchedPid;
       final runner = ManagedProcessRunner(
         cancellationController: cancellation,
         processTreeTerminator:
@@ -260,6 +261,7 @@ Future<void> main(List<String> arguments) async {
               required observedProcesses,
               required observationReliable,
             }) async {
+              launchedPid = process.pid;
               process.kill(ProcessSignal.sigkill);
               await exitCode;
               return ManagedProcessTerminationEvidence(
@@ -287,17 +289,22 @@ Future<void> main(List<String> arguments) async {
 
       cancellation.requestCancellation(ProcessSignal.sigterm);
 
-      await expectLater(
-        execution,
-        throwsA(
-          isA<ProcessTerminationUnconfirmedException>()
-              .having((error) => error.processId, 'processId', rootPid)
-              .having(
-                (error) => error.triggerSignal,
-                'triggerSignal',
-                ProcessSignal.sigterm,
-              ),
-        ),
+      Object? failure;
+      try {
+        await execution;
+      } on Object catch (error) {
+        failure = error;
+      }
+      expect(launchedPid, isNotNull);
+      expect(
+        failure,
+        isA<ProcessTerminationUnconfirmedException>()
+            .having((error) => error.processId, 'processId', launchedPid)
+            .having(
+              (error) => error.triggerSignal,
+              'triggerSignal',
+              ProcessSignal.sigterm,
+            ),
       );
       expect(cancellation.pendingOrActiveTreeCount, 0);
     },

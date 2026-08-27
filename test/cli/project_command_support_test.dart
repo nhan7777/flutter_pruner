@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:args/args.dart';
 import 'package:flutter_pruner/src/cli/project_command_support.dart';
+import 'package:flutter_pruner/src/cli/suggested_command.dart';
 import 'package:flutter_pruner/src/core/project/tool_workspace.dart';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
@@ -16,7 +17,11 @@ void main() {
 
         expect(
           projectCommandFor(workspace, 'init'),
-          "flutter_pruner 'init' '--project' '${root.path.replaceAll("'", "'\"'\"'")}'",
+          SuggestedCommand.flutterPruner([
+            'init',
+            '--project',
+            root.path,
+          ]).render(ShellDialect.host),
         );
       } finally {
         root.deleteSync(recursive: true);

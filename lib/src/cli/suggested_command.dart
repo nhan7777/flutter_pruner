@@ -93,6 +93,10 @@ final class SuggestedCommand {
 
   static String _quote(String value, ShellDialect dialect) => switch (dialect) {
     ShellDialect.posix => "'${value.replaceAll("'", "'\"'\"'")}'",
+    // Windows PowerShell 5.1 drops an ordinary empty string when it builds a
+    // native command line. Passing a quoted empty token preserves one exact
+    // empty argv element through the Windows CRT parser.
+    ShellDialect.powerShell when value.isEmpty => "'\"\"'",
     ShellDialect.powerShell => "'${value.replaceAll("'", "''")}'",
   };
 

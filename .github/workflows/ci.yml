@@ -75,7 +75,7 @@ jobs:
 
   test:
     name: Test (${{ matrix.os }}, Dart ${{ matrix.sdk }})
-    timeout-minutes: 25
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:

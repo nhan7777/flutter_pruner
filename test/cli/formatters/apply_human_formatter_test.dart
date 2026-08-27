@@ -11,6 +11,7 @@ import 'package:flutter_pruner/src/core/graph/build_condition.dart';
 import 'package:flutter_pruner/src/core/graph/node.dart';
 import 'package:flutter_pruner/src/core/project/target_matrix.dart';
 import 'package:flutter_pruner/src/reporting/run_report.dart';
+import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
 void main() {
@@ -66,7 +67,7 @@ void main() {
 
       for (final entry in cases.entries) {
         final output = _plain(
-          const HumanFormatter(lineWidth: 160).format(
+          const _PosixHumanFormatter(lineWidth: 160).format(
             _applyReport(
               status: entry.key,
               outcomes: entry.key == RunStatus.dryRun
@@ -260,7 +261,7 @@ void main() {
         const projectRoot = "/project's root";
         const quarantine = "/project's root/.flutter_pruner/quarantine/run-1";
         final output = _plain(
-          const HumanFormatter(lineWidth: 200).format(
+          const _PosixHumanFormatter(lineWidth: 200).format(
             _applyReport(
               projectRoot: projectRoot,
               quarantinePath: quarantine,
@@ -498,7 +499,8 @@ void main() {
         expect(
           output,
           contains(
-            "flutter_pruner 'apply' '--project' '/project' '--finding-id' "
+            "flutter_pruner 'apply' '--project' '$_canonicalProjectRoot' "
+            "'--finding-id' "
             "'finding-a' '--finding-id' 'finding-b' "
             "'--expect-preview-fingerprint' "
             "'${_exactSelection().actualPreviewFingerprint}'",
@@ -567,7 +569,8 @@ void main() {
         '\n'
         'Apply this exact batch only after reviewing the fingerprint:\n'
         'POSIX shell exact batch:\n'
-        "flutter_pruner 'apply' '--project' '/project' '--finding-id' "
+        "flutter_pruner 'apply' '--project' '$_canonicalProjectRoot' "
+        "'--finding-id' "
         "'finding-a' '--finding-id' 'finding-b' "
         "'--expect-preview-fingerprint' '${plan.preview!.fingerprint}'",
       );
@@ -591,7 +594,7 @@ void main() {
     });
 
     test('labels and quotes hostile exact commands for POSIX shells', () {
-      const projectRoot = r"/project & O'Reilly $HOME %PATH%";
+      final projectRoot = _hostileCanonicalProjectRoot;
       final plan = _initialPhysicalPlan(canonicalProjectRoot: projectRoot);
       final output = _plain(
         const _PosixHumanFormatter(lineWidth: 200).format(
@@ -608,13 +611,13 @@ void main() {
       expect(output, contains('POSIX shell exact batch:'));
       expect(
         output,
-        contains("'--project' '/project & O'\"'\"'Reilly \$HOME %PATH%'"),
+        contains("'--project' '${projectRoot.replaceAll("'", "'\"'\"'")}'"),
       );
       expect(output, isNot(contains('PowerShell exact batch:')));
     });
 
     test('labels and quotes hostile exact commands for PowerShell', () {
-      const projectRoot = r"/project & O'Reilly $HOME %PATH%";
+      final projectRoot = _hostileCanonicalProjectRoot;
       final plan = _initialPhysicalPlan(canonicalProjectRoot: projectRoot);
       final output = _plain(
         const _WindowsHumanFormatter(lineWidth: 200).format(
@@ -631,7 +634,7 @@ void main() {
       expect(output, contains('PowerShell exact batch:'));
       expect(
         output,
-        contains("'--project' '/project & O''Reilly \$HOME %PATH%'"),
+        contains("'--project' '${projectRoot.replaceAll("'", "''")}'"),
       );
       expect(output, isNot(contains('POSIX shell exact batch:')));
     });
@@ -646,7 +649,7 @@ RunReport _applyReport({
   RunStatus status = RunStatus.completed,
   int? exitCode,
   bool partialApplied = false,
-  String projectRoot = '/project',
+  String? projectRoot,
   List<ApplyFindingOutcome> outcomes = const [],
   ApplyStatistics? statistics,
   List<VerificationAttemptReport> attempts = const [],
@@ -666,7 +669,7 @@ RunReport _applyReport({
   status: status,
   exitCode: exitCode ?? (status == RunStatus.completed ? 0 : 2),
   partialApplied: partialApplied,
-  projectRoot: projectRoot,
+  projectRoot: projectRoot ?? _canonicalProjectRoot,
   canonicalProjectRoot: initialPlan?.preview?.canonicalProjectRoot,
   packageName: 'test',
   requestedAdapters: const ['dart'],
@@ -782,7 +785,7 @@ ApplySelectionReport _allEligibleSelection() {
 
 ApplyInitialPlanReport _initialPhysicalPlan({
   ApplyInitialPlanScope scope = ApplyInitialPlanScope.completeExactSelection,
-  String canonicalProjectRoot = '/project',
+  String? canonicalProjectRoot,
 }) => ApplyInitialPlanReport(
   canonicalVersion: 1,
   scope: scope,
@@ -855,33 +858,45 @@ ApplyInitialPlanReport _initialPhysicalPlan({
   ],
   preview: ApplyPreviewReport(
     version: 1,
-    canonicalProjectRoot: canonicalProjectRoot,
+    canonicalProjectRoot: canonicalProjectRoot ?? _canonicalProjectRoot,
     planFingerprint: 'a' * 64,
     sources: [
       ApplySourceSnapshotReport(
         projectRelativePath: 'assets/dead@2x.png',
-        canonicalPath: '$canonicalProjectRoot/assets/dead@2x.png',
+        canonicalPath: _canonicalChild(
+          canonicalProjectRoot ?? _canonicalProjectRoot,
+          'assets/dead@2x.png',
+        ),
         sha256: '1' * 64,
         sizeBytes: 3,
         posixMode: 420,
       ),
       ApplySourceSnapshotReport(
         projectRelativePath: 'lib/dead.dart',
-        canonicalPath: '$canonicalProjectRoot/lib/dead.dart',
+        canonicalPath: _canonicalChild(
+          canonicalProjectRoot ?? _canonicalProjectRoot,
+          'lib/dead.dart',
+        ),
         sha256: '2' * 64,
         sizeBytes: 0,
         posixMode: null,
       ),
       ApplySourceSnapshotReport(
         projectRelativePath: 'lib/dead.g.dart',
-        canonicalPath: '$canonicalProjectRoot/lib/dead.g.dart',
+        canonicalPath: _canonicalChild(
+          canonicalProjectRoot ?? _canonicalProjectRoot,
+          'lib/dead.g.dart',
+        ),
         sha256: '3' * 64,
         sizeBytes: 9,
         posixMode: 384,
       ),
       ApplySourceSnapshotReport(
         projectRelativePath: 'lib/importer.dart',
-        canonicalPath: '$canonicalProjectRoot/lib/importer.dart',
+        canonicalPath: _canonicalChild(
+          canonicalProjectRoot ?? _canonicalProjectRoot,
+          'lib/importer.dart',
+        ),
         sha256: '4' * 64,
         sizeBytes: 1,
         posixMode: 420,
@@ -915,12 +930,12 @@ ApplyInitialPlanReport _singleFileInitialPlan() => ApplyInitialPlanReport(
   blocked: const [],
   preview: ApplyPreviewReport(
     version: 1,
-    canonicalProjectRoot: '/project',
+    canonicalProjectRoot: _canonicalProjectRoot,
     planFingerprint: 'a' * 64,
     sources: [
       ApplySourceSnapshotReport(
         projectRelativePath: 'lib/a.dart',
-        canonicalPath: '/project/lib/a.dart',
+        canonicalPath: _canonicalChild(_canonicalProjectRoot, 'lib/a.dart'),
         sha256: '1' * 64,
         sizeBytes: 0,
         posixMode: null,
@@ -943,6 +958,19 @@ String _initialPlanSection(String output) {
   final start = output.indexOf(heading);
   final end = output.indexOf('\nOUTCOMES', start);
   return output.substring(start, end).trimRight();
+}
+
+String get _canonicalProjectRoot => Platform.isWindows
+    ? p.windows.normalize(r'C:\project')
+    : p.posix.normalize('/project');
+
+String get _hostileCanonicalProjectRoot => Platform.isWindows
+    ? p.windows.normalize(r"C:\project & O'Reilly $HOME %PATH%")
+    : p.posix.normalize(r"/project & O'Reilly $HOME %PATH%");
+
+String _canonicalChild(String root, String relativePath) {
+  final context = Platform.isWindows ? p.windows : p.posix;
+  return context.joinAll(<String>[root, ...p.posix.split(relativePath)]);
 }
 
 final class _WindowsHumanFormatter extends HumanFormatter {

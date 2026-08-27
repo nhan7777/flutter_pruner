@@ -2,6 +2,9 @@ import 'dart:ffi';
 
 import '../../reporting/native/windows_bindings.dart';
 import '../clean_move_backend.dart';
+import 'windows_clean_open_mode.dart';
+
+export 'windows_clean_open_mode.dart' show WindowsCleanDirectoryOpenMode;
 
 /// Stable identity and type evidence read from a retained Windows handle.
 final class WindowsCleanIdentityData {
@@ -31,15 +34,11 @@ abstract interface class WindowsCleanMoveBindings {
   /// Opens one canonical directory without following its final reparse point.
   Pointer<Void> openDirectory(String path);
 
-  /// Opens or creates one child directory relative to [parent].
-  ///
-  /// [renameSource] requests the exact handle authority needed by the later
-  /// no-replace rename operation.
+  /// Opens or creates one child directory relative to [parent] with [mode].
   Pointer<Void> openRelativeDirectory(
     Pointer<Void> parent,
     String leaf, {
-    required bool create,
-    required bool renameSource,
+    required WindowsCleanDirectoryOpenMode mode,
   });
 
   /// Reads stable file identity and reparse state through [handle].
@@ -80,18 +79,13 @@ final class WindowsSystemCleanMoveBindings implements WindowsCleanMoveBindings {
   Pointer<Void> openRelativeDirectory(
     Pointer<Void> parent,
     String leaf, {
-    required bool create,
-    required bool renameSource,
+    required WindowsCleanDirectoryOpenMode mode,
   }) {
     try {
-      return _delegate.openRelativeDirectoryForClean(
-        parent,
-        leaf,
-        create: create,
-        renameSource: renameSource,
-      );
+      return _delegate.openRelativeDirectoryForClean(parent, leaf, mode: mode);
     } on WindowsNativeFailure catch (error) {
-      if (create && (error.code & 0xffffffff) == 0xc0000035) {
+      if (mode == WindowsCleanDirectoryOpenMode.createExclusive &&
+          (error.code & 0xffffffff) == 0xc0000035) {
         throw const CleanMoveException(
           category: CleanMoveFailure.collision,
           operation: 'create-directory-exclusive',

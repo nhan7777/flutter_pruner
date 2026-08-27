@@ -2,6 +2,8 @@ import 'dart:ffi';
 import 'dart:io';
 import 'dart:typed_data';
 
+import '../../quarantine/native/windows_clean_open_mode.dart';
+
 typedef _CreateFileNative =
     Pointer<Void> Function(
       Pointer<Uint16>,
@@ -311,6 +313,10 @@ final class WindowsBindings implements WindowsReportBindings {
   }
 
   static const _fileReadAttributes = 0x80;
+  static const _fileTraverse = 0x20;
+  static const _fileAddFile = 0x2;
+  static const _fileAddSubdirectory = 0x4;
+  static const _fileWriteAttributes = 0x100;
   static const _synchronize = 0x00100000;
   static const _genericRead = 0x80000000;
   static const _genericWrite = 0x40000000;
@@ -325,6 +331,7 @@ final class WindowsBindings implements WindowsReportBindings {
   static const _fileAttributeNormal = 0x80;
   static const _fileOpen = 1;
   static const _fileCreate = 2;
+  static const _fileOpenIf = 3;
   static const _synchronousIoNonAlert = 0x20;
   static const _directoryFile = 0x1;
   static const _nonDirectoryFile = 0x40;
@@ -421,28 +428,52 @@ final class WindowsBindings implements WindowsReportBindings {
         return handle;
       });
 
-  /// Opens or exclusively creates one directory relative to [parent].
-  ///
-  /// When [renameSource] is true the exact returned handle carries `DELETE`
-  /// authority for [renameDirectoryNoReplace].
+  /// Opens or creates one directory relative to [parent] with [mode].
   Pointer<Void> openRelativeDirectoryForClean(
     Pointer<Void> parent,
     String component, {
-    required bool create,
-    required bool renameSource,
-  }) => _openRelative(
-    parent,
-    component,
-    desiredAccess: _genericRead | _genericWrite | (renameSource ? _delete : 0),
-    shareAccess: _shareRead | _shareWrite | _shareDelete,
-    disposition: create ? _fileCreate : _fileOpen,
-    options: _synchronousIoNonAlert | _directoryFile | _openReparsePoint,
-    operation: create
-        ? 'create-clean-directory'
-        : renameSource
-        ? 'open-clean-rename-source'
-        : 'open-clean-directory-relative',
-  );
+    required WindowsCleanDirectoryOpenMode mode,
+  }) {
+    final writable = switch (mode) {
+      WindowsCleanDirectoryOpenMode.openWritable ||
+      WindowsCleanDirectoryOpenMode.ensureWritable ||
+      WindowsCleanDirectoryOpenMode.createExclusive => true,
+      WindowsCleanDirectoryOpenMode.inspect ||
+      WindowsCleanDirectoryOpenMode.renameSource => false,
+    };
+    final desiredAccess =
+        _fileReadAttributes |
+        _fileTraverse |
+        _synchronize |
+        (writable
+            ? _fileAddFile | _fileAddSubdirectory | _fileWriteAttributes
+            : 0) |
+        (mode == WindowsCleanDirectoryOpenMode.renameSource ? _delete : 0);
+    final disposition = switch (mode) {
+      WindowsCleanDirectoryOpenMode.ensureWritable => _fileOpenIf,
+      WindowsCleanDirectoryOpenMode.createExclusive => _fileCreate,
+      WindowsCleanDirectoryOpenMode.inspect ||
+      WindowsCleanDirectoryOpenMode.openWritable ||
+      WindowsCleanDirectoryOpenMode.renameSource => _fileOpen,
+    };
+    final operation = switch (mode) {
+      WindowsCleanDirectoryOpenMode.inspect => 'open-clean-directory-relative',
+      WindowsCleanDirectoryOpenMode.openWritable =>
+        'open-clean-writable-directory',
+      WindowsCleanDirectoryOpenMode.renameSource => 'open-clean-rename-source',
+      WindowsCleanDirectoryOpenMode.ensureWritable => 'ensure-clean-directory',
+      WindowsCleanDirectoryOpenMode.createExclusive => 'create-clean-directory',
+    };
+    return _openRelative(
+      parent,
+      component,
+      desiredAccess: desiredAccess,
+      shareAccess: _shareRead | _shareWrite | _shareDelete,
+      disposition: disposition,
+      options: _synchronousIoNonAlert | _directoryFile | _openReparsePoint,
+      operation: operation,
+    );
+  }
 
   /// Renames the exact open [source] below [destinationParent].
   ///

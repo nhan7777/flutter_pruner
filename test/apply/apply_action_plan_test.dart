@@ -690,7 +690,7 @@ _actionProjection(List<FindingActionDescriptor> actions) => [
 ];
 
 File _file(Directory root, String relativePath, String contents) =>
-    File(p.join(root.path, relativePath))
+    File(p.joinAll(<String>[root.path, ...p.posix.split(relativePath)]))
       ..createSync(recursive: true)
       ..writeAsStringSync(contents);
 

@@ -97,7 +97,10 @@ final class _WindowsAnchoredCleanBase implements AnchoredCleanBase {
   Future<CleanObjectIdentity> inspectDirectory(List<String> components) async {
     _ensureOpen('inspect-directory');
     _validateComponents(components);
-    final handles = _openChain(components, create: false);
+    final handles = _openChain(
+      components,
+      mode: WindowsCleanDirectoryOpenMode.inspect,
+    );
     try {
       return _identity(_bindings, handles.last, 'inspect-directory');
     } finally {
@@ -110,7 +113,10 @@ final class _WindowsAnchoredCleanBase implements AnchoredCleanBase {
     _ensureOpen('ensure-directory');
     _validateComponents(components);
     await _verifyReachable();
-    final handles = _openChain(components, create: true);
+    final handles = _openChain(
+      components,
+      mode: WindowsCleanDirectoryOpenMode.ensureWritable,
+    );
     try {
       for (final handle in handles) {
         _flush(_bindings, handle, 'flush-created-directory');
@@ -131,7 +137,7 @@ final class _WindowsAnchoredCleanBase implements AnchoredCleanBase {
     await _verifyReachable();
     final parents = _openChain(
       components.take(components.length - 1).toList(growable: false),
-      create: false,
+      mode: WindowsCleanDirectoryOpenMode.openWritable,
       allowEmpty: true,
     );
     final parent = parents.isEmpty ? _handle : parents.last;
@@ -140,8 +146,7 @@ final class _WindowsAnchoredCleanBase implements AnchoredCleanBase {
       created = _openRelative(
         parent,
         components.last,
-        create: true,
-        renameSource: false,
+        mode: WindowsCleanDirectoryOpenMode.createExclusive,
         operation: 'create-directory-exclusive',
       );
       _flush(_bindings, created, 'flush-exclusive-directory');
@@ -159,7 +164,10 @@ final class _WindowsAnchoredCleanBase implements AnchoredCleanBase {
     _ensureOpen('flush-directory');
     _validateComponents(components);
     await _verifyReachable();
-    final handles = _openChain(components, create: false);
+    final handles = _openChain(
+      components,
+      mode: WindowsCleanDirectoryOpenMode.openWritable,
+    );
     try {
       _flush(_bindings, handles.last, 'flush-directory');
     } finally {
@@ -179,12 +187,12 @@ final class _WindowsAnchoredCleanBase implements AnchoredCleanBase {
     await _verifyReachable();
     final sourceParents = _openChain(
       source.take(source.length - 1).toList(growable: false),
-      create: false,
+      mode: WindowsCleanDirectoryOpenMode.openWritable,
       allowEmpty: true,
     );
     final destinationParents = _openChain(
       destination.take(destination.length - 1).toList(growable: false),
-      create: false,
+      mode: WindowsCleanDirectoryOpenMode.openWritable,
       allowEmpty: true,
     );
     final sourceParent = sourceParents.isEmpty ? _handle : sourceParents.last;
@@ -197,8 +205,7 @@ final class _WindowsAnchoredCleanBase implements AnchoredCleanBase {
       sourceHandle = _openRelative(
         sourceParent,
         source.last,
-        create: false,
-        renameSource: true,
+        mode: WindowsCleanDirectoryOpenMode.renameSource,
         operation: 'open-source',
       );
       final sourceIdentity = _identity(
@@ -230,8 +237,7 @@ final class _WindowsAnchoredCleanBase implements AnchoredCleanBase {
       retainedHandle = _openRelative(
         destinationParent,
         destination.last,
-        create: false,
-        renameSource: false,
+        mode: WindowsCleanDirectoryOpenMode.inspect,
         operation: 'open-retained-destination',
       );
       final movedIdentity = _identity(
@@ -285,7 +291,7 @@ final class _WindowsAnchoredCleanBase implements AnchoredCleanBase {
 
   List<Pointer<Void>> _openChain(
     List<String> components, {
-    required bool create,
+    required WindowsCleanDirectoryOpenMode mode,
     bool allowEmpty = false,
   }) {
     if (!allowEmpty) _validateComponents(components);
@@ -297,9 +303,10 @@ final class _WindowsAnchoredCleanBase implements AnchoredCleanBase {
         final handle = _openRelative(
           parent,
           component,
-          create: create,
-          renameSource: false,
-          operation: create ? 'ensure-directory' : 'open-directory',
+          mode: mode,
+          operation: mode == WindowsCleanDirectoryOpenMode.ensureWritable
+              ? 'ensure-directory'
+              : 'open-directory',
         );
         handles.add(handle);
         parent = handle;
@@ -314,8 +321,7 @@ final class _WindowsAnchoredCleanBase implements AnchoredCleanBase {
   Pointer<Void> _openRelative(
     Pointer<Void> parent,
     String component, {
-    required bool create,
-    required bool renameSource,
+    required WindowsCleanDirectoryOpenMode mode,
     required String operation,
   }) {
     validateCleanPathComponent(component);
@@ -323,8 +329,7 @@ final class _WindowsAnchoredCleanBase implements AnchoredCleanBase {
       final handle = _bindings.openRelativeDirectory(
         parent,
         component,
-        create: create,
-        renameSource: renameSource,
+        mode: mode,
       );
       _identity(_bindings, handle, operation);
       return handle;

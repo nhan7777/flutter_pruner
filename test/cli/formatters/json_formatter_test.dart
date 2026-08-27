@@ -15,6 +15,7 @@ import 'package:flutter_pruner/src/core/graph/execution_target.dart';
 import 'package:flutter_pruner/src/core/graph/node.dart';
 import 'package:flutter_pruner/src/core/project/target_matrix.dart';
 import 'package:flutter_pruner/src/reporting/run_report.dart';
+import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
 void main() {
@@ -1049,28 +1050,28 @@ void main() {
         'sources': [
           {
             'projectRelativePath': 'assets/dead@2x.png',
-            'canonicalPath': '/project/assets/dead@2x.png',
+            'canonicalPath': _canonicalChild('assets/dead@2x.png'),
             'sha256': '1' * 64,
             'sizeBytes': 3,
             'posixMode': 420,
           },
           {
             'projectRelativePath': 'lib/dead.dart',
-            'canonicalPath': '/project/lib/dead.dart',
+            'canonicalPath': _canonicalChild('lib/dead.dart'),
             'sha256': '2' * 64,
             'sizeBytes': 0,
             'posixMode': null,
           },
           {
             'projectRelativePath': 'lib/dead.g.dart',
-            'canonicalPath': '/project/lib/dead.g.dart',
+            'canonicalPath': _canonicalChild('lib/dead.g.dart'),
             'sha256': '3' * 64,
             'sizeBytes': 9,
             'posixMode': 384,
           },
           {
             'projectRelativePath': 'lib/importer.dart',
-            'canonicalPath': '/project/lib/importer.dart',
+            'canonicalPath': _canonicalChild('lib/importer.dart'),
             'sha256': '4' * 64,
             'sizeBytes': 1,
             'posixMode': 420,
@@ -1805,7 +1806,7 @@ RunReport _applyReportWith({
   status: RunStatus.dryRun,
   exitCode: 0,
   partialApplied: false,
-  projectRoot: '/project',
+  projectRoot: _canonicalProjectRoot,
   canonicalProjectRoot: initialPlan?.preview?.canonicalProjectRoot,
   packageName: 'test',
   requestedAdapters: const ['dart'],
@@ -1886,33 +1887,33 @@ ApplyInitialPlanReport _initialPlanReport() => ApplyInitialPlanReport(
   ],
   preview: ApplyPreviewReport(
     version: 1,
-    canonicalProjectRoot: '/project',
+    canonicalProjectRoot: _canonicalProjectRoot,
     planFingerprint: 'a' * 64,
     sources: [
       ApplySourceSnapshotReport(
         projectRelativePath: 'assets/dead@2x.png',
-        canonicalPath: '/project/assets/dead@2x.png',
+        canonicalPath: _canonicalChild('assets/dead@2x.png'),
         sha256: '1' * 64,
         sizeBytes: 3,
         posixMode: 420,
       ),
       ApplySourceSnapshotReport(
         projectRelativePath: 'lib/dead.dart',
-        canonicalPath: '/project/lib/dead.dart',
+        canonicalPath: _canonicalChild('lib/dead.dart'),
         sha256: '2' * 64,
         sizeBytes: 0,
         posixMode: null,
       ),
       ApplySourceSnapshotReport(
         projectRelativePath: 'lib/dead.g.dart',
-        canonicalPath: '/project/lib/dead.g.dart',
+        canonicalPath: _canonicalChild('lib/dead.g.dart'),
         sha256: '3' * 64,
         sizeBytes: 9,
         posixMode: 384,
       ),
       ApplySourceSnapshotReport(
         projectRelativePath: 'lib/importer.dart',
-        canonicalPath: '/project/lib/importer.dart',
+        canonicalPath: _canonicalChild('lib/importer.dart'),
         sha256: '4' * 64,
         sizeBytes: 1,
         posixMode: 420,
@@ -1920,3 +1921,15 @@ ApplyInitialPlanReport _initialPlanReport() => ApplyInitialPlanReport(
     ],
   ),
 );
+
+String get _canonicalProjectRoot => Platform.isWindows
+    ? p.windows.normalize(r'C:\project')
+    : p.posix.normalize('/project');
+
+String _canonicalChild(String relativePath) {
+  final context = Platform.isWindows ? p.windows : p.posix;
+  return context.joinAll(<String>[
+    _canonicalProjectRoot,
+    ...p.posix.split(relativePath),
+  ]);
+}

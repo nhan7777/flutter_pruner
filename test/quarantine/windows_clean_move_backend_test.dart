@@ -134,6 +134,15 @@ void main() {
       expect(bindings.renamedSource, bindings.sourceHandle);
       expect(bindings.renameCount, 1);
       expect(bindings.flushCount, greaterThanOrEqualTo(2));
+      expect(
+        bindings.openModes,
+        containsAll(<WindowsCleanDirectoryOpenMode>{
+          WindowsCleanDirectoryOpenMode.inspect,
+          WindowsCleanDirectoryOpenMode.ensureWritable,
+          WindowsCleanDirectoryOpenMode.openWritable,
+          WindowsCleanDirectoryOpenMode.renameSource,
+        }),
+      );
     },
   );
 
@@ -267,6 +276,8 @@ final class _FakeWindowsCleanMoveBindings implements WindowsCleanMoveBindings {
   final Pointer<Void> retainedHandle = Pointer<Void>.fromAddress(4);
   final Map<String, Pointer<Void>> _directories = <String, Pointer<Void>>{};
   final Map<int, int> closeCounts = <int, int>{};
+  final Set<WindowsCleanDirectoryOpenMode> openModes =
+      <WindowsCleanDirectoryOpenMode>{};
   var replacementBase = false;
   var renameCount = 0;
   var flushCount = 0;
@@ -317,10 +328,12 @@ final class _FakeWindowsCleanMoveBindings implements WindowsCleanMoveBindings {
   Pointer<Void> openRelativeDirectory(
     Pointer<Void> parent,
     String leaf, {
-    required bool create,
-    required bool renameSource,
+    required WindowsCleanDirectoryOpenMode mode,
   }) {
-    if (leaf == 'run-a' && renameSource) return sourceHandle;
+    openModes.add(mode);
+    if (leaf == 'run-a' && mode == WindowsCleanDirectoryOpenMode.renameSource) {
+      return sourceHandle;
+    }
     if (leaf == 'run-a' && renamedSource != null) return retainedHandle;
     if (leaf == 'run-a') return sourceHandle;
     final key = '${parent.address}:$leaf';

@@ -46,7 +46,7 @@ void main() {
 
       expect(
         command.render(ShellDialect.powerShell),
-        r"""flutter_pruner '' 'apostrophe''s' '$(touch marker)' 'line one
+        r"""flutter_pruner '""' 'apostrophe''s' '$(touch marker)' 'line one
 line two'""",
       );
     });

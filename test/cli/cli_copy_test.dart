@@ -856,7 +856,7 @@ const _allowedExits = <String, Set<int>>{
   'machine-contract': {0},
 };
 final _placeholderPatterns = <String, RegExp>{
-  'report-path': RegExp(r'(?:/|[A-Za-z]:)[^\r\n]+\.(?:html|json)'),
+  'report-path': RegExp(r'(?:/|[A-Za-z]:[\\/])[^\r\n]+\.(?:html|json)'),
   'adapter-label': RegExp(r'[A-Za-z][A-Za-z0-9 -]*'),
   'adapter-id': RegExp(r'[a-z][a-z0-9_-]*'),
   'failed-command': RegExp(r'(?:SCAN|APPLY)'),
@@ -868,24 +868,26 @@ final _placeholderPatterns = <String, RegExp>{
   ),
   'count': RegExp(r'[0-9]+'),
   'config-path': RegExp(
-    r'(?:/|[A-Za-z]:)[^\r\n]+/\.flutter_pruner/config\.yaml',
+    r'(?:/|[A-Za-z]:[\\/])[^\r\n]+[\\/]\.flutter_pruner[\\/]config\.yaml',
   ),
-  'project-path': RegExp(r'(?:/|[A-Za-z]:)[^\r\n]+'),
-  'missing-project-path': RegExp(r'(?:/|[A-Za-z]:)[^\r\n]+/missing-project'),
+  'project-path': RegExp(r'(?:/|[A-Za-z]:[\\/])[^\r\n]+'),
+  'missing-project-path': RegExp(
+    r'(?:/|[A-Za-z]:[\\/])[^\r\n]+[\\/]missing-project',
+  ),
   'planned-source-path': RegExp(
-    r'(?:/|[A-Za-z]:)[^\r\n]+/lib(?:/[A-Za-z0-9_.-]+)+\.dart',
+    r'(?:/|[A-Za-z]:[\\/])[^\r\n]+[\\/]lib(?:[\\/][A-Za-z0-9_.-]+)+\.dart',
   ),
   'quarantine-run-path': RegExp(
-    r'(?:/|[A-Za-z]:)[^\r\n]+/\.flutter_pruner/quarantine/[A-Za-z0-9][A-Za-z0-9_.-]*',
+    r'(?:/|[A-Za-z]:[\\/])[^\r\n]+[\\/]\.flutter_pruner[\\/]quarantine[\\/][A-Za-z0-9][A-Za-z0-9_.-]*',
   ),
   'current-quarantine-base': RegExp(
-    r'(?:/|[A-Za-z]:)[^\r\n]+/\.flutter_pruner/quarantine',
+    r'(?:/|[A-Za-z]:[\\/])[^\r\n]+[\\/]\.flutter_pruner[\\/]quarantine',
   ),
   'legacy-quarantine-base': RegExp(
-    r'(?:/|[A-Za-z]:)[^\r\n]+/\.flutter_pruner_quarantine',
+    r'(?:/|[A-Za-z]:[\\/])[^\r\n]+[\\/]\.flutter_pruner_quarantine',
   ),
   'invalid-manifest-detail': RegExp(
-    r'(?:/|[A-Za-z]:)[^\r\n]+/\.flutter_pruner/quarantine/[A-Za-z0-9_.-]+/manifest\.json \(FormatException: Unexpected character \(at character 2\)\\n\{broken\\n \^\\n\)',
+    r'(?:/|[A-Za-z]:[\\/])[^\r\n]+[\\/]\.flutter_pruner[\\/]quarantine[\\/][A-Za-z0-9_.-]+[\\/]manifest\.json \(FormatException: Unexpected character \(at character 2\)\\n\{broken\\n \^\\n\)',
   ),
   'report-write-failure': RegExp(
     r'(?:FileSystemException: permission denied|Bad state: formatter callback failed|Bad state: report object backend failed|Bad state: injected report preparation backend failure|JSON v2 cannot represent failed run reports\. Use --json-version 3\.|JSON v2 compatibility projection exceeds (?:maxBlockerReferences|maxAffectedNodeIdReferences|maxAffectedNodeIdsPerBlocker) \([0-9]+ > [0-9]+\)\. Use --json-version 3\.)',
@@ -897,11 +899,11 @@ final _placeholderPatterns = <String, RegExp>{
     r'(?:Unexpected non-directory entry in quarantine storage\.|Quarantine manifest is missing, unreadable, or invalid\.|Manifest journal authority is ambiguous\.|Manifest run ID does not match its directory\.|Quarantine belongs to a different project\.|Run ID appears in more than one quarantine directory\.|Symbolic links are not valid quarantine entries\.|Quarantine directory name is not a valid run ID\.|Quarantine base could not be enumerated\.|Quarantine entry changed during inspection\.|Quarantine entry is invalid\.)',
   ),
   'declaration-name': RegExp(r'[A-Za-z_][A-Za-z0-9_]*'),
-  'elided-path': RegExp(r'(?:/|[A-Za-z]:)[^\r\n]*…'),
+  'elided-path': RegExp(r'(?:/|[A-Za-z]:[\\/])[^\r\n]*…'),
   'library-label': RegExp(r'(?:<[A-Za-z][A-Za-z -]*>|[A-Za-z_][A-Za-z0-9_.]*)'),
-  'relative-dart-path': RegExp(r'(?:lib|test)(?:/[A-Za-z0-9_.-]+)+\.dart'),
+  'relative-dart-path': RegExp(r'(?:lib|test)(?:[\\/][A-Za-z0-9_.-]+)+\.dart'),
   'truncated-manifest-path': RegExp(
-    r'(?:[A-Za-z0-9_.-]+/)*…/[A-Za-z0-9_.-]+/manifest\.json',
+    r'(?:[A-Za-z0-9_.-]+[\\/])*…[\\/][A-Za-z0-9_.-]+[\\/]manifest\.json',
   ),
   'unit-id': RegExp(r'unit:[a-f0-9]{16}'),
   'preview-fingerprint': RegExp(r'v[1-9][0-9]*:[a-f0-9]{64}'),

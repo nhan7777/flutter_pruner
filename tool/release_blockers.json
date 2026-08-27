@@ -11,6 +11,9 @@
         "lib/src/quarantine/recoverable_clean_store.dart",
         "lib/src/quarantine/native/posix_clean_move_backend.dart",
         "lib/src/quarantine/native/windows_clean_move_backend.dart",
+        "lib/src/quarantine/native/windows_clean_move_bindings.dart",
+        "lib/src/quarantine/native/windows_clean_open_mode.dart",
+        "lib/src/reporting/native/windows_bindings.dart",
         "lib/src/quarantine/quarantine_manager.dart",
         "test/quarantine/recoverable_clean_store_test.dart",
         "test/quarantine/recoverable_clean_recovery_process_test.dart",
@@ -60,7 +63,10 @@
       "requiredArtifacts": [
         {"path": "lib/src/quarantine/clean_move_backend.dart", "sha256": "f21fc424bbd38f55c7d525d78d6ef2d44b9d83fbada253b1562529a24f1d093c"},
         {"path": "lib/src/quarantine/native/posix_clean_move_backend.dart", "sha256": "37884b9f23cde1b80afbff5356058fb6e8c94f12dfbb34bd05e550590e47de8e"},
-        {"path": "lib/src/quarantine/native/windows_clean_move_backend.dart", "sha256": "2273e3b6f849be584d8c6d3dd7e7f03aef604a04742c0f68d017c00d8a45f54c"},
+        {"path": "lib/src/quarantine/native/windows_clean_move_backend.dart", "sha256": "decdc988abcefcf35655c188a26f765e5a6e747b880f37384c02f0383a5450b0"},
+        {"path": "lib/src/quarantine/native/windows_clean_move_bindings.dart", "sha256": "609346f2c3eda739e416ca35a0a914eaa4e55dcd4639e04452b534dd6abcbd49"},
+        {"path": "lib/src/quarantine/native/windows_clean_open_mode.dart", "sha256": "438b2bb9d6514241fe1a77486e088032a01af03d42c7083e80a823c1fa496b64"},
+        {"path": "lib/src/reporting/native/windows_bindings.dart", "sha256": "4936096d29596319665a8641691734780313941065ed10c89c16d0571e43c33b"},
         {"path": "lib/src/quarantine/recoverable_clean_store.dart", "sha256": "50b734547adf690ddd7bcd681fca6fda4634f3a22c9a2dd3e66c66f19da16a73"},
         {"path": "lib/src/quarantine/recoverable_clean_transaction.dart", "sha256": "1bf1d11f6a724ce403f4e66688ca6088a87b5d2d1b0dfe21e218f2928a49f6e0"}
       ],
@@ -203,7 +209,7 @@
       "requiredArtifacts": [
         {
           "path": "lib/src/reporting/native/windows_bindings.dart",
-          "sha256": "11e39f6483ec147f3c4ae07b71ae76e0ca85069b478e7ba2cbcdb79784d391b9"
+          "sha256": "4936096d29596319665a8641691734780313941065ed10c89c16d0571e43c33b"
         },
         {
           "path": "lib/src/reporting/native/windows_report_object_backend.dart",
