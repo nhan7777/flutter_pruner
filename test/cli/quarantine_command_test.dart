@@ -3761,10 +3761,8 @@ String _stripAnsi(String value) =>
 
 String _unwrapVisualLines(String value) => value.replaceAll(RegExp(r'\s+'), '');
 
-bool _sameExistingDirectory(String left, String right) => p.equals(
-  p.normalize(Directory(left).resolveSymbolicLinksSync()),
-  p.normalize(Directory(right).resolveSymbolicLinksSync()),
-);
+bool _sameExistingDirectory(String left, String right) =>
+    FileSystemEntity.identicalSync(left, right);
 
 void _expectOnlyStaticSgr(String value) {
   final sgr = RegExp(r'\x1B\[[0-9;]*m');
