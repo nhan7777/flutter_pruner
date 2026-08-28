@@ -717,8 +717,10 @@ void main() {
     () async {
       final fixture = CliFixture.create(prefix: _hostileTerminalProjectSegment);
       addTearDown(fixture.dispose);
+      final rootToken = 'terminal-root:${p.basename(fixture.root.path)}';
       await fixture.writeText(<String, String>{
         'pubspec.yaml': 'name: quarantine_terminal_path\n',
+        '.fixture-root-token': rootToken,
         '.flutter_pruner/quarantine/$_hostileTerminalInvalidSegment/manifest.json':
             '{broken',
       });
@@ -787,10 +789,11 @@ void main() {
           final document = value as Map<String, Object?>;
           final items = document['items']! as List<Object?>;
           final reportedProjectRoot = document['projectRoot']! as String;
-          return _sameExistingDirectory(
-                reportedProjectRoot,
-                fixture.root.path,
-              ) &&
+          final reportedRootToken = File(
+            p.join(reportedProjectRoot, '.fixture-root-token'),
+          );
+          return reportedRootToken.existsSync() &&
+              reportedRootToken.readAsStringSync() == rootToken &&
               items
                   .cast<Map<Object?, Object?>>()
                   .map((item) => item['path'])
@@ -3760,9 +3763,6 @@ String _stripAnsi(String value) =>
     value.replaceAll(RegExp(r'\x1B\[[0-9;]*m'), '');
 
 String _unwrapVisualLines(String value) => value.replaceAll(RegExp(r'\s+'), '');
-
-bool _sameExistingDirectory(String left, String right) =>
-    FileSystemEntity.identicalSync(left, right);
 
 void _expectOnlyStaticSgr(String value) {
   final sgr = RegExp(r'\x1B\[[0-9;]*m');

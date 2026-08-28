@@ -264,15 +264,18 @@ void main() {
       final runner = FlutterPrunerCommandRunner(
         signalCoordinator: coordinator,
         analyzerProcessStarter:
-            (executable, arguments, {required workingDirectory}) =>
-                Process.start(Platform.resolvedExecutable, [
-                  scripts.root.path,
-                  scripts.child.path,
-                  childPidFile.path,
-                  childSurvived.path,
-                  ready.path,
-                  rootSurvived.path,
-                ], workingDirectory: workingDirectory),
+            (executable, arguments, {required workingDirectory}) async {
+              final process = await Process.start(Platform.resolvedExecutable, [
+                scripts.root.path,
+                scripts.child.path,
+                childPidFile.path,
+                childSurvived.path,
+                ready.path,
+                rootSurvived.path,
+              ], workingDirectory: workingDirectory);
+              await _waitForCompleteAnalyzerReady(ready, process.exitCode);
+              return process;
+            },
       );
       final completion = runner.run([
         'apply',
@@ -924,6 +927,45 @@ Future<Map<String, Object?>> _waitForAnalyzerReadyOrCommandExit(
     );
   }),
 ]);
+
+Future<void> _waitForCompleteAnalyzerReady(
+  File ready,
+  Future<int> processExit, {
+  Duration timeout = const Duration(seconds: 45),
+}) async {
+  final deadline = DateTime.now().add(timeout);
+  final exitObserved = processExit.then((_) => true);
+  Object? lastFailure;
+  while (DateTime.now().isBefore(deadline)) {
+    if (ready.existsSync()) {
+      try {
+        final decoded = jsonDecode(ready.readAsStringSync());
+        if (decoded case <String, Object?>{
+          'rootPid': final int rootPid,
+          'childPid': final int childPid,
+        } when rootPid > 0 && childPid > 0) {
+          return;
+        }
+        lastFailure = StateError('ready payload lacks positive PIDs');
+      } on Object catch (error) {
+        lastFailure = error;
+      }
+    }
+    final exited = await Future.any<bool>([
+      exitObserved,
+      Future<bool>.delayed(const Duration(milliseconds: 10), () => false),
+    ]);
+    if (exited) {
+      throw StateError(
+        'Analyzer fixture exited before complete readiness at ${ready.path}.',
+      );
+    }
+  }
+  throw TimeoutException(
+    'Analyzer fixture did not publish complete PID evidence at '
+    '${ready.path}: $lastFailure',
+  );
+}
 
 Future<bool> _waitForPidToDisappear(int processId) async {
   final deadline = DateTime.now().add(const Duration(seconds: 5));
