@@ -798,20 +798,24 @@ void main() {
                   .cast<Map<Object?, Object?>>()
                   .map((item) => item['path'])
                   .contains(
-                    p.join(
-                      reportedProjectRoot,
-                      QuarantineManager.defaultQuarantineDir,
-                      _hostileTerminalInvalidSegment,
+                    p.normalize(
+                      p.join(
+                        reportedProjectRoot,
+                        QuarantineManager.defaultQuarantineDir,
+                        _hostileTerminalInvalidSegment,
+                      ),
                     ),
                   ) &&
               items
                   .cast<Map<Object?, Object?>>()
                   .map((item) => item['path'])
                   .contains(
-                    p.join(
-                      reportedProjectRoot,
-                      QuarantineManager.defaultQuarantineDir,
-                      'valid-run',
+                    p.normalize(
+                      p.join(
+                        reportedProjectRoot,
+                        QuarantineManager.defaultQuarantineDir,
+                        'valid-run',
+                      ),
                     ),
                   );
         }, 'JSON preserves exact path controls'),
@@ -848,16 +852,20 @@ void main() {
       expect(inspectJson.stderrBytes, isEmpty);
       expectJsonStdout(
         inspectJson,
-        predicate(
-          (value) =>
-              (value as Map<String, Object?>)['path'] ==
-              p.join(
-                fixture.root.path,
-                QuarantineManager.defaultQuarantineDir,
-                'valid-run',
-              ),
-          'inspect JSON preserves the exact valid path',
-        ),
+        predicate((value) {
+          final document = value as Map<String, Object?>;
+          final reportedProjectRoot = document['projectRoot']! as String;
+          return p.basename(reportedProjectRoot) ==
+                  p.basename(fixture.root.path) &&
+              document['path'] ==
+                  p.normalize(
+                    p.join(
+                      reportedProjectRoot,
+                      QuarantineManager.defaultQuarantineDir,
+                      'valid-run',
+                    ),
+                  );
+        }, 'inspect JSON preserves the exact valid path'),
       );
     },
     timeout: processTestTimeout,
