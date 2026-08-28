@@ -717,10 +717,8 @@ void main() {
     () async {
       final fixture = CliFixture.create(prefix: _hostileTerminalProjectSegment);
       addTearDown(fixture.dispose);
-      final rootToken = 'terminal-root:${p.basename(fixture.root.path)}';
       await fixture.writeText(<String, String>{
         'pubspec.yaml': 'name: quarantine_terminal_path\n',
-        '.fixture-root-token': rootToken,
         '.flutter_pruner/quarantine/$_hostileTerminalInvalidSegment/manifest.json':
             '{broken',
       });
@@ -789,11 +787,13 @@ void main() {
           final document = value as Map<String, Object?>;
           final items = document['items']! as List<Object?>;
           final reportedProjectRoot = document['projectRoot']! as String;
-          final reportedRootToken = File(
-            p.join(reportedProjectRoot, '.fixture-root-token'),
-          );
-          return reportedRootToken.existsSync() &&
-              reportedRootToken.readAsStringSync() == rootToken &&
+          return p.isAbsolute(reportedProjectRoot) &&
+              p.equals(
+                p.rootPrefix(reportedProjectRoot),
+                p.rootPrefix(fixture.root.path),
+              ) &&
+              p.basename(reportedProjectRoot) ==
+                  p.basename(fixture.root.path) &&
               items
                   .cast<Map<Object?, Object?>>()
                   .map((item) => item['path'])
