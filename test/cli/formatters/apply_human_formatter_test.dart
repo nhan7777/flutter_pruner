@@ -527,7 +527,7 @@ void main() {
             projectRoot: _posixProjectRoot,
             status: RunStatus.dryRun,
             outcomes: [_outcome(ApplyFindingOutcomeStatus.remaining)],
-            selection: _allEligibleSelection(),
+            selection: _allEligibleSelection(plan),
             initialPlan: plan,
           ),
         ),
@@ -548,7 +548,7 @@ void main() {
             projectRoot: _posixProjectRoot,
             status: RunStatus.dryRun,
             outcomes: [_outcome(ApplyFindingOutcomeStatus.remaining)],
-            selection: _exactSelection(),
+            selection: _exactSelection(plan),
             initialPlan: plan,
           ),
         ),
@@ -790,8 +790,8 @@ ApplySelectionReport _exactSelection([ApplyInitialPlanReport? plan]) {
   );
 }
 
-ApplySelectionReport _allEligibleSelection() {
-  final preview = _initialPhysicalPlan().preview!;
+ApplySelectionReport _allEligibleSelection(ApplyInitialPlanReport plan) {
+  final preview = plan.preview!;
   return ApplySelectionReport(
     mode: FindingSelectionMode.allEligible,
     requestedFindingIds: const [],

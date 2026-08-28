@@ -786,13 +786,17 @@ void main() {
         predicate((value) {
           final document = value as Map<String, Object?>;
           final items = document['items']! as List<Object?>;
-          return document['projectRoot'] == fixture.root.path &&
+          final reportedProjectRoot = document['projectRoot']! as String;
+          return _sameExistingDirectory(
+                reportedProjectRoot,
+                fixture.root.path,
+              ) &&
               items
                   .cast<Map<Object?, Object?>>()
                   .map((item) => item['path'])
                   .contains(
                     p.join(
-                      fixture.root.path,
+                      reportedProjectRoot,
                       QuarantineManager.defaultQuarantineDir,
                       _hostileTerminalInvalidSegment,
                     ),
@@ -802,7 +806,7 @@ void main() {
                   .map((item) => item['path'])
                   .contains(
                     p.join(
-                      fixture.root.path,
+                      reportedProjectRoot,
                       QuarantineManager.defaultQuarantineDir,
                       'valid-run',
                     ),
@@ -3756,6 +3760,11 @@ String _stripAnsi(String value) =>
     value.replaceAll(RegExp(r'\x1B\[[0-9;]*m'), '');
 
 String _unwrapVisualLines(String value) => value.replaceAll(RegExp(r'\s+'), '');
+
+bool _sameExistingDirectory(String left, String right) => p.equals(
+  p.normalize(Directory(left).resolveSymbolicLinksSync()),
+  p.normalize(Directory(right).resolveSymbolicLinksSync()),
+);
 
 void _expectOnlyStaticSgr(String value) {
   final sgr = RegExp(r'\x1B\[[0-9;]*m');
