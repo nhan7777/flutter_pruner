@@ -1,3 +1,4 @@
+import 'dart:collection';
 import 'dart:io';
 
 import 'package:analyzer/dart/analysis/results.dart';
@@ -6,9 +7,11 @@ import 'package:analyzer/dart/ast/visitor.dart';
 import 'package:analyzer/dart/constant/value.dart';
 import 'package:analyzer/dart/element/element.dart';
 import 'package:analyzer/dart/element/type.dart';
+import 'package:analyzer/error/error.dart';
 import 'package:path/path.dart' as p;
 
 import '../../core/project/project_context.dart';
+import '../dart/dart_adapter_profile.dart';
 import '../dart/dart_analysis_workspace.dart';
 import '../dart/dart_directive_resolver.dart';
 import '../dart/dart_execution_reachability_service.dart';
@@ -75,7 +78,8 @@ final class L10nBlocker {
 /// class or library as localization usage.
 final class L10nUsageResolver {
   /// Creates a resolver for one valid l10n [config] and ARB [inventory].
-  L10nUsageResolver(this.project, this.config, this.inventory);
+  L10nUsageResolver(this.project, this.config, this.inventory, {this.profile})
+    : _ownership = DartPackageOwnership.discover(project);
 
   /// Project being inspected.
   final ProjectContext project;
@@ -85,6 +89,11 @@ final class L10nUsageResolver {
 
   /// Existing localization nodes that may be referenced.
   final ArbInventory inventory;
+
+  /// Optional bounded worklist diagnostics for benchmark regressions.
+  final DartAdapterProfile? profile;
+
+  final DartPackageOwnership _ownership;
 
   /// Exact modeled caller-to-ARB references.
   final List<L10nReference> _references = [];
@@ -166,6 +175,7 @@ final class L10nUsageResolver {
     }
 
     final boundedClosure = await workspace.boundedClosureSnapshot();
+    final ownership = _ownership;
     final admittedExternalLibraries = executionReachability == null
         ? const <ResolvedLibraryResult>[]
         : _executionSelectedExternalLibraries(
@@ -180,6 +190,10 @@ final class L10nUsageResolver {
       }
     }
     for (final issue in boundedClosure.issues) {
+      if (ownership.ownerOf(issue.location).ownership ==
+          DartSourceOwnership.externalPackage) {
+        continue;
+      }
       _addNamespaceBlocker(switch (issue.kind) {
         DartBoundedClosureIssueKind.uninspectable =>
           'external Dart closure could not be inspected for localization uses',
@@ -199,7 +213,12 @@ final class L10nUsageResolver {
       if (admittedUnitPaths != null && !admittedUnitPaths.contains(path)) {
         continue;
       }
-      if (unit.diagnostics.isNotEmpty) {
+      if (unit.diagnostics.any(
+            (diagnostic) =>
+                diagnostic.diagnosticCode.severity == DiagnosticSeverity.ERROR,
+          ) &&
+          ownership.ownerOf(unit.path).ownership !=
+              DartSourceOwnership.externalPackage) {
         _addNamespaceBlocker(
           'analyzer errors prevent semantic localization usage classification',
           location: project.relative(unit.path),
@@ -214,24 +233,26 @@ final class L10nUsageResolver {
     DartBoundedClosureSnapshot closure,
     DartExecutionReachabilitySnapshot reachability,
   ) {
-    final ownership = DartPackageOwnership.discover(project);
+    final ownership = _ownership;
     final librariesByPath = <String, ResolvedLibraryResult>{
       for (final library in closure.libraries)
         _normalizedPath(library.element.firstFragment.source.fullName): library,
     };
-    final pending = <String>{
+    final initialPaths = <String>{
       for (final edge in reachability.directives.edges)
         if (_edgeSourceIsRetained(reachability, edge) &&
             ownership.ownerOf(edge.targetPath).ownership ==
                 DartSourceOwnership.externalPackage)
           _normalizedPath(edge.targetPath),
-    };
+    }.toList()..sort();
+    final pending = Queue<String>()..addAll(initialPaths);
+    final scheduled = <String>{...initialPaths};
     final admitted = <String, ResolvedLibraryResult>{};
+    profile?.addCount('l10nExternalWorklistSelectionComparisons', 0);
     while (pending.isNotEmpty) {
-      final path = pending.reduce(
-        (left, right) => left.compareTo(right) <= 0 ? left : right,
-      );
-      pending.remove(path);
+      final path = pending.removeFirst();
+      scheduled.remove(path);
+      profile?.addCount('l10nExternalWorklistDequeues', 1);
       if (admitted.containsKey(path)) continue;
       final library = librariesByPath[path];
       if (library == null) continue;
@@ -247,11 +268,13 @@ final class L10nUsageResolver {
           continue;
         }
         final dependencyPath = _normalizedPath(source.fullName);
-        if (!admitted.containsKey(dependencyPath)) {
-          pending.add(dependencyPath);
+        if (!admitted.containsKey(dependencyPath) &&
+            scheduled.add(dependencyPath)) {
+          pending.addLast(dependencyPath);
         }
       }
     }
+    profile?.addCount('l10nExternalLibrariesAdmitted', admitted.length);
     return admitted.values.toList()..sort(
       (left, right) => left.element.firstFragment.source.fullName.compareTo(
         right.element.firstFragment.source.fullName,
@@ -646,12 +669,34 @@ final class _L10nUseVisitor extends RecursiveAstVisitor<void> {
   final L10nUsageResolver resolver;
   final _MemberIndex index;
   final ResolvedUnitResult unit;
+  final Set<Element> _provenDynamicOutputVariables = <Element>{};
+
+  @override
+  void visitVariableDeclaration(VariableDeclaration node) {
+    final initializer = node.initializer;
+    final constructor = initializer is InstanceCreationExpression
+        ? initializer.constructorName.element
+        : null;
+    final variable = node.declaredFragment?.element;
+    if (constructor != null &&
+        variable != null &&
+        _belongsTo(constructor, index.outputClass)) {
+      _provenDynamicOutputVariables.add(variable);
+    }
+    super.visitVariableDeclaration(node);
+  }
 
   @override
   void visitPropertyAccess(PropertyAccess node) {
+    if (_isPureWriteTarget(node)) {
+      super.visitPropertyAccess(node);
+      return;
+    }
     final element = node.propertyName.element;
     if (element == null) {
-      resolver._blockUnresolvedMemberName(node.propertyName.name, node, unit);
+      if (!resolver._isExternalUnit(unit)) {
+        resolver._blockUnresolvedMemberName(node.propertyName.name, node, unit);
+      }
     } else {
       resolver._recordInUnit(index, element, node, unit);
     }
@@ -660,9 +705,15 @@ final class _L10nUseVisitor extends RecursiveAstVisitor<void> {
 
   @override
   void visitPrefixedIdentifier(PrefixedIdentifier node) {
+    if (_isPureWriteTarget(node)) {
+      super.visitPrefixedIdentifier(node);
+      return;
+    }
     final element = node.identifier.element;
     if (element == null) {
-      resolver._blockUnresolvedMemberName(node.identifier.name, node, unit);
+      if (!resolver._isExternalUnit(unit)) {
+        resolver._blockUnresolvedMemberName(node.identifier.name, node, unit);
+      }
     } else {
       resolver._recordInUnit(index, element, node, unit);
     }
@@ -673,17 +724,21 @@ final class _L10nUseVisitor extends RecursiveAstVisitor<void> {
   void visitMethodInvocation(MethodInvocation node) {
     final element = node.methodName.element;
     if (element == null) {
-      final blockedKey = resolver._blockUnresolvedMemberName(
-        node.methodName.name,
-        node,
-        unit,
-      );
-      if (!blockedKey && node.target?.staticType is DynamicType) {
-        resolver._addNamespaceBlocker(
-          'dynamic localization API cannot be resolved',
-          node: node,
-          unit: unit,
+      if (!resolver._isExternalUnit(unit)) {
+        final blockedKey = resolver._blockUnresolvedMemberName(
+          node.methodName.name,
+          node,
+          unit,
         );
+        if (!blockedKey &&
+            node.target?.staticType is DynamicType &&
+            _isProvenDynamicOutputTarget(node.target)) {
+          resolver._addNamespaceBlocker(
+            'dynamic localization API cannot be resolved',
+            node: node,
+            unit: unit,
+          );
+        }
       }
     } else {
       resolver._recordInUnit(index, element, node, unit);
@@ -695,6 +750,11 @@ final class _L10nUseVisitor extends RecursiveAstVisitor<void> {
     }
     super.visitMethodInvocation(node);
   }
+
+  bool _isProvenDynamicOutputTarget(Expression? target) =>
+      target is SimpleIdentifier &&
+      target.element != null &&
+      _provenDynamicOutputVariables.contains(target.element);
 
   @override
   void visitSimpleIdentifier(SimpleIdentifier node) {
@@ -710,9 +770,20 @@ final class _L10nUseVisitor extends RecursiveAstVisitor<void> {
         parent is PrefixedIdentifier && identical(parent.identifier, node) ||
         parent is MethodInvocation && identical(parent.methodName, node);
   }
+
+  bool _isPureWriteTarget(AstNode node) {
+    final parent = node.parent;
+    return parent is AssignmentExpression &&
+        identical(parent.leftHandSide, node) &&
+        parent.operator.lexeme == '=';
+  }
 }
 
 extension on L10nUsageResolver {
+  bool _isExternalUnit(ResolvedUnitResult unit) =>
+      _ownership.ownerOf(unit.path).ownership ==
+      DartSourceOwnership.externalPackage;
+
   void _recordInUnit(
     _MemberIndex index,
     Element? element,
@@ -726,7 +797,7 @@ extension on L10nUsageResolver {
     if (key == null) return;
     final callerId = _callerId(node, index.outputPath, unit: unit);
     if (callerId == null) {
-      final owner = DartPackageOwnership.discover(project).ownerOf(unit.path);
+      final owner = _ownership.ownerOf(unit.path);
       if (owner.ownership == DartSourceOwnership.externalPackage) {
         _externallyUsedNodeIds.add(key.nodeId);
         return;

@@ -125,11 +125,15 @@ void main() {
             const ['pub', 'get', '--offline'],
           ],
         );
-        expect(runner.flutterInvocations.map((entry) => entry.arguments), [
-          const ['--version', '--machine'],
-          const ['pub', 'get', '--offline'],
-          const ['--version', '--machine'],
-        ], reason: 'toolchain authority must bracket the only resolution');
+        expect(
+          runner.flutterInvocations.map((entry) => entry.arguments),
+          [
+            const ['--version', '--machine'],
+            const ['pub', 'get', '--offline'],
+            const ['--version', '--machine'],
+          ],
+          reason: 'toolchain authority must bracket the only resolution',
+        );
         final clone = runner.gitInvocations.singleWhere(
           (entry) => entry.arguments.contains('clone'),
         );
@@ -347,6 +351,232 @@ void main() {
         expect(_gitStatusBytes(retained), statusBefore);
       },
     );
+
+    test('accepts an exact tracked fixture overlay', () async {
+      final retained = Directory(p.join(suiteRoot.path, 'tracked-exact'))
+        ..createSync(recursive: true);
+      _writeRootPackageRepository(retained);
+      const overlayPath = 'lib/.env.dart';
+      const sourceIdentity = 'fixture-authority/exact/lib/.env.dart';
+      const fixtureSource = 'const fixtureEnvironment = "test";\n';
+      final sourceFile = File(p.join(suiteRoot.path, sourceIdentity));
+      sourceFile.parent.createSync(recursive: true);
+      sourceFile.writeAsStringSync(fixtureSource);
+      _chmod(sourceFile, 0x1a4);
+      final target = File(_rootPath(retained, overlayPath));
+      target.parent.createSync(recursive: true);
+      target.writeAsStringSync(fixtureSource);
+      _chmod(target, 0x1a4);
+      final revision = _commitFixtureRepository(retained);
+      final retainedStatusBefore = _gitStatusBytes(retained);
+      final runner = _CorpusProcessRunner();
+
+      final creation =
+          await DefaultCorpusProjectViewFactory(processRunner: runner).create(
+            project: _rootProject(
+              id: 'fixture',
+              revision: revision,
+              fixtureOverlays: [
+                L10nFixtureOverlay(
+                  relativePath: overlayPath,
+                  sourceIdentity: sourceIdentity,
+                  purpose: 'non-secret deterministic config stub',
+                  sha256: ImmutableBytes.copyOf(
+                    sourceFile.readAsBytesSync(),
+                  ).sha256Hex,
+                  containsSecrets: false,
+                ),
+              ],
+            ),
+            retainedRepositoryPath: retained.path,
+            canonicalFlutterExecutable: canonicalFlutter.path,
+          );
+
+      final view = (creation as CorpusProjectViewReady).view;
+      addTearDown(view.dispose);
+      expect(
+        File(_rootPath(view.repositoryRoot, overlayPath)).readAsStringSync(),
+        fixtureSource,
+      );
+      expect(
+        runner.flutterInvocations.where(
+          (entry) => entry.arguments.firstOrNull == 'pub',
+        ),
+        hasLength(1),
+      );
+      expect(_gitStatusBytes(retained), retainedStatusBefore);
+    });
+
+    test('accepts an authority-bound toolchain selector replacement', () async {
+      final retained = Directory(p.join(suiteRoot.path, 'selector-replacement'))
+        ..createSync(recursive: true);
+      _writeRootPackageRepository(retained);
+      const sourceIdentity = 'fixture-authority/toolchain/.fvmrc';
+      const selector = '{\n  "flutter": "3.38.7"\n}\n';
+      final sourceFile = File(p.join(suiteRoot.path, sourceIdentity));
+      sourceFile.parent.createSync(recursive: true);
+      sourceFile.writeAsStringSync(selector);
+      _chmod(sourceFile, 0x1a4);
+      final selectorHash = ImmutableBytes.copyOf(
+        sourceFile.readAsBytesSync(),
+      ).sha256Hex;
+      final target = File(_rootPath(retained, '.fvmrc'));
+      target.writeAsStringSync('{\n  "flutter": "3.37.0"\n}\n');
+      _chmod(target, 0x1a4);
+      final revision = _commitFixtureRepository(retained);
+      final retainedStatusBefore = _gitStatusBytes(retained);
+      final runner = _CorpusProcessRunner();
+
+      final creation =
+          await DefaultCorpusProjectViewFactory(processRunner: runner).create(
+            project: _rootProject(
+              id: 'fixture',
+              revision: revision,
+              fixtureOverlays: [
+                L10nFixtureOverlay(
+                  relativePath: '.fvmrc',
+                  sourceIdentity: sourceIdentity,
+                  purpose: 'toolchain selector authority',
+                  sha256: selectorHash,
+                  containsSecrets: false,
+                ),
+              ],
+              toolchainSelectionEvidence: {
+                'evidencePath': '.fvmrc',
+                'evidenceSha256': selectorHash,
+                'frameworkVersion': '3.38.7',
+                'selectionKind': 'pinned-fvm-config',
+              },
+            ),
+            retainedRepositoryPath: retained.path,
+            canonicalFlutterExecutable: canonicalFlutter.path,
+          );
+
+      final view = (creation as CorpusProjectViewReady).view;
+      addTearDown(view.dispose);
+      expect(
+        File(_rootPath(view.repositoryRoot, '.fvmrc')).readAsStringSync(),
+        selector,
+      );
+      expect(_gitStatusBytes(retained), retainedStatusBefore);
+    });
+
+    test('rejects mismatched tracked fixture bytes before pub get', () async {
+      final retained = Directory(p.join(suiteRoot.path, 'tracked-mismatch'))
+        ..createSync(recursive: true);
+      _writeRootPackageRepository(retained);
+      const overlayPath = 'lib/.env.dart';
+      const sourceIdentity = 'fixture-authority/mismatch/lib/.env.dart';
+      final sourceFile = File(p.join(suiteRoot.path, sourceIdentity));
+      sourceFile.parent.createSync(recursive: true);
+      sourceFile.writeAsStringSync('const fixtureEnvironment = "test";\n');
+      _chmod(sourceFile, 0x1a4);
+      final target = File(_rootPath(retained, overlayPath));
+      target.parent.createSync(recursive: true);
+      target.writeAsStringSync('const fixtureEnvironment = "foreign";\n');
+      _chmod(target, 0x1a4);
+      final revision = _commitFixtureRepository(retained);
+      final retainedStatusBefore = _gitStatusBytes(retained);
+      final runner = _CorpusProcessRunner();
+
+      final creation =
+          await DefaultCorpusProjectViewFactory(processRunner: runner).create(
+            project: _rootProject(
+              id: 'fixture',
+              revision: revision,
+              fixtureOverlays: [
+                L10nFixtureOverlay(
+                  relativePath: overlayPath,
+                  sourceIdentity: sourceIdentity,
+                  purpose: 'non-secret deterministic config stub',
+                  sha256: ImmutableBytes.copyOf(
+                    sourceFile.readAsBytesSync(),
+                  ).sha256Hex,
+                  containsSecrets: false,
+                ),
+              ],
+            ),
+            retainedRepositoryPath: retained.path,
+            canonicalFlutterExecutable: canonicalFlutter.path,
+          );
+
+      expect(creation, isA<CorpusProjectViewRejected>());
+      expect(
+        runner.flutterInvocations.where(
+          (entry) => entry.arguments.firstOrNull == 'pub',
+        ),
+        isEmpty,
+      );
+      expect(_gitStatusBytes(retained), retainedStatusBefore);
+    });
+
+    test('accepts canonical Flutter ephemeral outputs from pub get', () async {
+      final scenario = await _provision(
+        project: project,
+        retainedRepository: retainedRepository,
+        canonicalFlutter: canonicalFlutter,
+        onPubGet: _writeFlutterEphemeralOutputs,
+      );
+      addTearDown(scenario.view.dispose);
+
+      for (final path in _flutterEphemeralPaths) {
+        expect(
+          File(_rootPath(scenario.view.packageRoot, path)).existsSync(),
+          isTrue,
+        );
+      }
+    });
+
+    test('preserves tracked Flutter ephemeral inputs during pub get', () async {
+      final retained = Directory(p.join(suiteRoot.path, 'tracked-ephemeral'))
+        ..createSync(recursive: true);
+      _writeRootPackageRepository(retained);
+      for (final relativePath in _flutterEphemeralPaths) {
+        final file = File(_rootPath(retained, relativePath));
+        file.parent.createSync(recursive: true);
+        file.writeAsStringSync('tracked $relativePath\n');
+      }
+      final revision = _commitFixtureRepository(retained);
+      final retainedStatusBefore = _gitStatusBytes(retained);
+
+      final creation =
+          await DefaultCorpusProjectViewFactory(
+            processRunner: _CorpusProcessRunner(),
+          ).create(
+            project: _rootProject(id: 'fixture', revision: revision),
+            retainedRepositoryPath: retained.path,
+            canonicalFlutterExecutable: canonicalFlutter.path,
+          );
+
+      final view = (creation as CorpusProjectViewReady).view;
+      addTearDown(view.dispose);
+      for (final relativePath in _flutterEphemeralPaths) {
+        expect(
+          File(_rootPath(view.repositoryRoot, relativePath)).readAsStringSync(),
+          'tracked $relativePath\n',
+        );
+      }
+      expect(_gitStatusBytes(retained), retainedStatusBefore);
+    });
+
+    test('detects drift in a provisioned Flutter ephemeral output', () async {
+      final scenario = await _provision(
+        project: project,
+        retainedRepository: retainedRepository,
+        canonicalFlutter: canonicalFlutter,
+        onPubGet: _writeFlutterEphemeralOutputs,
+      );
+      addTearDown(scenario.view.dispose);
+      File(
+        _rootPath(scenario.view.packageRoot, _flutterEphemeralPaths.first),
+      ).writeAsStringSync('drift\n');
+
+      final outcome = await _runScenario(scenario, project, canonicalFlutter);
+
+      expect(outcome.status, CorpusMutationEvidenceStatus.restorationFailed);
+      expect(outcome.commandResults.single['status'], 'sourceDrift');
+      expect(scenario.processRunner.policyInvocations, isEmpty);
+    });
 
     test(
       'copies a real-shape ignored fixture only from its source authority',
@@ -642,8 +872,8 @@ void main() {
             revision: repositoryRevision,
             normalizationOverlays: [
               L10nNormalizationOverlay(
-                manifest: 'gsy-normalized-family-v1.json',
-                policy: 'remove-declared-byte-spans',
+                manifest: 'gsy-normalized-family-v2.json',
+                policy: 'apply-declared-byte-transforms',
               ),
             ],
           ),
@@ -666,6 +896,316 @@ void main() {
       },
     );
 
+    test(
+      'installs position-preserving semantic normalization only after pub get',
+      () async {
+        final retained = Directory(p.join(suiteRoot.path, 'gsy-normalized'))
+          ..createSync();
+        _writeRootPackageRepository(retained);
+        for (final relativePath in _gsyArbPaths) {
+          final file = File(_rootPath(retained, relativePath));
+          file.parent.createSync(recursive: true);
+          file.writeAsStringSync(_duplicateArb);
+        }
+        final revision = _commitFixtureRepository(retained);
+        final normalization = _syntheticNormalizationManifest(revision);
+        final normalizedProject = _rootProject(
+          id: 'gsy',
+          revision: revision,
+          arbPathsRelative: _gsyArbPaths,
+          normalizationOverlays: [
+            L10nNormalizationOverlay(
+              manifest: 'gsy-normalized-family-v2.json',
+              policy: 'apply-declared-byte-transforms',
+              normalizationManifest: normalization,
+            ),
+          ],
+        );
+        final runner = _CorpusProcessRunner(
+          onPubGet: (packageRoot) {
+            for (final relativePath in _gsyArbPaths) {
+              expect(
+                File(_rootPath(packageRoot, relativePath)).readAsStringSync(),
+                _duplicateArb,
+                reason: 'pub get must observe the retained semantic baseline',
+              );
+            }
+          },
+        );
+
+        final creation =
+            await DefaultCorpusProjectViewFactory(
+              processRunner: runner,
+              normalizationManifestLoaderForTesting: (_, _) => normalization,
+            ).create(
+              project: normalizedProject,
+              retainedRepositoryPath: retained.path,
+              canonicalFlutterExecutable: canonicalFlutter.path,
+            );
+
+        final view = (creation as CorpusProjectViewReady).view;
+        addTearDown(view.dispose);
+        for (final relativePath in _gsyArbPaths) {
+          final contents = File(
+            _rootPath(view.repositoryRoot, relativePath),
+          ).readAsStringSync();
+          expect(contents, _positionPreservingNormalizedArb);
+        }
+      },
+    );
+
+    test(
+      'regenerates an exact normalized generated baseline after pub get',
+      () async {
+        const generatedPath =
+            'lib/common/localization/l10n/app_localizations.dart';
+        const beforeGenerated = '// original generated baseline\n';
+        const afterGenerated = '// normalized generated baseline\n';
+        final retained = Directory(
+          p.join(suiteRoot.path, 'gsy-normalized-generated'),
+        )..createSync();
+        _writeRootPackageRepository(retained);
+        for (final relativePath in _gsyArbPaths) {
+          final file = File(_rootPath(retained, relativePath));
+          file.parent.createSync(recursive: true);
+          file.writeAsStringSync(_duplicateArb);
+        }
+        final generated = File(_rootPath(retained, generatedPath));
+        generated.parent.createSync(recursive: true);
+        generated.writeAsStringSync(beforeGenerated);
+        const legitimatePackageFiles = <String, String>{
+          'ios/AppIcon.icon/Assets/1 - Layer 2.svg': '<svg />\n',
+          'ios/Runner/Assets.xcassets/BrandingImage.imageset/'
+                  'BrandingImage@2x.png':
+              'png fixture\n',
+        };
+        for (final entry in legitimatePackageFiles.entries) {
+          final file = File(_rootPath(retained, entry.key));
+          file.parent.createSync(recursive: true);
+          file.writeAsStringSync(entry.value);
+        }
+        final revision = _commitFixtureRepository(retained);
+        final normalization = _syntheticNormalizationManifest(
+          revision,
+          generatedBaseline: L10nNormalizedGeneratedBaseline(
+            changedOutputs: [
+              L10nNormalizedGeneratedOutput(
+                relativePath: generatedPath,
+                originalSha256: ImmutableBytes.copyOf(
+                  utf8.encode(beforeGenerated),
+                ).sha256Hex,
+                replacementSha256: ImmutableBytes.copyOf(
+                  utf8.encode(afterGenerated),
+                ).sha256Hex,
+                posixMode: 0x1a4,
+              ),
+            ],
+          ),
+        );
+        final normalizedProject = _rootProject(
+          id: 'gsy',
+          revision: revision,
+          arbPathsRelative: _gsyArbPaths,
+          normalizationOverlays: [
+            L10nNormalizationOverlay(
+              manifest: 'gsy-normalized-family-v2.json',
+              policy: 'apply-declared-byte-transforms',
+              normalizationManifest: normalization,
+            ),
+          ],
+        );
+        final runner = _CorpusProcessRunner(
+          onPubGet: (packageRoot) {
+            for (final relativePath in _gsyArbPaths) {
+              expect(
+                File(_rootPath(packageRoot, relativePath)).readAsStringSync(),
+                _duplicateArb,
+              );
+            }
+          },
+          onGenL10n: (packageRoot) {
+            for (final relativePath in _gsyArbPaths) {
+              expect(
+                File(_rootPath(packageRoot, relativePath)).readAsStringSync(),
+                _positionPreservingNormalizedArb,
+              );
+            }
+            File(
+              _rootPath(packageRoot, generatedPath),
+            ).writeAsStringSync(afterGenerated);
+          },
+        );
+
+        final creation =
+            await DefaultCorpusProjectViewFactory(
+              processRunner: runner,
+              normalizationManifestLoaderForTesting: (_, _) => normalization,
+            ).create(
+              project: normalizedProject,
+              retainedRepositoryPath: retained.path,
+              canonicalFlutterExecutable: canonicalFlutter.path,
+            );
+
+        final view = (creation as CorpusProjectViewReady).view;
+        addTearDown(view.dispose);
+        expect(
+          File(
+            _rootPath(view.repositoryRoot, generatedPath),
+          ).readAsStringSync(),
+          afterGenerated,
+        );
+        for (final entry in legitimatePackageFiles.entries) {
+          expect(
+            File(_rootPath(view.repositoryRoot, entry.key)).readAsStringSync(),
+            entry.value,
+          );
+        }
+        expect(runner.flutterInvocations.map((entry) => entry.arguments), [
+          const ['--version', '--machine'],
+          const ['pub', 'get', '--offline'],
+          const ['gen-l10n'],
+          const ['--version', '--machine'],
+        ]);
+      },
+    );
+
+    test('rejects an undeclared normalized generator write', () async {
+      const generatedPath =
+          'lib/common/localization/l10n/app_localizations.dart';
+      const beforeGenerated = '// original generated baseline\n';
+      const afterGenerated = '// normalized generated baseline\n';
+      final retained = Directory(
+        p.join(suiteRoot.path, 'gsy-normalized-undeclared-write'),
+      )..createSync();
+      _writeRootPackageRepository(retained);
+      for (final relativePath in _gsyArbPaths) {
+        final file = File(_rootPath(retained, relativePath));
+        file.parent.createSync(recursive: true);
+        file.writeAsStringSync(_duplicateArb);
+      }
+      final generated = File(_rootPath(retained, generatedPath));
+      generated.parent.createSync(recursive: true);
+      generated.writeAsStringSync(beforeGenerated);
+      final revision = _commitFixtureRepository(retained);
+      final normalization = _syntheticNormalizationManifest(
+        revision,
+        generatedBaseline: L10nNormalizedGeneratedBaseline(
+          changedOutputs: [
+            L10nNormalizedGeneratedOutput(
+              relativePath: generatedPath,
+              originalSha256: ImmutableBytes.copyOf(
+                utf8.encode(beforeGenerated),
+              ).sha256Hex,
+              replacementSha256: ImmutableBytes.copyOf(
+                utf8.encode(afterGenerated),
+              ).sha256Hex,
+              posixMode: 0x1a4,
+            ),
+          ],
+        ),
+      );
+      final normalizedProject = _rootProject(
+        id: 'gsy',
+        revision: revision,
+        arbPathsRelative: _gsyArbPaths,
+        normalizationOverlays: [
+          L10nNormalizationOverlay(
+            manifest: 'gsy-normalized-family-v2.json',
+            policy: 'apply-declared-byte-transforms',
+            normalizationManifest: normalization,
+          ),
+        ],
+      );
+      final runner = _CorpusProcessRunner(
+        onGenL10n: (packageRoot) {
+          File(
+            _rootPath(packageRoot, generatedPath),
+          ).writeAsStringSync(afterGenerated);
+          File(
+            _rootPath(packageRoot, 'README.md'),
+          ).writeAsStringSync('undeclared generator write\n');
+        },
+      );
+
+      final creation =
+          await DefaultCorpusProjectViewFactory(
+            processRunner: runner,
+            normalizationManifestLoaderForTesting: (_, _) => normalization,
+          ).create(
+            project: normalizedProject,
+            retainedRepositoryPath: retained.path,
+            canonicalFlutterExecutable: canonicalFlutter.path,
+          );
+
+      final rejected = creation as CorpusProjectViewRejected;
+      expect(
+        rejected.outcome.commandResults.single['status'],
+        'managedAuthorityDrift',
+      );
+      expect(_gitStatusBytes(retained), isEmpty);
+    });
+
+    test(
+      'rejects unsafe normalization copy spans before installation',
+      () async {
+        final retained = Directory(p.join(suiteRoot.path, 'gsy-invalid-copy'))
+          ..createSync();
+        _writeRootPackageRepository(retained);
+        for (final relativePath in _gsyArbPaths) {
+          final file = File(_rootPath(retained, relativePath));
+          file.parent.createSync(recursive: true);
+          file.writeAsStringSync(_duplicateArb);
+        }
+        final revision = _commitFixtureRepository(retained);
+        final invalidManifests = <L10nNormalizationManifest>[
+          _syntheticNormalizationManifest(
+            revision,
+            copyMutation: (copy) => L10nCopiedByteSpan(
+              start: copy.sourceStart,
+              endExclusive: copy.sourceEndExclusive,
+              sourceStart: copy.sourceStart,
+              sourceEndExclusive: copy.sourceEndExclusive,
+            ),
+          ),
+          _syntheticNormalizationManifest(
+            revision,
+            copyMutation: (copy) => L10nCopiedByteSpan(
+              start: copy.start,
+              endExclusive: copy.endExclusive,
+              sourceStart: copy.sourceStart,
+              sourceEndExclusive: _duplicateArb.length + 1,
+            ),
+          ),
+        ];
+
+        for (final normalization in invalidManifests) {
+          final project = _rootProject(
+            id: 'gsy',
+            revision: revision,
+            arbPathsRelative: _gsyArbPaths,
+            normalizationOverlays: [
+              L10nNormalizationOverlay(
+                manifest: 'gsy-normalized-family-v2.json',
+                policy: 'apply-declared-byte-transforms',
+                normalizationManifest: normalization,
+              ),
+            ],
+          );
+          final result =
+              await DefaultCorpusProjectViewFactory(
+                processRunner: _CorpusProcessRunner(),
+                normalizationManifestLoaderForTesting: (_, _) => normalization,
+              ).create(
+                project: project,
+                retainedRepositoryPath: retained.path,
+                canonicalFlutterExecutable: canonicalFlutter.path,
+              );
+
+          expect(result, isA<CorpusProjectViewRejected>());
+        }
+      },
+    );
+
     test('does not trust a forged embedded GSY normalization object', () async {
       final retained = Directory(p.join(suiteRoot.path, 'gsy-forged'))
         ..createSync();
@@ -681,7 +1221,7 @@ void main() {
         p.join(suiteRoot.path, 'forged-manifest'),
       )..createSync();
       File(
-        p.join(manifestDirectory.path, 'gsy-normalized-family-v1.json'),
+        p.join(manifestDirectory.path, 'gsy-normalized-family-v2.json'),
       ).writeAsStringSync('{}\n');
       final forgedProject = _rootProject(
         id: 'gsy',
@@ -689,8 +1229,8 @@ void main() {
         arbPathsRelative: _gsyArbPaths,
         normalizationOverlays: [
           L10nNormalizationOverlay(
-            manifest: 'gsy-normalized-family-v1.json',
-            policy: 'remove-declared-byte-spans',
+            manifest: 'gsy-normalized-family-v2.json',
+            policy: 'apply-declared-byte-transforms',
             normalizationManifest: embedded,
           ),
         ],
@@ -1720,12 +2260,18 @@ const _beforeArb = '{"alive":"Alive","dead":"Dead"}\n';
 const _afterArb = '{"alive":"Alive"}\n';
 const _beforeGenerated = 'String get dead => "Dead";\n';
 const _afterGenerated = '// dead removed\n';
-const _duplicateArb = '{"dup":"old","alive":"yes","dup":"kept"}\n';
+const _duplicateArb = '{"dup":"old","alive":"yes","dup":"kept","tail":"ok"}\n';
+const _positionPreservingNormalizedArb =
+    '{"dup":"kept","alive":"yes","tail":"ok"}\n';
 const _gsyArbPaths = <String>[
   'lib/common/localization/l10n/app_en.arb',
   'lib/common/localization/l10n/app_ja.arb',
   'lib/common/localization/l10n/app_ko.arb',
   'lib/common/localization/l10n/app_zh.arb',
+];
+const _flutterEphemeralPaths = <String>[
+  'ios/Flutter/ephemeral/flutter_lldb_helper.py',
+  'ios/Flutter/ephemeral/flutter_lldbinit',
 ];
 const _candidateIdentity =
     'candidate_0123456789abcdef0123456789abcdef0123456789abcdef';
@@ -1773,26 +2319,40 @@ CorpusMutationEvidenceOutcome _evidenceOutcome({
       status == CorpusMutationEvidenceStatus.fullPolicyFailed,
 );
 
-L10nNormalizationManifest _syntheticNormalizationManifest(String revision) {
-  const removed = '"dup":"old",';
-  final start = _duplicateArb.indexOf(removed);
-  final replacement = _duplicateArb.replaceFirst(removed, '');
+L10nNormalizationManifest _syntheticNormalizationManifest(
+  String revision, {
+  L10nCopiedByteSpan Function(L10nCopiedByteSpan copy)? copyMutation,
+  L10nNormalizedGeneratedBaseline? generatedBaseline,
+}) {
+  const first = '"dup":"old"';
+  const effective = '"dup":"kept"';
+  final firstStart = _duplicateArb.indexOf(first);
+  final effectiveStart = _duplicateArb.lastIndexOf(effective);
+  final removedStart = effectiveStart;
+  final removedEnd = removedStart + effective.length + 1;
   final originalHash = ImmutableBytes.copyOf(
     utf8.encode(_duplicateArb),
   ).sha256Hex;
   final replacementHash = ImmutableBytes.copyOf(
-    utf8.encode(replacement),
+    utf8.encode(_positionPreservingNormalizedArb),
   ).sha256Hex;
   final canonicalHash = ImmutableBytes.copyOf(
-    utf8.encode('{"alive":"yes","dup":"kept"}'),
+    utf8.encode('{"alive":"yes","dup":"kept","tail":"ok"}'),
   ).sha256Hex;
+  final copy = L10nCopiedByteSpan(
+    start: firstStart,
+    endExclusive: firstStart + first.length,
+    sourceStart: effectiveStart,
+    sourceEndExclusive: effectiveStart + effective.length,
+  );
   return L10nNormalizationManifest(
-    schemaVersion: 1,
-    normalizationVersion: 'gsy-normalized-family-v1',
+    schemaVersion: generatedBaseline == null ? 2 : 3,
+    normalizationVersion: 'gsy-normalized-family-v2',
     repositoryRevision: revision,
-    policy: 'retain-last-effective-decoded-top-level-member',
+    policy: 'retain-last-effective-decoded-top-level-member-at-first-position',
     sourceSha256:
-        '0a363b17eaaed53c1b3724e3a9b75481db0dfd6534beccb09e1690cb2218c457',
+        '00c994f3fa48fc40ff1a1a35e8ea3fd0011ca3801da2e75acfa297009c761c59',
+    generatedBaseline: generatedBaseline,
     changedArbs: [
       for (final path in _gsyArbPaths)
         L10nNormalizedArb(
@@ -1800,11 +2360,9 @@ L10nNormalizationManifest _syntheticNormalizationManifest(String revision) {
           originalSha256: originalHash,
           replacementSha256: replacementHash,
           canonicalDecodedObjectSha256: canonicalHash,
+          copiedByteSpans: [copyMutation?.call(copy) ?? copy],
           removedByteSpans: [
-            L10nRemovedByteSpan(
-              start: start,
-              endExclusive: start + removed.length,
-            ),
+            L10nRemovedByteSpan(start: removedStart, endExclusive: removedEnd),
           ],
           decodedObjectEquivalent: true,
           replacementHasDuplicateDecodedKeys: false,
@@ -1894,6 +2452,14 @@ void _expectBeforeFiles(Directory root) {
     File(_rootPath(root, _generatedPath)).readAsStringSync(),
     _beforeGenerated,
   );
+}
+
+void _writeFlutterEphemeralOutputs(Directory packageRoot) {
+  for (final path in _flutterEphemeralPaths) {
+    final file = File(_rootPath(packageRoot, path));
+    file.parent.createSync(recursive: true);
+    file.writeAsStringSync('generated $path\n');
+  }
 }
 
 ({String sha256, int? mode}) _fileState(Directory root, String path) {
@@ -2085,6 +2651,7 @@ final class _CorpusProcessRunner implements ProcessExecutionRunner {
     this.mutateManagedAuthority = false,
     this.breakManagedFingerprintOnUnconfirmed = false,
     this.onPubGet,
+    this.onGenL10n,
     this.onGitInvocation,
     this.toolchainMachine,
     this.onFirstPolicy,
@@ -2098,6 +2665,7 @@ final class _CorpusProcessRunner implements ProcessExecutionRunner {
   final bool mutateManagedAuthority;
   final bool breakManagedFingerprintOnUnconfirmed;
   final void Function(Directory packageRoot)? onPubGet;
+  final void Function(Directory packageRoot)? onGenL10n;
   final void Function(_Invocation invocation)? onGitInvocation;
   final Map<String, Object?>? toolchainMachine;
   final void Function(_Invocation invocation)? onFirstPolicy;
@@ -2165,6 +2733,10 @@ final class _CorpusProcessRunner implements ProcessExecutionRunner {
         config.writeAsStringSync('{"configVersion":2,"packages":[]}\n');
       }
       return _processResult(exitCode: pubGetExitCode);
+    }
+    if (arguments case ['gen-l10n']) {
+      onGenL10n?.call(Directory(workingDirectory));
+      return _processResult();
     }
     if (arguments case ['--version', '--machine']) {
       _toolchainProbeCount++;

@@ -92,10 +92,10 @@ final class DartAnalysisWorkspace {
         for (final path in context.contextRoot.analyzedFiles())
           if (path.endsWith('.dart')) path,
       for (final file in _project.dartFiles)
-        if (_isAdmissibleExcludedGeneratedPath(file.path))
+        if (_isAdmissibleAnalyzerExcludedProjectPath(file.path))
           p.normalize(p.absolute(file.path)),
       for (final target in _project.targets)
-        if (_isAdmissibleExcludedGeneratedPath(
+        if (_isAdmissibleAnalyzerExcludedProjectPath(
           _project.resolve(target.entrypoint),
         ))
           p.normalize(p.absolute(_project.resolve(target.entrypoint))),
@@ -257,7 +257,7 @@ final class DartAnalysisWorkspace {
     try {
       return collection.contextFor(path).currentSession;
     } on StateError {
-      if (!_isAdmissibleExcludedGeneratedPath(path)) rethrow;
+      if (!_isAdmissibleAnalyzerExcludedProjectPath(path)) rethrow;
       final canonicalPath = _canonicalPath(path);
       final containingContexts =
           collection.contexts.where((context) {
@@ -279,13 +279,17 @@ final class DartAnalysisWorkspace {
     }
   }
 
-  bool _isAdmissibleExcludedGeneratedPath(String path) {
+  bool _isAdmissibleAnalyzerExcludedProjectPath(String path) {
     final normalizedPath = p.normalize(p.absolute(path));
     return FileSystemEntity.typeSync(normalizedPath, followLinks: false) ==
             FileSystemEntityType.file &&
         !_project.pathPolicy.shouldExclude(normalizedPath) &&
         !_hasSymlinkComponent(normalizedPath) &&
-        _ownership.isSelectedGeneratedSource(normalizedPath);
+        (_ownership.isSelectedGeneratedSource(normalizedPath) ||
+            p.basename(normalizedPath).startsWith('.') &&
+                normalizedPath.endsWith('.dart') &&
+                _ownership.ownerOf(normalizedPath).ownership ==
+                    DartSourceOwnership.selectedPackage);
   }
 
   bool _hasSymlinkComponent(String path) {

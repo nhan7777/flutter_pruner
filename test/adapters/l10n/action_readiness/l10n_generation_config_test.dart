@@ -14,9 +14,11 @@ import 'package:test/test.dart';
 const _frameworkRevision38 = '3b62efc2a3da49882f43c372e0bc53daef7295a6';
 const _frameworkRevision41 = '2c9eb20739dfec95e2c74bd3dfa4601b0a8a36aa';
 const _frameworkRevision44 = '924134a44c189315be2148659913dda1671cbe99';
+const _frameworkRevision449 = '6b182d2c7585eba26d4edce0f97630effd256c33';
 const _engineRevision38 = '3838383838383838383838383838383838383838';
 const _engineRevision41 = '4141414141414141414141414141414141414141';
 const _engineRevision44 = '4444444444444444444444444444444444444444';
+const _engineRevision449 = '5a2a6a42cce67f965cf540fcecf616faca624aa1';
 
 void main() {
   late Directory scratch;
@@ -106,7 +108,7 @@ void main() {
         );
         expect(
           configurations.map((config) => config.configurationIdentity).toSet(),
-          hasLength(3),
+          hasLength(4),
         );
       },
     );
@@ -1289,6 +1291,12 @@ final _identity44 = _machine(
   engineRevision: _engineRevision44,
   dartSdkVersion: '3.12.1',
 );
+final _identity449 = _machine(
+  Version(3, 44, 9),
+  frameworkRevision: _frameworkRevision449,
+  engineRevision: _engineRevision449,
+  dartSdkVersion: '3.12.2',
+);
 
 final _toolchainCases = [
   (
@@ -1305,6 +1313,11 @@ final _toolchainCases = [
     name: 'Flutter 3.44.1',
     identity: _identity44,
     schemaVersion: L10nGenerationSchemaVersion.flutter3441,
+  ),
+  (
+    name: 'Flutter 3.44.9',
+    identity: _identity449,
+    schemaVersion: L10nGenerationSchemaVersion.flutter3449,
   ),
 ];
 

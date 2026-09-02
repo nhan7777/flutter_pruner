@@ -10,6 +10,7 @@ import 'analysis_mode.dart';
 import 'project_config.dart';
 import 'project_language_version.dart';
 import 'project_path_policy.dart';
+import 'project_source_path.dart';
 import 'target_matrix.dart';
 import 'tool_workspace.dart';
 
@@ -34,7 +35,9 @@ class ProjectContext {
        targetMatrix = targetMatrix ?? TargetMatrix.declared(targets!),
        rootCoverage = _normalizeRootCoverage(analysisMode, rootCoverage),
        verificationPolicy = _snapshotVerificationPolicy(verificationPolicy),
-       pathPolicy = pathPolicy ?? ProjectPathPolicy(root: root);
+       pathPolicy = pathPolicy ?? ProjectPathPolicy(root: root) {
+    _validateExcludedApplicationEntrypoints();
+  }
 
   /// Loads the project rooted at [directory].
   ///
@@ -187,6 +190,41 @@ class ProjectContext {
   /// Build targets reachability is evaluated against.
   List<BuildTarget> get targets => targetMatrix.targets;
 
+  void _validateExcludedApplicationEntrypoints() {
+    if (targetMatrix.excludedEntrypoints.isEmpty) return;
+    if (analysisMode != AnalysisMode.application) {
+      throw ArgumentError.value(
+        targetMatrix.excludedEntrypoints,
+        'targetMatrix.excludedEntrypoints',
+        'Excluded application entrypoints are only valid in application mode.',
+      );
+    }
+    for (final exclusion in targetMatrix.excludedEntrypoints) {
+      try {
+        final canonical = ProjectSourcePath.validate(
+          root,
+          exclusion.path,
+          field: 'excluded application entrypoint',
+          kind: ProjectSourceKind.applicationEntrypoint,
+          pathPolicy: pathPolicy,
+        );
+        if (canonical != exclusion.path) {
+          throw ArgumentError.value(
+            exclusion.path,
+            'targetMatrix.excludedEntrypoints',
+            'Excluded application entrypoint paths must be canonical.',
+          );
+        }
+      } on ProjectSourcePathException catch (error) {
+        throw ArgumentError.value(
+          exclusion.path,
+          'targetMatrix.excludedEntrypoints',
+          error.message,
+        );
+      }
+    }
+  }
+
   /// Whether targets and externally addressable roots are explicitly complete.
   bool get analysisCoverageComplete =>
       targetMatrix.isComplete && rootCoverage.internalBoundaryComplete;
@@ -250,7 +288,12 @@ class ProjectContext {
         if (entity is! File) continue;
         if (pathPolicy.shouldExcludeTraversalEntry(entity)) continue;
         if (!entity.path.endsWith('.dart')) continue;
-        if (p.split(entity.path).any((s) => s.startsWith('.'))) continue;
+        final relativeSegments = p.split(relative(entity.path));
+        if (relativeSegments
+            .take(relativeSegments.length - 1)
+            .any((segment) => segment.startsWith('.'))) {
+          continue;
+        }
         result.add(entity);
       }
     }

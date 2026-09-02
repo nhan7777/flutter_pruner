@@ -49,6 +49,59 @@ void main() {
     );
   });
 
+  test(
+    'threads an ancestor toolchain authority through resolve and revalidate',
+    () async {
+      final fixture = await _PipelineFixture.create(
+        toolchainAuthorityAtParent: true,
+      );
+      addTearDown(fixture.dispose);
+
+      final evaluation = await fixture.pipeline.evaluate(fixture.request);
+
+      expect(evaluation.verdict.status, L10nEvidenceStatus.accepted);
+      expect(
+        fixture.resolver.lastOriginalProjectRoot?.path,
+        fixture.scratch.path,
+      );
+      expect(
+        fixture.scenario.lastToolchainAuthorityRoot?.path,
+        fixture.scratch.path,
+      );
+    },
+  );
+
+  test(
+    'rejects a toolchain authority outside the analyzed project ancestry',
+    () async {
+      final fixture = await _PipelineFixture.create();
+      final unrelated = Directory.systemTemp.createTempSync(
+        'l10n-unrelated-toolchain-authority-',
+      );
+      addTearDown(() async {
+        await fixture.dispose();
+        if (unrelated.existsSync()) unrelated.deleteSync(recursive: true);
+      });
+
+      final evaluation = await fixture.pipeline.evaluate(
+        L10nEvidenceRequest(
+          analysis: fixture.request.analysis,
+          selectedNodeIds: fixture.request.selectedNodeIds,
+          sdkRegistry: fixture.request.sdkRegistry,
+          toolchainSelection: fixture.request.toolchainSelection,
+          toolchainAuthorityRoot: unrelated,
+        ),
+      );
+
+      expect(evaluation.verdict.status, L10nEvidenceStatus.rejected);
+      expect(
+        evaluation.verdict.failures.single.detailCode,
+        'toolchain-authority-root-not-ancestor',
+      );
+      expect(fixture.log, isEmpty);
+    },
+  );
+
   test('rejects an empty selection before invoking any boundary', () async {
     final boundaries = _NeverCalledBoundaries();
     final pipeline = L10nEvidencePipeline(
@@ -413,6 +466,7 @@ final class _NeverCalledSnapshotRevalidator implements L10nSnapshotRevalidator {
   @override
   Future<L10nSnapshotRevalidationResult> revalidate({
     required Directory originalProjectRoot,
+    Directory? toolchainAuthorityRoot,
     required L10nFamilySnapshot snapshot,
     required L10nToolchainResolved toolchain,
   }) => throw StateError('snapshot revalidator must not be called');
@@ -498,6 +552,7 @@ final class _PipelineFixture {
     required this.request,
     required this.pipeline,
     required this.materializer,
+    required this.resolver,
     required this.scenario,
   });
 
@@ -510,6 +565,7 @@ final class _PipelineFixture {
   final L10nEvidenceRequest request;
   final L10nEvidencePipeline pipeline;
   final _RecordingMaterializer materializer;
+  final _ScenarioToolchainResolver resolver;
   final _ScenarioBoundaries scenario;
 
   List<String> get log => scenario.log;
@@ -523,6 +579,7 @@ final class _PipelineFixture {
   static Future<_PipelineFixture> create({
     bool cleanupFailure = false,
     _BoundaryFailure? failure,
+    bool toolchainAuthorityAtParent = false,
   }) async {
     final allocatedScratch = Directory.systemTemp.createTempSync(
       'l10n-evidence-pipeline-test-',
@@ -580,12 +637,13 @@ final class _PipelineFixture {
       changeSet: changeSet,
       failure: failure,
     );
+    final resolver = _ScenarioToolchainResolver(
+      log: log,
+      toolchain: toolchain,
+      failure: failure,
+    );
     final pipeline = L10nEvidencePipeline.withMaterializerFactory(
-      toolchainResolver: _ScenarioToolchainResolver(
-        log: log,
-        toolchain: toolchain,
-        failure: failure,
-      ),
+      toolchainResolver: resolver,
       configLoader: scenario,
       snapshotter: scenario,
       materializerFactory: (resolved) {
@@ -605,6 +663,7 @@ final class _PipelineFixture {
         Version(3, 41, 5): toolchain.canonicalFlutterExecutable,
       }),
       toolchainSelection: const ProjectSelectorSelection(),
+      toolchainAuthorityRoot: toolchainAuthorityAtParent ? scratch : null,
     );
     return _PipelineFixture._(
       scratch: scratch,
@@ -616,6 +675,7 @@ final class _PipelineFixture {
       request: request,
       pipeline: pipeline,
       materializer: materializer,
+      resolver: resolver,
       scenario: scenario,
     );
   }
@@ -639,6 +699,7 @@ final class _ScenarioToolchainResolver implements L10nToolchainResolver {
   final List<String> log;
   final L10nToolchainResolved toolchain;
   final _BoundaryFailure? failure;
+  Directory? lastOriginalProjectRoot;
 
   @override
   Future<L10nToolchainResolution> resolve({
@@ -646,6 +707,7 @@ final class _ScenarioToolchainResolver implements L10nToolchainResolver {
     required L10nSdkRegistry sdkRegistry,
     required L10nToolchainSelection selection,
   }) async {
+    lastOriginalProjectRoot = originalProjectRoot;
     log.add('resolve');
     if (failure == _BoundaryFailure.resolve) {
       return const L10nToolchainRejected(
@@ -693,6 +755,7 @@ final class _ScenarioBoundaries
   Set<String>? candidateRemovedKeys;
   Set<String>? baselineOutputPaths;
   Set<String>? candidateOutputPaths;
+  Directory? lastToolchainAuthorityRoot;
 
   @override
   Future<L10nGenerationConfigLoadResult> load({
@@ -831,9 +894,11 @@ final class _ScenarioBoundaries
   @override
   Future<L10nSnapshotRevalidationResult> revalidate({
     required Directory originalProjectRoot,
+    Directory? toolchainAuthorityRoot,
     required L10nFamilySnapshot snapshot,
     required L10nToolchainResolved toolchain,
   }) async {
+    lastToolchainAuthorityRoot = toolchainAuthorityRoot;
     log.add('revalidate');
     if (failure == _BoundaryFailure.revalidateThrow) {
       throw StateError(_unexpectedSecret);

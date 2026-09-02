@@ -250,7 +250,9 @@ final class L10nAnalysisOptionsProjection {
     required Iterable<String> projectOwnedPaths,
     required Iterable<L10nExternalAnalysisOptionsAuthority> externalAuthorities,
     required this.contextAuthorityIdentity,
+    Iterable<String> nestedAuthorityPaths = const [],
   }) : projectOwnedPaths = _sortedSet(projectOwnedPaths.toSet()),
+       nestedAuthorityPaths = _sortedSet(nestedAuthorityPaths.toSet()),
        externalAuthorities = List.unmodifiable(
          externalAuthorities.toList()..sort(
            (left, right) => left.canonicalPath.compareTo(right.canonicalPath),
@@ -258,6 +260,15 @@ final class L10nAnalysisOptionsProjection {
        ) {
     if (this.projectOwnedPaths.any((path) => !_isSafeRelativePosixPath(path))) {
       throw ArgumentError.value(projectOwnedPaths, 'projectOwnedPaths');
+    }
+    if (this.nestedAuthorityPaths.any(
+      (path) =>
+          !_isSafeRelativePosixPath(path) ||
+          path == 'analysis_options.yaml' ||
+          !path.endsWith('/analysis_options.yaml') ||
+          !this.projectOwnedPaths.contains(path),
+    )) {
+      throw ArgumentError.value(nestedAuthorityPaths, 'nestedAuthorityPaths');
     }
     final externalPaths = <String>{};
     if (this.externalAuthorities.any(
@@ -276,6 +287,9 @@ final class L10nAnalysisOptionsProjection {
   /// Project-relative options files that must be staged.
   final Set<String> projectOwnedPaths;
 
+  /// Nested package-root options files allowed to affect analyzer semantics.
+  final Set<String> nestedAuthorityPaths;
+
   /// External package options files that remain live but are re-readable.
   final List<L10nExternalAnalysisOptionsAuthority> externalAuthorities;
 
@@ -288,6 +302,9 @@ final class L10nAnalysisOptionsProjection {
         utf8.encode(
           jsonEncode({
             'projectOwnedPaths': projectOwnedPaths.toList(growable: false),
+            'nestedAuthorityPaths': nestedAuthorityPaths.toList(
+              growable: false,
+            ),
             'contextAuthorityIdentity': contextAuthorityIdentity,
             'externalAuthorities': [
               for (final authority in externalAuthorities) authority._identity,
@@ -359,6 +376,7 @@ final class L10nProjectSemantics {
          status: targetMatrix.status,
          source: targetMatrix.source,
          issues: targetMatrix.issues,
+         excludedEntrypoints: targetMatrix.excludedEntrypoints,
        ),
        rootCoverage = RootCoverage(
          mode: rootCoverage.mode,
@@ -426,6 +444,7 @@ final class L10nFamilySnapshot {
        ),
        analysisOptionsProjection = L10nAnalysisOptionsProjection(
          projectOwnedPaths: analysisOptionsProjection.projectOwnedPaths,
+         nestedAuthorityPaths: analysisOptionsProjection.nestedAuthorityPaths,
          externalAuthorities: analysisOptionsProjection.externalAuthorities,
          contextAuthorityIdentity:
              analysisOptionsProjection.contextAuthorityIdentity,

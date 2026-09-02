@@ -30,21 +30,130 @@ const expectedNegativeReasons = {
 };
 
 void main() {
+  test(
+    'v2 freezes full-policy Smooth corrections and GitJournal normalization',
+    () {
+      final manifestFile = File(
+        'benchmark/accuracy/manifests/l10n-mutation-readiness-v2.json',
+      );
+      expect(
+        manifestFile.existsSync(),
+        isTrue,
+        reason: 'the corrected v2 authority must be generated and frozen',
+      );
+      if (!manifestFile.existsSync()) return;
+      final manifest = L10nMutationManifest.read(manifestFile);
+
+      expect(manifest.oracleVersion, 'l10n-mutation-readiness-v2');
+      expect(manifest.totals.positiveKeys, 367);
+      expect(manifest.totals.negativeKeys, 2235);
+      expect(manifest.totals.requiredRestorations, 370);
+      expect(manifest.cases, hasLength(2602));
+
+      const correctedSmoothKeys = <String>{
+        'barcode_barcode',
+        'category_picker_no_category_found_button',
+        'category_picker_no_category_found_message',
+        'dev_preferences_migration_subtitle',
+        'email_body_account_deletion',
+        'importance_label',
+        'pct_match',
+        'product_search_button_download_more',
+        'product_search_no_more_results',
+        'user_profile_title_id_default',
+        'user_profile_title_id_email',
+      };
+      final corrected = manifest.cases
+          .where(
+            (entry) =>
+                entry.projectId == 'smooth' &&
+                correctedSmoothKeys.contains(entry.decodedKey),
+          )
+          .toList(growable: false);
+      expect(corrected, hasLength(correctedSmoothKeys.length));
+      expect(
+        corrected.every(
+          (entry) =>
+              !entry.isMutationPositive &&
+              !entry.expectedScannerPresence &&
+              entry.expectedArbMembersByPath.isEmpty,
+        ),
+        isTrue,
+      );
+
+      final gitjournal =
+          manifest.projectsById['gitjournal']!.normalizationOverlays.single;
+      expect(gitjournal.manifest, 'gitjournal-normalized-family-v1.json');
+      expect(gitjournal.policy, 'apply-declared-byte-transforms');
+      final normalizedArbs = gitjournal.normalizationManifest!.changedArbs;
+      expect(normalizedArbs, hasLength(21));
+      expect(
+        normalizedArbs.every(
+          (arb) =>
+              !arb.decodedObjectEquivalent &&
+              !arb.replacementHasDuplicateDecodedKeys &&
+              arb.copiedByteSpans.isEmpty &&
+              arb.removedByteSpans.isNotEmpty,
+        ),
+        isTrue,
+      );
+
+      final smooth =
+          manifest.projectsById['smooth']!.normalizationOverlays.single;
+      expect(smooth.manifest, 'smooth-normalized-family-v2.json');
+      expect(smooth.policy, 'apply-declared-byte-transforms');
+      final smoothNormalization = smooth.normalizationManifest!;
+      expect(smoothNormalization.schemaVersion, 3);
+      final smoothArbs = smoothNormalization.changedArbs;
+      expect(smoothArbs, hasLength(128));
+      expect(
+        smoothArbs.every(
+          (arb) =>
+              !arb.decodedObjectEquivalent &&
+              !arb.replacementHasDuplicateDecodedKeys &&
+              arb.copiedByteSpans.isEmpty &&
+              arb.removedByteSpans.isNotEmpty,
+        ),
+        isTrue,
+      );
+      final generatedBaseline = smoothNormalization.generatedBaseline!;
+      expect(generatedBaseline.changedOutputs, hasLength(64));
+      final generatedPaths = generatedBaseline.changedOutputs
+          .map((output) => output.relativePath)
+          .toList(growable: false);
+      expect(generatedPaths, orderedEquals([...generatedPaths]..sort()));
+      expect(
+        generatedBaseline.changedOutputs.every(
+          (output) =>
+              output.relativePath.startsWith(
+                'packages/smooth_app/lib/l10n/app_localizations',
+              ) &&
+              output.relativePath.endsWith('.dart') &&
+              output.originalSha256 != output.replacementSha256 &&
+              _sha256.hasMatch(output.originalSha256) &&
+              _sha256.hasMatch(output.replacementSha256) &&
+              output.posixMode == 0x1a4,
+        ),
+        isTrue,
+      );
+    },
+  );
+
   test('strict reader exposes immutable scanner-independent values', () {
     final manifest = L10nMutationManifest.read(
-      File('benchmark/accuracy/manifests/l10n-mutation-readiness-v1.json'),
+      File('benchmark/accuracy/manifests/l10n-mutation-readiness-v2.json'),
     );
 
     expect(manifest.schemaVersion, 1);
-    expect(manifest.oracleVersion, 'l10n-mutation-readiness-v1');
+    expect(manifest.oracleVersion, 'l10n-mutation-readiness-v2');
     expect(manifest.projects.map((project) => project.id), [
       'gitjournal',
       'gsy',
       'smooth',
     ]);
-    expect(manifest.projectsById['smooth']!.toolchainVersion, '3.38.7');
-    expect(manifest.totals.positiveKeys, 378);
-    expect(manifest.totals.negativeKeys, 2224);
+    expect(manifest.projectsById['smooth']!.toolchainVersion, '3.44.9');
+    expect(manifest.totals.positiveKeys, 367);
+    expect(manifest.totals.negativeKeys, 2235);
     expect(manifest.cases, hasLength(2602));
     expect(
       () => manifest.projects.add(manifest.projects.first),
@@ -60,7 +169,8 @@ void main() {
     );
     final normalization =
         manifest.projectsById['gsy']!.normalizationOverlays.single;
-    expect(normalization.manifest, 'gsy-normalized-family-v1.json');
+    expect(normalization.manifest, 'gsy-normalized-family-v2.json');
+    expect(normalization.policy, 'apply-declared-byte-transforms');
     expect(normalization.normalizationManifest!.changedArbs, hasLength(4));
   });
 
@@ -280,16 +390,23 @@ void main() {
       );
       addTearDown(() => temporary.deleteSync(recursive: true));
       final rootSource = File(
-        'benchmark/accuracy/manifests/l10n-mutation-readiness-v1.json',
+        'benchmark/accuracy/manifests/l10n-mutation-readiness-v2.json',
       );
       final normalizationSource = File(
-        'benchmark/accuracy/manifests/gsy-normalized-family-v1.json',
+        'benchmark/accuracy/manifests/gsy-normalized-family-v2.json',
       );
-      final root = File('${temporary.path}/l10n-mutation-readiness-v1.json')
+      final root = File('${temporary.path}/l10n-mutation-readiness-v2.json')
         ..writeAsBytesSync(rootSource.readAsBytesSync());
       final normalization = File(
-        '${temporary.path}/gsy-normalized-family-v1.json',
+        '${temporary.path}/gsy-normalized-family-v2.json',
       )..writeAsBytesSync(normalizationSource.readAsBytesSync());
+      File(
+        '${temporary.path}/gitjournal-normalized-family-v1.json',
+      ).writeAsBytesSync(
+        File(
+          'benchmark/accuracy/manifests/gitjournal-normalized-family-v1.json',
+        ).readAsBytesSync(),
+      );
 
       normalization.writeAsStringSync('${normalization.readAsStringSync()} ');
       expect(() => L10nMutationManifest.read(root), throwsFormatException);
@@ -307,21 +424,21 @@ void main() {
 
   test('freezes the independent l10n mutation-readiness oracle', () {
     final manifest = _readJson(
-      'benchmark/accuracy/manifests/l10n-mutation-readiness-v1.json',
+      'benchmark/accuracy/manifests/l10n-mutation-readiness-v2.json',
     );
     final normalization = _readJson(
-      'benchmark/accuracy/manifests/gsy-normalized-family-v1.json',
+      'benchmark/accuracy/manifests/gsy-normalized-family-v2.json',
     );
 
     expect(manifest['schemaVersion'], 1);
-    expect(manifest['oracleVersion'], 'l10n-mutation-readiness-v1');
+    expect(manifest['oracleVersion'], 'l10n-mutation-readiness-v2');
     expect(manifest['totals'], {
-      'positiveKeys': 378,
-      'negativeKeys': 2224,
+      'positiveKeys': 367,
+      'negativeKeys': 2235,
       'families': 3,
-      'individualMutationAttempts': 378,
+      'individualMutationAttempts': 367,
       'familyMutationAttempts': 3,
-      'requiredRestorations': 381,
+      'requiredRestorations': 370,
     });
 
     final sourceOracles = _objectMap(manifest['sourceOracles']);
@@ -372,7 +489,7 @@ void main() {
       };
     }
     expect(projectCounts, {
-      'smooth': {'positive': 323, 'negative': 1457},
+      'smooth': {'positive': 312, 'negative': 1468},
       'gsy': {'positive': 17, 'negative': 386},
       'gitjournal': {'positive': 38, 'negative': 381},
     });
@@ -384,7 +501,7 @@ void main() {
       ),
     );
     expect(toolchainVersions, {
-      'smooth': '3.38.7',
+      'smooth': '3.44.9',
       'gsy': '3.44.1',
       'gitjournal': '3.41.5',
     });
@@ -397,7 +514,7 @@ void main() {
       )..remove('gitjournal'),
       {
         'smooth':
-            'd7136e4315d88a5039d89d5e9b22743883e2c0fca30b26337b462acb7d1e65f3',
+            'b94a21e157a4ee1f8a34fa2b69e7b9d50fe06654cdcdbe6d6df65866e7129f94',
         'gsy':
             '6829953e403e4e06af06fadc4e33258c78a09fe460a3625835116c31cf4e20a9',
       },
@@ -430,19 +547,18 @@ void main() {
       {
         'smooth': [
           {
-            'workingDirectory': '.',
-            'executable': {'kind': 'flutterByVersion', 'version': '3.38.7'},
+            'workingDirectory': 'packages/smooth_app',
+            'executable': {'kind': 'flutterByVersion', 'version': '3.44.9'},
             'arguments': [
               'analyze',
               '--no-pub',
               '--fatal-infos',
               '--fatal-warnings',
-              '.',
             ],
           },
           {
             'workingDirectory': 'packages/smooth_app',
-            'executable': {'kind': 'flutterByVersion', 'version': '3.38.7'},
+            'executable': {'kind': 'flutterByVersion', 'version': '3.44.9'},
             'arguments': ['test', '--no-pub'],
           },
         ],
@@ -462,7 +578,7 @@ void main() {
           {
             'workingDirectory': '.',
             'executable': {'kind': 'flutterByVersion', 'version': '3.41.5'},
-            'arguments': ['analyze', '--no-pub'],
+            'arguments': ['analyze', '--no-pub', '--no-fatal-infos'],
           },
           {
             'workingDirectory': '.',
@@ -562,8 +678,12 @@ void main() {
     expect(reportSchemaKeys, isNotEmpty);
     expect(reportSchemaKeys, orderedEquals([...reportSchemaKeys]..sort()));
 
-    expect(normalization['schemaVersion'], 1);
-    expect(normalization['normalizationVersion'], 'gsy-normalized-family-v1');
+    expect(normalization['schemaVersion'], 2);
+    expect(normalization['normalizationVersion'], 'gsy-normalized-family-v2');
+    expect(
+      normalization['policy'],
+      'retain-last-effective-decoded-top-level-member-at-first-position',
+    );
     expect(
       normalization['repositorySha'],
       '2b6c49008afc44b90fee869dedf8e59a86482953',
@@ -580,6 +700,16 @@ void main() {
       expect(arb['originalSha256'], matches(_sha256));
       expect(arb['replacementSha256'], matches(_sha256));
       expect(arb['canonicalDecodedObjectSha256'], matches(_sha256));
+      final copies = _objectList(arb['copiedByteSpans']);
+      expect(copies, isNotEmpty);
+      for (final copy in copies) {
+        final start = copy['start'] as int;
+        final end = copy['endExclusive'] as int;
+        final sourceStart = copy['sourceStart'] as int;
+        final sourceEnd = copy['sourceEndExclusive'] as int;
+        expect(end, greaterThan(start));
+        expect(sourceEnd, greaterThan(sourceStart));
+      }
       final spans = _objectList(arb['removedByteSpans']);
       expect(spans, isNotEmpty);
       var previousEnd = -1;
@@ -598,7 +728,7 @@ void main() {
 
   test('freezes private staging identity normalization and cleanup policy', () {
     final manifest = _readJson(
-      'benchmark/accuracy/manifests/l10n-mutation-readiness-v1.json',
+      'benchmark/accuracy/manifests/l10n-mutation-readiness-v2.json',
     );
     final publicSurface = _objectMap(manifest['publicSurfaceBaseline']);
 
@@ -612,7 +742,7 @@ void main() {
 
   test('freezes verified corpus-relative fixture overlay provenance', () {
     final manifest = _readJson(
-      'benchmark/accuracy/manifests/l10n-mutation-readiness-v1.json',
+      'benchmark/accuracy/manifests/l10n-mutation-readiness-v2.json',
     );
     final families = _objectList(manifest['families']);
     final overlaysByProject = {
@@ -621,8 +751,35 @@ void main() {
     };
 
     expect(overlaysByProject, {
-      'smooth': <Object?>[],
+      'smooth': [
+        {
+          'relativePath': '.fvmrc',
+          'sourceIdentity': 'worktrees/v3-stage1/smooth/.fvmrc',
+          'purpose': 'toolchain selector authority',
+          'sha256':
+              'b94a21e157a4ee1f8a34fa2b69e7b9d50fe06654cdcdbe6d6df65866e7129f94',
+          'containsSecrets': false,
+        },
+        {
+          'relativePath': 'packages/smooth_app/flutter_pruner_v2_accuracy.yaml',
+          'sourceIdentity':
+              'worktrees/v2-natural-accuracy/smooth/packages/smooth_app/flutter_pruner_v2_accuracy.yaml',
+          'purpose': 'scanner coverage authority',
+          'sha256':
+              '9c50b97122bc7dc037f87f8bcd85e0ce05ba92ddadbb3d6e3ab5e52974ca3527',
+          'containsSecrets': false,
+        },
+      ],
       'gsy': [
+        {
+          'relativePath': 'flutter_pruner_v2_accuracy.yaml',
+          'sourceIdentity':
+              'worktrees/v2-natural-accuracy/gsy/flutter_pruner_v2_accuracy.yaml',
+          'purpose': 'scanner coverage authority',
+          'sha256':
+              '088014c7fc747e62ba52e705374da2e6fb12aea87fa4f0cdd9a0d3935d916beb',
+          'containsSecrets': false,
+        },
         {
           'relativePath': 'lib/common/config/ignoreConfig.dart',
           'sourceIdentity':
@@ -634,6 +791,15 @@ void main() {
         },
       ],
       'gitjournal': [
+        {
+          'relativePath': 'flutter_pruner_v2_accuracy.yaml',
+          'sourceIdentity':
+              'worktrees/v2-natural-accuracy/gitjournal/flutter_pruner_v2_accuracy.yaml',
+          'purpose': 'scanner coverage authority',
+          'sha256':
+              '4231078c9d2d427da754d28395a2727ddc4a4c054790c4381de2e256d9a35d05',
+          'containsSecrets': false,
+        },
         {
           'relativePath': 'lib/.env.dart',
           'sourceIdentity':
@@ -672,7 +838,7 @@ List<String> _stringList(Object? value) {
 Map<String, Object?> _manifestClone() => _objectMap(
   jsonDecode(
     jsonEncode(
-      _readJson('benchmark/accuracy/manifests/l10n-mutation-readiness-v1.json'),
+      _readJson('benchmark/accuracy/manifests/l10n-mutation-readiness-v2.json'),
     ),
   ),
 );

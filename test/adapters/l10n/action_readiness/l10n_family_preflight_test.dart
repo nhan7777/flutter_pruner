@@ -26,6 +26,37 @@ import 'package:test/test.dart';
 void main() {
   group('L10nFamilyPreflight.capture', () {
     test(
+      'keeps captured ARBs out of shared output-directory siblings',
+      () async {
+        final fixture = await _Fixture.create(
+          sharedArbAndOutputDirectory: true,
+        );
+        addTearDown(fixture.dispose);
+
+        final result = await fixture.capture();
+
+        expect(
+          result,
+          isA<L10nFamilySnapshotReady>(),
+          reason: _describeResult(result),
+        );
+        final snapshot = (result as L10nFamilySnapshotReady).snapshot;
+        expect(snapshot.provenUnrelatedOutputSiblings, {
+          'lib/l10n/header.txt',
+          'lib/l10n/helper.dart',
+        });
+        expect(
+          snapshot.entries['lib/l10n/app_en.arb']!.role,
+          L10nSnapshotRole.arbTemplate,
+        );
+        expect(
+          snapshot.entries['lib/l10n/app_vi.arb']!.role,
+          L10nSnapshotRole.arbLocale,
+        );
+      },
+    );
+
+    test(
       'captures exact immutable family with projected packages and base languages',
       () async {
         final fixture = await _Fixture.create();
@@ -400,6 +431,104 @@ plugins:
             reason: entry.key,
           );
         }
+      },
+    );
+
+    test(
+      'accepts only unresolved inert legacy analyzer plugin identifiers',
+      () async {
+        final unresolved = await _Fixture.create();
+        addTearDown(unresolved.dispose);
+        File(
+          p.join(unresolved.projectRoot.path, 'analysis_options.yaml'),
+        ).writeAsStringSync('''
+analyzer:
+  plugins:
+    - custom_lint
+''');
+        final unresolvedResult = await unresolved.capture();
+        expect(
+          unresolvedResult,
+          isA<L10nFamilySnapshotReady>(),
+          reason: _describeResult(unresolvedResult),
+        );
+
+        final resolved = await _Fixture.create();
+        addTearDown(resolved.dispose);
+        File(
+          p.join(resolved.projectRoot.path, 'analysis_options.yaml'),
+        ).writeAsStringSync('''
+analyzer:
+  plugins:
+    - external_dep
+''');
+        _expectFailure(
+          await resolved.capture(),
+          L10nEvidenceRejectionCode.invalidInputPath,
+          'analysis-options-plugins-unsupported',
+        );
+
+        final locked = await _Fixture.create();
+        addTearDown(locked.dispose);
+        File(
+          p.join(locked.projectRoot.path, 'analysis_options.yaml'),
+        ).writeAsStringSync('''
+analyzer:
+  plugins:
+    - custom_lint
+''');
+        File(p.join(locked.projectRoot.path, 'pubspec.lock')).writeAsStringSync(
+          '''
+packages:
+  custom_lint:
+    dependency: transitive
+    description:
+      name: custom_lint
+      sha256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      url: https://pub.dev
+    source: hosted
+    version: 0.7.0
+sdks:
+  dart: ">=3.9.0 <4.0.0"
+''',
+        );
+        _expectFailure(
+          await locked.capture(),
+          L10nEvidenceRejectionCode.invalidInputPath,
+          'analysis-options-plugins-unsupported',
+        );
+
+        final declared = await _Fixture.create(
+          unresolvedDevDependency: 'custom_lint',
+        );
+        addTearDown(declared.dispose);
+        File(
+          p.join(declared.projectRoot.path, 'analysis_options.yaml'),
+        ).writeAsStringSync('''
+analyzer:
+  plugins:
+    - custom_lint
+''');
+        _expectFailure(
+          await declared.capture(),
+          L10nEvidenceRejectionCode.invalidInputPath,
+          'analysis-options-plugins-unsupported',
+        );
+
+        final malformed = await _Fixture.create();
+        addTearDown(malformed.dispose);
+        File(
+          p.join(malformed.projectRoot.path, 'analysis_options.yaml'),
+        ).writeAsStringSync('''
+analyzer:
+  plugins:
+    - ../plugin
+''');
+        _expectFailure(
+          await malformed.capture(),
+          L10nEvidenceRejectionCode.invalidInputPath,
+          'analysis-options-plugins-unsupported',
+        );
       },
     );
 
@@ -895,13 +1024,22 @@ plugins:
           Blocker(
             producer: 'fixture',
             reason: 'unselected sibling uncertainty',
+            location: 'lib/active.dart:12:4',
             affectedNodeIds: {liveId},
           ),
         );
+        final activeResult = await activeFixture.capture();
         _expectFailure(
-          await activeFixture.capture(),
+          activeResult,
           L10nEvidenceRejectionCode.scanBlockerPresent,
           'active-family-blocker',
+        );
+        expect(
+          (activeResult as L10nFamilySnapshotRejected)
+              .failures
+              .single
+              .relativePath,
+          'lib/active.dart',
         );
 
         final inactiveFixture = await _Fixture.create();
@@ -1263,15 +1401,19 @@ plugins:
       },
     );
 
-    test('package projector rejects project-owned path dependencies', () async {
+    test('package projector rebases nested project-owned packages', () async {
       final fixture = await _Fixture.create();
       addTearDown(fixture.dispose);
       final nestedPackage = Directory(
         p.join(fixture.projectRoot.path, 'packages/local_dependency'),
       )..createSync(recursive: true);
+      Directory(p.join(nestedPackage.path, 'lib')).createSync();
       File(
         p.join(nestedPackage.path, 'pubspec.yaml'),
       ).writeAsStringSync('name: local_dependency\n');
+      File(
+        p.join(nestedPackage.path, 'lib/local_dependency.dart'),
+      ).writeAsStringSync('const localValue = 1;\n');
       final source = fixture.packageConfig.readAsStringSync().replaceFirst(
         '{"name":"external_dep"',
         '{"name":"local_dependency","rootUri":"../packages/local_dependency/",'
@@ -1286,12 +1428,134 @@ plugins:
         toolchain: fixture.toolchain,
       );
 
-      expect(result, isA<L10nPackageConfigProjectionRejected>());
+      expect(result, isA<L10nPackageConfigProjectionReady>());
+      final projection =
+          (result as L10nPackageConfigProjectionReady).projection;
+      expect(projection.projectOwnedRootsByPackage, {
+        'local_dependency': 'packages/local_dependency',
+      });
+      final projected =
+          jsonDecode(utf8.decode(projection.stageBytes.copy()))
+              as Map<String, Object?>;
+      final records = (projected['packages']! as List<Object?>)
+          .cast<Map<String, Object?>>();
       expect(
-        (result as L10nPackageConfigProjectionRejected).failure.detailCode,
-        'external-package-overlaps-project',
+        records.singleWhere(
+          (record) => record['name'] == 'local_dependency',
+        )['rootUri'],
+        '../packages/local_dependency/',
       );
     });
+
+    test('captures nested package lib closure for isolated stages', () async {
+      final fixture = await _Fixture.create();
+      addTearDown(fixture.dispose);
+      final nestedPackage = Directory(
+        p.join(fixture.projectRoot.path, 'packages/local_dependency'),
+      )..createSync(recursive: true);
+      Directory(
+        p.join(nestedPackage.path, 'lib/src'),
+      ).createSync(recursive: true);
+      File(p.join(nestedPackage.path, 'pubspec.yaml')).writeAsStringSync('''
+name: local_dependency
+environment:
+  sdk: ^3.9.0
+''');
+      File(
+        p.join(nestedPackage.path, 'analysis_options.yaml'),
+      ).writeAsStringSync('''
+analyzer:
+  errors:
+    unused_import: ignore
+''');
+      File(
+        p.join(nestedPackage.path, 'lib/local_dependency.dart'),
+      ).writeAsStringSync("export 'src/value.dart';\n");
+      File(
+        p.join(nestedPackage.path, 'lib/src/value.dart'),
+      ).writeAsStringSync('const localValue = 1;\n');
+      fixture.packageConfig.writeAsStringSync(
+        fixture.packageConfig.readAsStringSync().replaceFirst(
+          '{"name":"external_dep"',
+          '{"name":"local_dependency",'
+              '"rootUri":"../packages/local_dependency/",'
+              '"packageUri":"lib/","languageVersion":"3.9"},\n  '
+              '{"name":"external_dep"',
+        ),
+      );
+      final main = File(p.join(fixture.projectRoot.path, 'lib/main.dart'));
+      main.writeAsStringSync(
+        "import 'package:local_dependency/local_dependency.dart';\n"
+        '${main.readAsStringSync()}\n'
+        'const capturedLocalValue = localValue;\n',
+      );
+      final analysis = await ProjectAnalyzer(
+        project: fixture.project,
+        only: const {'l10n'},
+      ).analyze();
+      final selected = analysis.graph
+          .nodesOfKind(NodeKind.localizationKey)
+          .singleWhere((node) => node.metadata['key'] == 'dead')
+          .id;
+
+      final result = await fixture.capture(
+        analysis: analysis,
+        selectedNodeIds: [selected],
+      );
+
+      expect(
+        result,
+        isA<L10nFamilySnapshotReady>(),
+        reason: _describeResult(result),
+      );
+      final snapshot = (result as L10nFamilySnapshotReady).snapshot;
+      expect(
+        snapshot.entries.keys,
+        containsAll(<String>[
+          'packages/local_dependency/pubspec.yaml',
+          'packages/local_dependency/analysis_options.yaml',
+          'packages/local_dependency/lib/local_dependency.dart',
+          'packages/local_dependency/lib/src/value.dart',
+        ]),
+      );
+      expect(
+        snapshot.verificationClosure.projectOwnedDartPaths,
+        containsAll(<String>[
+          'packages/local_dependency/lib/local_dependency.dart',
+          'packages/local_dependency/lib/src/value.dart',
+        ]),
+      );
+    });
+
+    test(
+      'package projector still rejects ancestor path dependencies',
+      () async {
+        final fixture = await _Fixture.create();
+        addTearDown(fixture.dispose);
+        File(
+          p.join(fixture.container.path, 'pubspec.yaml'),
+        ).writeAsStringSync('name: ancestor_dependency\n');
+        final source = fixture.packageConfig.readAsStringSync().replaceFirst(
+          '{"name":"external_dep"',
+          '{"name":"ancestor_dependency","rootUri":"../../",'
+              '"packageUri":"lib/","languageVersion":"3.9"},\n  '
+              '{"name":"external_dep"',
+        );
+
+        final result = const L10nPackageConfigProjector().project(
+          sourceBytes: utf8.encode(source),
+          canonicalProjectRoot: fixture.projectRoot.resolveSymbolicLinksSync(),
+          selectedPackageName: fixture.project.packageName,
+          toolchain: fixture.toolchain,
+        );
+
+        expect(result, isA<L10nPackageConfigProjectionRejected>());
+        expect(
+          (result as L10nPackageConfigProjectionRejected).failure.detailCode,
+          'external-package-overlaps-project',
+        );
+      },
+    );
 
     test(
       'package projector rejects non-integer schema and noncanonical language',
@@ -1658,7 +1922,11 @@ final class _Fixture {
     (finding) => finding.node.id == selectedNodeId,
   );
 
-  static Future<_Fixture> create({Version? frameworkVersion}) async {
+  static Future<_Fixture> create({
+    Version? frameworkVersion,
+    String? unresolvedDevDependency,
+    bool sharedArbAndOutputDirectory = false,
+  }) async {
     final selectedFrameworkVersion = frameworkVersion ?? Version(3, 41, 5);
     final createdContainer = await Directory.systemTemp.createTemp(
       'l10n_family_preflight_',
@@ -1680,6 +1948,38 @@ final class _Fixture {
       Directory(p.absolute('test/fixtures/l10n_action_readiness/standard')),
       projectRoot,
     );
+    if (sharedArbAndOutputDirectory) {
+      final yaml = File(p.join(projectRoot.path, 'l10n.yaml'));
+      yaml.writeAsStringSync(
+        yaml.readAsStringSync().replaceFirst(
+          'output-dir: lib/generated/l10n',
+          'output-dir: lib/l10n',
+        ),
+      );
+      final generatedDirectory = Directory(
+        p.join(projectRoot.path, 'lib/generated/l10n'),
+      );
+      for (final file in generatedDirectory.listSync().whereType<File>()) {
+        file.renameSync(
+          p.join(projectRoot.path, 'lib/l10n', p.basename(file.path)),
+        );
+      }
+      final main = File(p.join(projectRoot.path, 'lib/main.dart'));
+      main.writeAsStringSync(
+        main.readAsStringSync().replaceFirst(
+          "'generated/l10n/app.bundle.dart'",
+          "'l10n/app.bundle.dart'",
+        ),
+      );
+    }
+    if (unresolvedDevDependency != null) {
+      final pubspec = File(p.join(projectRoot.path, 'pubspec.yaml'));
+      pubspec.writeAsStringSync(
+        '${pubspec.readAsStringSync()}\n'
+        'dev_dependencies:\n'
+        '  $unresolvedDevDependency: ^0.7.0\n',
+      );
+    }
     File(p.join(externalRoot.path, 'pubspec.yaml')).writeAsStringSync('''
 name: external_dep
 environment:

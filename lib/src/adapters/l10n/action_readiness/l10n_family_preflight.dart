@@ -126,7 +126,10 @@ final class L10nAnalyzerContextAuthorityProjector {
   const L10nAnalyzerContextAuthorityProjector();
 
   /// Discovers context/package/options authorities without analyzing code.
-  L10nAnalyzerContextAuthorityProjectionResult project(ProjectContext project) {
+  L10nAnalyzerContextAuthorityProjectionResult project(
+    ProjectContext project, {
+    Set<String> nestedAuthorityPaths = const {},
+  }) {
     try {
       final canonicalRoot = _canonicalDirectory(project.root.path);
       if (p.normalize(p.absolute(project.root.path)) != canonicalRoot) {
@@ -136,7 +139,11 @@ final class L10nAnalyzerContextAuthorityProjector {
           'project-root-not-canonical',
         );
       }
-      final probe = _probeAnalyzerContextAuthorities(project, canonicalRoot);
+      final probe = _probeAnalyzerContextAuthorities(
+        project,
+        canonicalRoot,
+        nestedAuthorityPaths: nestedAuthorityPaths,
+      );
       return L10nAnalyzerContextAuthorityProjectionReady(
         L10nAnalyzerContextAuthorityProjection(probe.identity),
       );
@@ -162,13 +169,19 @@ final class L10nPackageConfigProjection {
     required this.identity,
     required this.authorityIdentity,
     required Map<String, String> canonicalRootsByPackage,
+    required Map<String, String> projectOwnedRootsByPackage,
     required List<_ExternalPackageAuthority> externalAuthorities,
+    required List<_ProjectOwnedPackageAuthority> projectOwnedAuthorities,
   }) : sourceBytes = ImmutableBytes.copyOf(sourceBytes.copy()),
        stageBytes = ImmutableBytes.copyOf(stageBytes.copy()),
        canonicalRootsByPackage = Map<String, String>.unmodifiable(
          SplayTreeMap<String, String>.of(canonicalRootsByPackage),
        ),
-       _externalAuthorities = List.unmodifiable(externalAuthorities);
+       projectOwnedRootsByPackage = Map<String, String>.unmodifiable(
+         SplayTreeMap<String, String>.of(projectOwnedRootsByPackage),
+       ),
+       _externalAuthorities = List.unmodifiable(externalAuthorities),
+       _projectOwnedAuthorities = List.unmodifiable(projectOwnedAuthorities);
 
   /// Exact live package-config bytes.
   final ImmutableBytes sourceBytes;
@@ -186,7 +199,11 @@ final class L10nPackageConfigProjection {
   /// Canonical physical package roots by logical package name.
   final Map<String, String> canonicalRootsByPackage;
 
+  /// Stage-relative roots for strict descendants owned by this project.
+  final Map<String, String> projectOwnedRootsByPackage;
+
   final List<_ExternalPackageAuthority> _externalAuthorities;
+  final List<_ProjectOwnedPackageAuthority> _projectOwnedAuthorities;
 }
 
 /// Typed outcome of strict package-config validation and projection.
@@ -384,7 +401,11 @@ final class L10nFamilyPreflight implements L10nFamilySnapshotter {
       );
     }
     _requireLivePubspecAgreement(pubspec.bytes!, analysis.project);
-    capture.add('pubspec.lock', L10nSnapshotRole.lockfile, required: true);
+    final lockfile = capture.add(
+      'pubspec.lock',
+      L10nSnapshotRole.lockfile,
+      required: true,
+    );
     final liveYaml = capture.add(
       'l10n.yaml',
       L10nSnapshotRole.l10nConfig,
@@ -535,14 +556,29 @@ final class L10nFamilyPreflight implements L10nFamilySnapshotter {
       '.dart_tool/package_config.json',
       packageProjection.stageBytes.copy(),
     );
-    _prevalidateAnalysisOptionsPlacement(canonicalRoot);
-    final capturedOptions = _captureAnalysisOptions(capture, packageProjection);
+    final nestedOptionsPaths = <String>{
+      for (final relativeRoot
+          in packageProjection.projectOwnedRootsByPackage.values)
+        '$relativeRoot/analysis_options.yaml',
+    };
+    _prevalidateAnalysisOptionsPlacement(
+      canonicalRoot,
+      nestedAuthorityPaths: nestedOptionsPaths,
+    );
+    final capturedOptions = _captureAnalysisOptions(
+      capture,
+      packageProjection,
+      analysis.project.pubspec,
+      lockfile.bytes!,
+    );
     final contextProbeBefore = _probeAnalyzerContextAuthorities(
       analysis.project,
       canonicalRoot,
+      nestedAuthorityPaths: nestedOptionsPaths,
     );
     final optionsAuthority = L10nAnalysisOptionsProjection(
       projectOwnedPaths: capturedOptions.projectOwnedPaths,
+      nestedAuthorityPaths: capturedOptions.nestedAuthorityPaths,
       externalAuthorities: capturedOptions.externalAuthorities,
       contextAuthorityIdentity: contextProbeBefore.identity,
     );
@@ -560,18 +596,31 @@ final class L10nFamilyPreflight implements L10nFamilySnapshotter {
       'externalAnalysisOptions': optionsAuthority.identity,
     });
 
-    final closureBefore = _captureAnalyzerClosure(
+    final analyzerClosureBefore = _captureAnalyzerClosure(
       analysis.project,
       canonicalRoot,
       capture,
       outputFamily,
       workspaceBefore,
     );
+    final projectOwnedPackagePaths = <String>{
+      for (final authority in packageProjection._projectOwnedAuthorities)
+        ...authority.relativeFilePaths,
+    };
+    for (final path in projectOwnedPackagePaths.toList()..sort()) {
+      if (capture.entries.containsKey(path)) continue;
+      capture.add(path, L10nSnapshotRole.verificationInput, required: true);
+    }
+    final closureBefore = <String>{
+      ...analyzerClosureBefore,
+      ...projectOwnedPackagePaths.where((path) => path.endsWith('.dart')),
+    }.toList()..sort();
     final unrelatedSiblings = _captureOutputSiblings(
       capture: capture,
       outputDirectory: config.outputDirectory,
       outputFamily: outputFamily,
       baseOutputPath: config.baseOutputPath,
+      arbPaths: arbPaths,
     );
 
     final l10nFingerprint = _l10nAnalysisFingerprint(analysis, inventory);
@@ -592,6 +641,7 @@ final class L10nFamilyPreflight implements L10nFamilySnapshotter {
     final contextProbeAfterRerun = _probeAnalyzerContextAuthoritiesForDrift(
       analysis.project,
       canonicalRoot,
+      nestedAuthorityPaths: nestedOptionsPaths,
     );
     if (contextProbeAfterRerun.identity != contextProbeBefore.identity) {
       throw const _Problem(
@@ -600,13 +650,16 @@ final class L10nFamilyPreflight implements L10nFamilySnapshotter {
         'analyzer-context-authority-drift',
       );
     }
-    final closureAfterRerun = _rediscoverMembershipForDrift(
-      () => _enumerateAnalyzerClosure(
-        analysis.project,
-        canonicalRoot,
-        contextProbeAfterRerun.workspace,
+    final closureAfterRerun = <String>{
+      ..._rediscoverMembershipForDrift(
+        () => _enumerateAnalyzerClosure(
+          analysis.project,
+          canonicalRoot,
+          contextProbeAfterRerun.workspace,
+        ),
       ),
-    );
+      ...projectOwnedPackagePaths.where((path) => path.endsWith('.dart')),
+    }.toList()..sort();
     if (!_sameStrings(closureBefore, closureAfterRerun)) {
       throw const _Problem(
         L10nEvidenceRejectionCode.sourceDrift,
@@ -619,6 +672,7 @@ final class L10nFamilyPreflight implements L10nFamilySnapshotter {
     final contextProbeFinal = _probeAnalyzerContextAuthoritiesForDrift(
       analysis.project,
       canonicalRoot,
+      nestedAuthorityPaths: nestedOptionsPaths,
     );
     if (contextProbeFinal.identity != contextProbeBefore.identity) {
       throw const _Problem(
@@ -667,23 +721,37 @@ final class L10nFamilyPreflight implements L10nFamilySnapshotter {
     final finalArbPaths = _rediscoverMembershipForDrift(
       () => _enumerateArbPaths(canonicalRoot, config.arbDirectory),
     );
-    final finalClosure = _rediscoverMembershipForDrift(
+    final finalAnalyzerClosure = _rediscoverMembershipForDrift(
       () => _enumerateAnalyzerClosure(
         analysis.project,
         canonicalRoot,
         contextProbeFinal.workspace,
       ),
     );
+    final finalProjectOwnedPackagePaths = <String>{
+      for (final authority
+          in secondPackageProjectionResult.projection._projectOwnedAuthorities)
+        ...authority.relativeFilePaths,
+    };
+    final finalClosure = <String>{
+      ...finalAnalyzerClosure,
+      ...finalProjectOwnedPackagePaths.where((path) => path.endsWith('.dart')),
+    }.toList()..sort();
     final finalOutputSiblings = _rediscoverMembershipForDrift(
       () => _enumerateOutputSiblings(
         canonicalRoot: canonicalRoot,
         outputDirectory: config.outputDirectory,
         outputFamily: outputFamily,
         baseOutputPath: config.baseOutputPath,
+        arbPaths: finalArbPaths,
       ),
     );
     if (!_sameStrings(arbPaths, finalArbPaths) ||
         !_sameStrings(closureBefore, finalClosure) ||
+        !_sameStrings(
+          projectOwnedPackagePaths.toList()..sort(),
+          finalProjectOwnedPackagePaths.toList()..sort(),
+        ) ||
         !_sameStrings(unrelatedSiblings, finalOutputSiblings)) {
       throw const _Problem(
         L10nEvidenceRejectionCode.sourceDrift,
@@ -958,6 +1026,7 @@ void _requireConfigAgreement({
         '3.38.7' => L10nGenerationSchemaVersion.flutter3387,
         '3.41.5' => L10nGenerationSchemaVersion.flutter3415,
         '3.44.1' => L10nGenerationSchemaVersion.flutter3441,
+        '3.44.9' => L10nGenerationSchemaVersion.flutter3449,
         _ => null,
       };
   if (expectedSchema == null || strict.schemaVersion != expectedSchema) {
@@ -1139,14 +1208,24 @@ void _validateFamilyGraphSafety(
     }
     for (final blocker in analysis.graph.blockersFor(id)) {
       if (_isActiveBlocker(analysis.graph, targets, blocker)) {
-        throw const _Problem(
+        throw _Problem(
           L10nEvidenceRejectionCode.scanBlockerPresent,
           _preflightStage,
           'active-family-blocker',
+          _blockerRelativePath(blocker),
         );
       }
     }
   }
+}
+
+String? _blockerRelativePath(Blocker blocker) {
+  final location = blocker.location;
+  if (location == null) return null;
+  final path = _normalizeRelative(
+    location.replaceFirst(RegExp(r':\d+:\d+(?:-\d+:\d+)?$'), ''),
+  );
+  return _isSafeRelative(path) ? path : null;
 }
 
 bool _isActiveBlocker(
@@ -1200,6 +1279,7 @@ List<String> _outputFamily(
     L10nGenerationSchemaVersion.flutter3387 => '${stem}_$language$suffix',
     L10nGenerationSchemaVersion.flutter3415 => '${stem}_$language$suffix',
     L10nGenerationSchemaVersion.flutter3441 => '${stem}_$language$suffix',
+    L10nGenerationSchemaVersion.flutter3449 => '${stem}_$language$suffix',
   };
   return [
     config.baseOutputPath,
@@ -1350,12 +1430,14 @@ List<String> _captureOutputSiblings({
   required String outputDirectory,
   required List<String> outputFamily,
   required String baseOutputPath,
+  required List<String> arbPaths,
 }) {
   final siblings = _enumerateOutputSiblings(
     canonicalRoot: capture.canonicalRoot,
     outputDirectory: outputDirectory,
     outputFamily: outputFamily,
     baseOutputPath: baseOutputPath,
+    arbPaths: arbPaths,
   );
   for (final path in siblings) {
     final existing = capture.entries[path];
@@ -1380,6 +1462,7 @@ List<String> _enumerateOutputSiblings({
   required String outputDirectory,
   required List<String> outputFamily,
   required String baseOutputPath,
+  required List<String> arbPaths,
 }) {
   final directory = Directory(
     p.join(canonicalRoot, p.fromUri(outputDirectory)),
@@ -1397,6 +1480,7 @@ List<String> _enumerateOutputSiblings({
   final expectedByFold = <String, String>{
     for (final path in outputFamily) _asciiFold(path): path,
   };
+  final arbPathSet = arbPaths.toSet();
   final base = p.posix.basename(baseOutputPath);
   final dot = base.indexOf('.');
   final stem = _asciiFold(base.substring(0, dot));
@@ -1429,6 +1513,7 @@ List<String> _enumerateOutputSiblings({
       }
       continue;
     }
+    if (arbPathSet.contains(relative)) continue;
     final name = _asciiFold(p.posix.basename(relative));
     if (name.startsWith('${stem}_') && name.endsWith(suffix)) {
       throw _Problem(
@@ -1444,7 +1529,10 @@ List<String> _enumerateOutputSiblings({
   return List.unmodifiable(siblings);
 }
 
-void _prevalidateAnalysisOptionsPlacement(String canonicalRoot) {
+void _prevalidateAnalysisOptionsPlacement(
+  String canonicalRoot, {
+  Set<String> nestedAuthorityPaths = const {},
+}) {
   final rootOptions = p.join(canonicalRoot, 'analysis_options.yaml');
   final rootType = FileSystemEntity.typeSync(rootOptions, followLinks: false);
   if (rootType != FileSystemEntityType.notFound &&
@@ -1477,7 +1565,10 @@ void _prevalidateAnalysisOptionsPlacement(String canonicalRoot) {
     canonicalRoot,
   ).listSync(recursive: true, followLinks: false)) {
     if (p.basename(entity.path) == 'analysis_options.yaml' &&
-        p.normalize(entity.path) != p.normalize(rootOptions)) {
+        p.normalize(entity.path) != p.normalize(rootOptions) &&
+        !nestedAuthorityPaths.contains(
+          _relative(canonicalRoot, p.normalize(entity.path)),
+        )) {
       throw const _Problem(
         L10nEvidenceRejectionCode.invalidInputPath,
         _captureStage,
@@ -1552,9 +1643,13 @@ final class _AnalyzerContextAuthorityProbe {
 
 _AnalyzerContextAuthorityProbe _probeAnalyzerContextAuthorities(
   ProjectContext project,
-  String canonicalRoot,
-) {
-  _prevalidateAnalysisOptionsPlacement(canonicalRoot);
+  String canonicalRoot, {
+  Set<String> nestedAuthorityPaths = const {},
+}) {
+  _prevalidateAnalysisOptionsPlacement(
+    canonicalRoot,
+    nestedAuthorityPaths: nestedAuthorityPaths,
+  );
   final workspace = DartAnalysisWorkspace(project);
   final hasRootOptions =
       FileSystemEntity.typeSync(
@@ -1569,6 +1664,7 @@ _AnalyzerContextAuthorityProbe _probeAnalyzerContextAuthorities(
         'root': _relative(canonicalRoot, context.contextRoot.root.path),
         'packages': '.dart_tool/package_config.json',
         'options': hasRootOptions ? 'analysis_options.yaml' : null,
+        'nestedOptions': nestedAuthorityPaths.toList()..sort(),
       },
   ]..sort(_compareCanonicalMaps);
   return _AnalyzerContextAuthorityProbe(
@@ -1579,10 +1675,15 @@ _AnalyzerContextAuthorityProbe _probeAnalyzerContextAuthorities(
 
 _AnalyzerContextAuthorityProbe _probeAnalyzerContextAuthoritiesForDrift(
   ProjectContext project,
-  String canonicalRoot,
-) {
+  String canonicalRoot, {
+  Set<String> nestedAuthorityPaths = const {},
+}) {
   try {
-    return _probeAnalyzerContextAuthorities(project, canonicalRoot);
+    return _probeAnalyzerContextAuthorities(
+      project,
+      canonicalRoot,
+      nestedAuthorityPaths: nestedAuthorityPaths,
+    );
   } on Object {
     throw const _Problem(
       L10nEvidenceRejectionCode.sourceDrift,
@@ -1595,16 +1696,20 @@ _AnalyzerContextAuthorityProbe _probeAnalyzerContextAuthoritiesForDrift(
 final class _CapturedAnalysisOptions {
   const _CapturedAnalysisOptions({
     required this.projectOwnedPaths,
+    required this.nestedAuthorityPaths,
     required this.externalAuthorities,
   });
 
   final List<String> projectOwnedPaths;
+  final Set<String> nestedAuthorityPaths;
   final List<L10nExternalAnalysisOptionsAuthority> externalAuthorities;
 }
 
 _CapturedAnalysisOptions _captureAnalysisOptions(
   _CaptureSet capture,
   L10nPackageConfigProjection packages,
+  Map<dynamic, dynamic> projectPubspec,
+  List<int> lockfileBytes,
 ) {
   const rootPath = 'analysis_options.yaml';
   final rootAbsolute = p.join(capture.canonicalRoot, rootPath);
@@ -1714,7 +1819,13 @@ _CapturedAnalysisOptions _captureAnalysisOptions(
     final analyzer = map['analyzer'];
     if (analyzer is Map &&
         analyzer.containsKey('plugins') &&
-        analyzer['plugins'] != null) {
+        analyzer['plugins'] != null &&
+        !_legacyAnalyzerPluginsAreInert(
+          analyzer['plugins'],
+          packages: packages,
+          projectPubspec: projectPubspec,
+          lockfileBytes: lockfileBytes,
+        )) {
       throw _Problem(
         L10nEvidenceRejectionCode.invalidInputPath,
         _captureStage,
@@ -1793,14 +1904,84 @@ _CapturedAnalysisOptions _captureAnalysisOptions(
   if (rootType == FileSystemEntityType.file) {
     visit(absolute: rootAbsolute, authorityRoot: capture.canonicalRoot);
   }
+  final nestedAuthorityPaths = <String>{};
+  final packageRoots = packages.projectOwnedRootsByPackage.entries.toList()
+    ..sort((left, right) => left.key.compareTo(right.key));
+  for (final package in packageRoots) {
+    final relative = '${package.value}/analysis_options.yaml';
+    final absolute = p.join(capture.canonicalRoot, p.fromUri(relative));
+    final type = FileSystemEntity.typeSync(absolute, followLinks: false);
+    nestedAuthorityPaths.add(relative);
+    projectPaths.add(relative);
+    if (type == FileSystemEntityType.notFound) {
+      capture.add(
+        relative,
+        L10nSnapshotRole.verificationInput,
+        required: false,
+      );
+    } else if (type == FileSystemEntityType.file) {
+      visit(
+        absolute: absolute,
+        authorityRoot: packages.canonicalRootsByPackage[package.key]!,
+      );
+    } else {
+      throw _Problem(
+        L10nEvidenceRejectionCode.invalidInputPath,
+        _captureStage,
+        'analysis-options-include-invalid',
+        relative,
+      );
+    }
+  }
   final sortedProject = projectPaths.toList()..sort();
   external.sort(
     (left, right) => left.canonicalPath.compareTo(right.canonicalPath),
   );
   return _CapturedAnalysisOptions(
     projectOwnedPaths: sortedProject,
+    nestedAuthorityPaths: Set.unmodifiable(nestedAuthorityPaths),
     externalAuthorities: external,
   );
+}
+
+bool _legacyAnalyzerPluginsAreInert(
+  Object? rawPlugins, {
+  required L10nPackageConfigProjection packages,
+  required Map<dynamic, dynamic> projectPubspec,
+  required List<int> lockfileBytes,
+}) {
+  if (rawPlugins is! List) return false;
+  final pluginNames = <String>{};
+  for (final rawPlugin in rawPlugins) {
+    if (rawPlugin is! String ||
+        !_validPackageName(rawPlugin) ||
+        !pluginNames.add(rawPlugin)) {
+      return false;
+    }
+  }
+  if (pluginNames.isEmpty) return true;
+  if (pluginNames.any(packages.canonicalRootsByPackage.containsKey)) {
+    return false;
+  }
+  for (final sectionName in const {
+    'dependencies',
+    'dev_dependencies',
+    'dependency_overrides',
+  }) {
+    final section = projectPubspec[sectionName];
+    if (section is Map && pluginNames.any(section.containsKey)) return false;
+  }
+  try {
+    final lockfile = loadYaml(utf8.decode(lockfileBytes));
+    if (lockfile is! Map || lockfile['packages'] is! Map) return false;
+    final lockedPackages = lockfile['packages']! as Map;
+    if (lockedPackages.keys.any((key) => key is! String)) return false;
+    return pluginNames.every(
+      (pluginName) => !lockedPackages.containsKey(pluginName),
+    );
+  } on Object {
+    return false;
+  }
 }
 
 bool _isSafeAnalysisOptionsInclude(String value) {
@@ -2209,6 +2390,8 @@ L10nPackageConfigProjection _projectPackageConfig({
   final roots = <String>{};
   final replacements = <_ByteReplacement>[];
   final externalAuthorities = <_ExternalPackageAuthority>[];
+  final projectOwnedAuthorities = <_ProjectOwnedPackageAuthority>[];
+  final projectOwnedRootsByPackage = <String, String>{};
   var selectedCount = 0;
   for (var index = 0; index < spans.length; index++) {
     final span = spans[index];
@@ -2320,13 +2503,35 @@ L10nPackageConfigProjection _projectPackageConfig({
           '.dart_tool/package_config.json',
         );
       }
+    } else if (_within(canonicalProjectRoot, canonicalRoot)) {
+      if (requestedRoot != canonicalRoot) {
+        throw const _Problem(
+          L10nEvidenceRejectionCode.packageResolutionDrift,
+          _packageStage,
+          'project-package-root-invalid',
+          '.dart_tool/package_config.json',
+        );
+      }
+      final relativeRoot = _relative(canonicalProjectRoot, canonicalRoot);
+      if (!_isSafeRelative(relativeRoot)) {
+        throw const _Problem(
+          L10nEvidenceRejectionCode.packageResolutionDrift,
+          _packageStage,
+          'project-package-root-invalid',
+          '.dart_tool/package_config.json',
+        );
+      }
+      projectOwnedRootsByPackage[name] = relativeRoot;
+      projectOwnedAuthorities.add(
+        _captureProjectOwnedPackage(
+          name,
+          canonicalProjectRoot,
+          canonicalRoot,
+          relativeRoot,
+        ),
+      );
     } else {
-      // Stage 1 deliberately excludes project-owned/ancestor path
-      // dependencies. Supporting them requires a separate ownership and
-      // stage-relative projection authority; canonicalizing them as external
-      // packages would silently broaden the selected project boundary.
-      if (_within(canonicalProjectRoot, canonicalRoot) ||
-          _within(canonicalRoot, canonicalProjectRoot)) {
+      if (_within(canonicalRoot, canonicalProjectRoot)) {
         throw const _Problem(
           L10nEvidenceRejectionCode.packageResolutionDrift,
           _packageStage,
@@ -2337,15 +2542,17 @@ L10nPackageConfigProjection _projectPackageConfig({
       externalAuthorities.add(_captureExternalPackage(name, canonicalRoot));
     }
     final rootToken = recordDocument.member('rootUri')!.valueSpan;
+    final projectOwnedRelative = projectOwnedRootsByPackage[name];
+    final projectedRoot = selected
+        ? '../'
+        : projectOwnedRelative != null
+        ? '../$projectOwnedRelative/'
+        : Directory(canonicalRoot).uri.toString();
     replacements.add(
       _ByteReplacement(
         start: span.start + rootToken.start,
         end: span.start + rootToken.endExclusive,
-        bytes: utf8.encode(
-          jsonEncode(
-            selected ? '../' : Directory(canonicalRoot).uri.toString(),
-          ),
-        ),
+        bytes: utf8.encode(jsonEncode(projectedRoot)),
       ),
     );
     records.add(
@@ -2379,15 +2586,22 @@ L10nPackageConfigProjection _projectPackageConfig({
     canonicalProjectRoot,
     selectedPackageName,
     records,
+    projectOwnedRootsByPackage,
   );
   records.sort((left, right) => left.name.compareTo(right.name));
   externalAuthorities.sort((left, right) => left.name.compareTo(right.name));
+  projectOwnedAuthorities.sort(
+    (left, right) => left.name.compareTo(right.name),
+  );
   final identity = _hashCanonical({
     'sourceSha256': source.sha256Hex,
     'stageSha256': sha256.convert(stageBytes).toString(),
     'records': [for (final record in records) record.identity],
     'external': [
       for (final authority in externalAuthorities) authority.identity,
+    ],
+    'projectOwned': [
+      for (final authority in projectOwnedAuthorities) authority.identity,
     ],
   });
   final authorityIdentity = _hashCanonical({
@@ -2398,10 +2612,15 @@ L10nPackageConfigProjection _projectPackageConfig({
           ...record.identity,
           if (record.name == selectedPackageName)
             'root': 'selected-project-root',
+          if (projectOwnedRootsByPackage[record.name] case final relative?)
+            'root': 'project-owned:$relative',
         },
     ],
     'external': [
       for (final authority in externalAuthorities) authority.identity,
+    ],
+    'projectOwned': [
+      for (final authority in projectOwnedAuthorities) authority.identity,
     ],
   });
   return L10nPackageConfigProjection._(
@@ -2412,7 +2631,9 @@ L10nPackageConfigProjection _projectPackageConfig({
     canonicalRootsByPackage: {
       for (final record in records) record.name: record.canonicalRoot,
     },
+    projectOwnedRootsByPackage: projectOwnedRootsByPackage,
     externalAuthorities: externalAuthorities,
+    projectOwnedAuthorities: projectOwnedAuthorities,
   );
 }
 
@@ -2553,6 +2774,7 @@ void _validateProjectedPackageBytes(
   String canonicalProjectRoot,
   String selectedPackageName,
   List<_PackageRecord> records,
+  Map<String, String> projectOwnedRootsByPackage,
 ) {
   final decoded = jsonDecode(utf8.decode(bytes));
   if (decoded is! Map<String, Object?> || decoded['packages'] is! List) {
@@ -2584,6 +2806,15 @@ void _validateProjectedPackageBytes(
           '.dart_tool/package_config.json',
         );
       }
+    } else if (projectOwnedRootsByPackage[name] case final relative?) {
+      if (root != '../$relative/') {
+        throw const _Problem(
+          L10nEvidenceRejectionCode.packageResolutionDrift,
+          _packageStage,
+          'projected-project-root-invalid',
+          '.dart_tool/package_config.json',
+        );
+      }
     } else if (root != Directory(byName[name]!.canonicalRoot).uri.toString()) {
       throw const _Problem(
         L10nEvidenceRejectionCode.packageResolutionDrift,
@@ -2610,6 +2841,172 @@ final class _PackageRecord {
     'languageVersion': languageVersion,
     'packageUri': 'lib/',
   };
+}
+
+final class _ProjectOwnedPackageAuthority {
+  const _ProjectOwnedPackageAuthority({
+    required this.name,
+    required this.relativeRoot,
+    required this.relativeFilePaths,
+    required this.identity,
+  });
+
+  final String name;
+  final String relativeRoot;
+  final List<String> relativeFilePaths;
+  final Map<String, Object?> identity;
+}
+
+_ProjectOwnedPackageAuthority _captureProjectOwnedPackage(
+  String name,
+  String canonicalProjectRoot,
+  String packageRoot,
+  String relativeRoot,
+) {
+  if (!_within(canonicalProjectRoot, packageRoot) ||
+      packageRoot == canonicalProjectRoot ||
+      _canonicalDirectory(packageRoot) != packageRoot) {
+    throw const _Problem(
+      L10nEvidenceRejectionCode.packageResolutionDrift,
+      _packageStage,
+      'project-package-root-invalid',
+      '.dart_tool/package_config.json',
+    );
+  }
+
+  final files = <Map<String, Object?>>[];
+  final relativeFilePaths = <String>[];
+  final folded = <String, String>{};
+
+  void captureFile(String absolute, String packageRelative) {
+    final projectRelative = _relative(canonicalProjectRoot, absolute);
+    if (!_isSafeRelative(projectRelative) ||
+        !_isSafeRelative(packageRelative) ||
+        !_within(packageRoot, absolute) ||
+        FileSystemEntity.typeSync(absolute, followLinks: false) !=
+            FileSystemEntityType.file ||
+        p.normalize(File(absolute).resolveSymbolicLinksSync()) != absolute) {
+      throw const _Problem(
+        L10nEvidenceRejectionCode.packageResolutionDrift,
+        _packageStage,
+        'project-package-file-invalid',
+        '.dart_tool/package_config.json',
+      );
+    }
+    final fold = _asciiFold(packageRelative);
+    final prior = folded.putIfAbsent(fold, () => packageRelative);
+    if (prior != packageRelative) {
+      throw const _Problem(
+        L10nEvidenceRejectionCode.packageResolutionDrift,
+        _packageStage,
+        'project-package-casefold-collision',
+        '.dart_tool/package_config.json',
+      );
+    }
+    final file = File(absolute);
+    final before = file.statSync();
+    final bytes = file.readAsBytesSync();
+    final after = file.statSync();
+    if (!_sameFileStat(before, after)) {
+      throw const _Problem(
+        L10nEvidenceRejectionCode.packageResolutionDrift,
+        _packageStage,
+        'project-package-file-drift',
+        '.dart_tool/package_config.json',
+      );
+    }
+    relativeFilePaths.add(projectRelative);
+    files.add({
+      'path': packageRelative,
+      'sha256': sha256.convert(bytes).toString(),
+      'mode': Platform.isWindows ? null : before.mode & 0xfff,
+    });
+  }
+
+  final pubspecPath = p.normalize(p.join(packageRoot, 'pubspec.yaml'));
+  captureFile(pubspecPath, 'pubspec.yaml');
+  final pubspec = loadYaml(File(pubspecPath).readAsStringSync());
+  if (pubspec is! Map || pubspec['name'] != name) {
+    throw const _Problem(
+      L10nEvidenceRejectionCode.packageResolutionDrift,
+      _packageStage,
+      'project-package-name-mismatch',
+      '.dart_tool/package_config.json',
+    );
+  }
+
+  final optionsPath = p.normalize(p.join(packageRoot, 'analysis_options.yaml'));
+  final optionsType = FileSystemEntity.typeSync(
+    optionsPath,
+    followLinks: false,
+  );
+  if (optionsType == FileSystemEntityType.file) {
+    captureFile(optionsPath, 'analysis_options.yaml');
+  } else if (optionsType == FileSystemEntityType.notFound) {
+    files.add({'path': 'analysis_options.yaml', 'present': false});
+  } else {
+    throw const _Problem(
+      L10nEvidenceRejectionCode.packageResolutionDrift,
+      _packageStage,
+      'project-package-options-invalid',
+      '.dart_tool/package_config.json',
+    );
+  }
+
+  final libRoot = p.normalize(p.join(packageRoot, 'lib'));
+  final libType = FileSystemEntity.typeSync(libRoot, followLinks: false);
+  if (libType == FileSystemEntityType.directory) {
+    final entities = Directory(libRoot).listSync(
+      recursive: true,
+      followLinks: false,
+    )..sort((left, right) => left.path.compareTo(right.path));
+    for (final entity in entities) {
+      final absolute = p.normalize(p.absolute(entity.path));
+      final packageRelative = _relative(packageRoot, absolute);
+      if (!_isSafeRelative(packageRelative) || !_within(libRoot, absolute)) {
+        throw const _Problem(
+          L10nEvidenceRejectionCode.packageResolutionDrift,
+          _packageStage,
+          'project-package-lib-invalid',
+          '.dart_tool/package_config.json',
+        );
+      }
+      final type = FileSystemEntity.typeSync(absolute, followLinks: false);
+      if (type == FileSystemEntityType.file) {
+        captureFile(absolute, packageRelative);
+      } else if (type != FileSystemEntityType.directory ||
+          p.normalize(Directory(absolute).resolveSymbolicLinksSync()) !=
+              absolute) {
+        throw const _Problem(
+          L10nEvidenceRejectionCode.packageResolutionDrift,
+          _packageStage,
+          'project-package-lib-invalid',
+          '.dart_tool/package_config.json',
+        );
+      }
+    }
+  } else if (libType != FileSystemEntityType.notFound) {
+    throw const _Problem(
+      L10nEvidenceRejectionCode.packageResolutionDrift,
+      _packageStage,
+      'project-package-lib-invalid',
+      '.dart_tool/package_config.json',
+    );
+  }
+
+  return _ProjectOwnedPackageAuthority(
+    name: name,
+    relativeRoot: relativeRoot,
+    relativeFilePaths: List.unmodifiable(relativeFilePaths..sort()),
+    identity: {
+      'name': name,
+      'root': relativeRoot,
+      'files': files
+        ..sort(
+          (left, right) => '${left['path']}'.compareTo('${right['path']}'),
+        ),
+    },
+  );
 }
 
 final class _ExternalPackageAuthority {
@@ -3052,11 +3449,11 @@ String _l10nAnalysisFingerprintForIds(
     ],
     'auxiliaryProven': [
       for (final id in frozenFamilyIds)
-        if (analysis.graph.auxiliaryProven().contains(id)) id,
+        if (auxiliary.proven.contains(id)) id,
     ]..sort(),
     'auxiliaryRetained': [
       for (final id in frozenFamilyIds)
-        if (analysis.graph.auxiliaryRetained().contains(id)) id,
+        if (auxiliary.retained.contains(id)) id,
     ]..sort(),
     'auxiliaryTargets': auxiliaryTargets,
     'auxiliaryIncompleteExecutionTargetIds': [

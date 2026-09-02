@@ -179,6 +179,20 @@ void main() {
       },
     );
 
+    test(
+      'governs ARB inputs beside generated outputs without sibling aliasing',
+      () {
+        final scenario = _sharedArbAndOutputDirectoryScenario();
+
+        final ready = _expectReady(_reconcile(scenario));
+
+        expect(ready.changeSet.arbReplacements.keys, {'lib/l10n/app_en.arb'});
+        expect(ready.changeSet.generatedReplacements.keys, {
+          'lib/l10n/app.dart',
+        });
+      },
+    );
+
     test('returns deeply immutable sorted replacements and byte values', () {
       final scenario = _defaultScenario(
         siblings: {
@@ -1131,6 +1145,26 @@ _Scenario _customScenario() => _buildScenario(
       'output-dir: lib/i18n/generated\n'
       'output-localization-file: strings.dart\n'
       'output-class: Strings\n'
+      'synthetic-package: false\n',
+);
+
+_Scenario _sharedArbAndOutputDirectoryScenario() => _buildScenario(
+  templatePath: 'lib/l10n/app_en.arb',
+  arbSources: {
+    'lib/l10n/app_en.arb': utf8.encode('{"alive":"Alive","dead":"Dead"}\n'),
+  },
+  baseOutputPath: 'lib/l10n/app.dart',
+  expectedOutputPaths: const ['lib/l10n/app.dart'],
+  liveOutputs: {'lib/l10n/app.dart': _fixtureEvidence('default/live_app.dart')},
+  candidateOutputs: {
+    'lib/l10n/app.dart': _fixtureEvidence('default/candidate_app.dart'),
+  },
+  l10nYaml:
+      'arb-dir: lib/l10n\n'
+      'template-arb-file: app_en.arb\n'
+      'output-dir: lib/l10n\n'
+      'output-localization-file: app.dart\n'
+      'output-class: AppLocalizations\n'
       'synthetic-package: false\n',
 );
 

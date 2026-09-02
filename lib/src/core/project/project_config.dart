@@ -132,6 +132,7 @@ class ProjectConfig {
     _rejectUnknownKeys(targetSection, const {
       'complete',
       'targets',
+      'excluded_entrypoints',
     }, 'target_matrix');
     final completeValue = targetSection['complete'];
     if (completeValue is! bool) {
@@ -178,6 +179,14 @@ class ProjectConfig {
       }
       targets.add(target);
     }
+    final excludedEntrypoints = _parseExcludedApplicationEntrypoints(
+      targetSection['excluded_entrypoints'],
+      mode: mode,
+      complete: completeValue,
+      targets: targets,
+      projectRoot: projectRoot,
+      pathPolicy: effectivePathPolicy,
+    );
 
     final hasInadmissibleConditionalSources =
         _hasInadmissibleConditionalSources(
@@ -189,6 +198,12 @@ class ProjectConfig {
         );
     final effectiveComplete =
         completeValue && !hasInadmissibleConditionalSources;
+    if (excludedEntrypoints.isNotEmpty && !effectiveComplete) {
+      throw ProjectConfigException(
+        'target_matrix.excluded_entrypoints requires complete coverage after '
+        'conditional analysis.',
+      );
+    }
     final issues = <String>[
       if (!completeValue) 'the configuration declares a partial target matrix',
       if (hasInadmissibleConditionalSources)
@@ -203,6 +218,7 @@ class ProjectConfig {
             : TargetMatrixStatus.declaredPartial,
         source: file.path,
         issues: issues,
+        excludedEntrypoints: excludedEntrypoints,
       ),
       rootCoverage: rootCoverage,
       source: file.path,
@@ -544,6 +560,71 @@ class ProjectConfig {
       flavor: flavorValue as String?,
       dartDefines: defines,
     );
+  }
+
+  static List<ExcludedApplicationEntrypoint>
+  _parseExcludedApplicationEntrypoints(
+    Object? value, {
+    required AnalysisMode mode,
+    required bool complete,
+    required List<BuildTarget> targets,
+    required Directory projectRoot,
+    required ProjectPathPolicy pathPolicy,
+  }) {
+    if (value == null) return const [];
+    if (value is! List<Object?>) {
+      throw ProjectConfigException(
+        'target_matrix.excluded_entrypoints must be a list.',
+      );
+    }
+    if (value.isEmpty) return const [];
+    if (mode != AnalysisMode.application) {
+      throw ProjectConfigException(
+        'target_matrix.excluded_entrypoints is only valid in application mode.',
+      );
+    }
+    if (!complete) {
+      throw ProjectConfigException(
+        'target_matrix.excluded_entrypoints requires target_matrix.complete: true.',
+      );
+    }
+
+    final exclusions = <ExcludedApplicationEntrypoint>[];
+    final paths = <String>{};
+    final targetPaths = targets.map((target) => target.entrypoint).toSet();
+    for (var index = 0; index < value.length; index++) {
+      final field = 'target_matrix.excluded_entrypoints[$index]';
+      final mapping = _mapping(value[index], field);
+      _rejectUnknownKeys(mapping, const {'path', 'reason'}, field);
+      final path = _validateProjectFile(
+        projectRoot,
+        _requiredString(mapping['path'], '$field.path'),
+        '$field.path',
+        kind: ProjectSourceKind.applicationEntrypoint,
+        pathPolicy: pathPolicy,
+      );
+      final reason = mapping['reason'];
+      if (reason is! String || reason.isEmpty) {
+        throw ProjectConfigException(
+          '$field.reason must be a non-empty string.',
+        );
+      }
+      if (reason.trim().isEmpty) {
+        throw ProjectConfigException('$field.reason must not be blank.');
+      }
+      if (!paths.add(path)) {
+        throw ProjectConfigException(
+          'target_matrix.excluded_entrypoints contains duplicate paths: $path.',
+        );
+      }
+      if (targetPaths.contains(path)) {
+        throw ProjectConfigException(
+          'target_matrix.excluded_entrypoints overlaps a configured target: $path.',
+        );
+      }
+      exclusions.add(ExcludedApplicationEntrypoint(path: path, reason: reason));
+    }
+    return List<ExcludedApplicationEntrypoint>.unmodifiable(exclusions);
   }
 
   static String _validateProjectFile(

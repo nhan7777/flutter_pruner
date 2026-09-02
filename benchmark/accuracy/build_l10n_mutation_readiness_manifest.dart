@@ -31,6 +31,20 @@ const _negativeFixtures = {
   'cleanup-failure': ['cleanupFailed'],
 };
 
+const _smoothFullPolicyCorrections = <String>{
+  'barcode_barcode',
+  'category_picker_no_category_found_button',
+  'category_picker_no_category_found_message',
+  'dev_preferences_migration_subtitle',
+  'email_body_account_deletion',
+  'importance_label',
+  'pct_match',
+  'product_search_button_download_more',
+  'product_search_no_more_results',
+  'user_profile_title_id_default',
+  'user_profile_title_id_email',
+};
+
 const _families = <String, _FamilySpec>{
   'smooth': _FamilySpec(
     project: 'smooth',
@@ -38,7 +52,7 @@ const _families = <String, _FamilySpec>{
     packageRoot: 'packages/smooth_app',
     arbDirectory: 'packages/smooth_app/lib/l10n',
     templateArb: 'packages/smooth_app/lib/l10n/app_en.arb',
-    frameworkVersion: '3.38.7',
+    frameworkVersion: '3.44.9',
   ),
   'gsy': _FamilySpec(
     project: 'gsy',
@@ -65,6 +79,9 @@ const _gitjournalCiEvidenceHash =
     '4980a6207c2caa7a0f65cbc7b1390eb1fffe18f3dad3e7bb0b072cf033dd94d3';
 const _gitjournalProbeHash =
     'f1635a2a13f5ca240c48dc4fb8e0fab82758ce6aedeb66a3664af7d38844989c';
+const _smoothFrameworkRevision = '6b182d2c7585eba26d4edce0f97630effd256c33';
+const _smoothEngineRevision = '5a2a6a42cce67f965cf540fcecf616faca624aa1';
+const _smoothDartVersion = '3.12.2';
 const _publicSurfaceStagingPlaceholder = '<PUBLIC_SURFACE_STAGING_ROOT>';
 
 Future<void> main(List<String> arguments) async {
@@ -112,6 +129,18 @@ Future<void> main(List<String> arguments) async {
     _families['gsy']!,
   );
   final normalizedGsyBytes = gsyNormalization.normalizedBytesByPath;
+  final gitjournalNormalization = _buildGitjournalNormalization(
+    repositories['gitjournal']!,
+    _families['gitjournal']!,
+  );
+  final normalizedGitjournalBytes =
+      gitjournalNormalization.normalizedBytesByPath;
+  final smoothNormalization = await _buildSmoothNormalization(
+    repositories['smooth']!,
+    _families['smooth']!,
+    options['smooth-flutter']!,
+  );
+  final normalizedSmoothBytes = smoothNormalization.normalizedBytesByPath;
 
   final gitjournalToolchain = _probeGitjournalToolchain(
     repositories['gitjournal']!,
@@ -143,6 +172,12 @@ Future<void> main(List<String> arguments) async {
       final bytes =
           project == 'gsy' && normalizedGsyBytes.containsKey(relativePath)
           ? normalizedGsyBytes[relativePath]!
+          : project == 'gitjournal' &&
+                normalizedGitjournalBytes.containsKey(relativePath)
+          ? normalizedGitjournalBytes[relativePath]!
+          : project == 'smooth' &&
+                normalizedSmoothBytes.containsKey(relativePath)
+          ? normalizedSmoothBytes[relativePath]!
           : _gitBlob(repository, spec.revision, relativePath);
       arbObjects[relativePath] = _jsonObject(jsonDecode(utf8.decode(bytes)));
     }
@@ -151,7 +186,7 @@ Future<void> main(List<String> arguments) async {
     for (final sourceCase in cases) {
       final id = sourceCase['id'];
       final key = sourceCase['detailValue'];
-      final label = sourceCase['label'];
+      var label = sourceCase['label'];
       final scannerPresence = sourceCase['observedFinding'];
       _require(
         id is String && id.startsWith('$project:l10n:'),
@@ -163,6 +198,13 @@ Future<void> main(List<String> arguments) async {
         label == 'CONFIRMED_UNUSED' || label == 'CONFIRMED_USED',
         'invalid truth label for $id',
       );
+      if (project == 'smooth' && _smoothFullPolicyCorrections.contains(key)) {
+        _require(
+          label == 'CONFIRMED_UNUSED' && scannerPresence == false,
+          'Smooth correction source authority drifted for $id',
+        );
+        label = 'CONFIRMED_USED';
+      }
       _require(scannerPresence is bool, 'invalid scanner presence for $id');
       final decodedKey = key as String;
 
@@ -219,18 +261,27 @@ Future<void> main(List<String> arguments) async {
       .length;
   final negativeCount = allCases.length - positiveCount;
   _require(
-    positiveCount == 378,
+    positiveCount == 367,
     'positive denominator drifted to $positiveCount',
   );
   _require(
-    negativeCount == 2224,
+    negativeCount == 2235,
     'negative denominator drifted to $negativeCount',
   );
 
   final manifest = <String, Object?>{
     'schemaVersion': 1,
-    'oracleVersion': 'l10n-mutation-readiness-v1',
+    'oracleVersion': 'l10n-mutation-readiness-v2',
     'sourceOracles': sourceOracles,
+    'oracleCorrections': {
+      'policy': 'full-production-verification-policy',
+      'reclassifiedCaseIds': [
+        for (final key in _smoothFullPolicyCorrections.toList()..sort())
+          'smooth:l10n:$key',
+      ],
+      'sourceTruthLabel': 'mutation-positive',
+      'correctedTruthLabel': 'mutation-negative',
+    },
     'totals': {
       'positiveKeys': positiveCount,
       'negativeKeys': negativeCount,
@@ -247,11 +298,19 @@ Future<void> main(List<String> arguments) async {
 
   outputDirectory.createSync(recursive: true);
   _writeCanonicalJson(
-    File(p.join(outputDirectory.path, 'gsy-normalized-family-v1.json')),
+    File(p.join(outputDirectory.path, 'gsy-normalized-family-v2.json')),
     gsyNormalization.manifest,
   );
   _writeCanonicalJson(
-    File(p.join(outputDirectory.path, 'l10n-mutation-readiness-v1.json')),
+    File(p.join(outputDirectory.path, 'gitjournal-normalized-family-v1.json')),
+    gitjournalNormalization.manifest,
+  );
+  _writeCanonicalJson(
+    File(p.join(outputDirectory.path, 'smooth-normalized-family-v2.json')),
+    smoothNormalization.manifest,
+  );
+  _writeCanonicalJson(
+    File(p.join(outputDirectory.path, 'l10n-mutation-readiness-v2.json')),
     manifest,
   );
 
@@ -271,6 +330,7 @@ Map<String, String> _parseArguments(List<String> arguments) {
     'gsy-repository',
     'gitjournal-repository',
     'gitjournal-flutter',
+    'smooth-flutter',
     'output-directory',
   };
   final result = <String, String>{};
@@ -361,14 +421,28 @@ _NormalizationResult _buildGsyNormalization(
   for (final relativePath in arbPaths) {
     final original = _gitBlob(repository, spec.revision, relativePath);
     final originalMembers = _scanTopLevelMembers(original);
-    final lastIndexByKey = <String, int>{};
+    final indicesByKey = <String, List<int>>{};
     for (var index = 0; index < originalMembers.length; index++) {
-      lastIndexByKey[originalMembers[index].decodedKey] = index;
+      indicesByKey
+          .putIfAbsent(originalMembers[index].decodedKey, () => <int>[])
+          .add(index);
     }
+    final copied = <_ByteCopy>[];
     final removed = <_ByteSpan>[];
-    for (var index = 0; index < originalMembers.length; index++) {
-      final member = originalMembers[index];
-      if (lastIndexByKey[member.decodedKey] != index) {
+    for (final indices in indicesByKey.values) {
+      if (indices.length < 2) continue;
+      final first = originalMembers[indices.first];
+      final effective = originalMembers[indices.last];
+      copied.add(
+        _ByteCopy(
+          first.start,
+          first.endExclusive,
+          effective.start,
+          effective.endExclusive,
+        ),
+      );
+      for (final index in indices.skip(1)) {
+        final member = originalMembers[index];
         _require(
           member.commaEnd != null,
           'duplicate final member in $relativePath',
@@ -376,14 +450,19 @@ _NormalizationResult _buildGsyNormalization(
         removed.add(_ByteSpan(member.start, member.commaEnd!));
       }
     }
+    copied.sort((left, right) => left.start.compareTo(right.start));
     removed.sort((left, right) => left.start.compareTo(right.start));
-    for (var index = 1; index < removed.length; index++) {
+    final targetSpans = <_ByteSpan>[
+      for (final copy in copied) _ByteSpan(copy.start, copy.endExclusive),
+      ...removed,
+    ]..sort((left, right) => left.start.compareTo(right.start));
+    for (var index = 1; index < targetSpans.length; index++) {
       _require(
-        removed[index - 1].endExclusive <= removed[index].start,
-        'overlapping normalization spans in $relativePath',
+        targetSpans[index - 1].endExclusive <= targetSpans[index].start,
+        'overlapping normalization transforms in $relativePath',
       );
     }
-    final replacement = _removeSpans(original, removed);
+    final replacement = _applyByteTransforms(original, copied, removed);
     final replacementMembers = _scanTopLevelMembers(replacement);
     final replacementKeys = <String>{};
     for (final member in replacementMembers) {
@@ -392,6 +471,20 @@ _NormalizationResult _buildGsyNormalization(
         'duplicate decoded key remains in $relativePath',
       );
     }
+    final firstOccurrenceKeys = <String>[];
+    final seenOriginalKeys = <String>{};
+    for (final member in originalMembers) {
+      if (seenOriginalKeys.add(member.decodedKey)) {
+        firstOccurrenceKeys.add(member.decodedKey);
+      }
+    }
+    _require(
+      _sameStrings(
+        replacementMembers.map((member) => member.decodedKey).toList(),
+        firstOccurrenceKeys,
+      ),
+      'first-occurrence order changed in $relativePath',
+    );
     final originalObject = _jsonObject(jsonDecode(utf8.decode(original)));
     final replacementObject = _jsonObject(jsonDecode(utf8.decode(replacement)));
     final canonicalObject = _canonicalCompact(originalObject);
@@ -404,6 +497,15 @@ _NormalizationResult _buildGsyNormalization(
       changedArbs.add({
         'relativePath': relativePath,
         'originalSha256': _sha256(original),
+        'copiedByteSpans': [
+          for (final copy in copied)
+            {
+              'start': copy.start,
+              'endExclusive': copy.endExclusive,
+              'sourceStart': copy.sourceStart,
+              'sourceEndExclusive': copy.sourceEndExclusive,
+            },
+        ],
         'removedByteSpans': [
           for (final span in removed)
             {'start': span.start, 'endExclusive': span.endExclusive},
@@ -419,13 +521,447 @@ _NormalizationResult _buildGsyNormalization(
   return _NormalizationResult(
     normalizedBytesByPath: normalized,
     manifest: {
-      'schemaVersion': 1,
-      'normalizationVersion': 'gsy-normalized-family-v1',
+      'schemaVersion': 2,
+      'normalizationVersion': 'gsy-normalized-family-v2',
       'repositorySha': spec.revision,
-      'policy': 'retain-last-effective-decoded-top-level-member',
+      'policy':
+          'retain-last-effective-decoded-top-level-member-at-first-position',
       'changedArbs': changedArbs,
     },
   );
+}
+
+_NormalizationResult _buildGitjournalNormalization(
+  Directory repository,
+  _FamilySpec spec,
+) {
+  final normalized = <String, Uint8List>{};
+  final changedArbs = <Map<String, Object?>>[];
+  final arbPaths =
+      _gitPaths(repository, spec.revision)
+          .where(
+            (path) =>
+                path.startsWith('${spec.arbDirectory}/') &&
+                path.endsWith('.arb'),
+          )
+          .toList()
+        ..sort();
+  for (final relativePath in arbPaths) {
+    final original = _gitBlob(repository, spec.revision, relativePath);
+    final members = _scanTopLevelMembers(original);
+    final removed = <_ByteSpan>[];
+    for (final member in members) {
+      final remove =
+          member.decodedKey == 'settingsExperimentalMerge' ||
+          relativePath == 'lib/l10n/app_ru.arb' &&
+              member.decodedKey == '@rootFolder';
+      if (!remove) continue;
+      _require(
+        member.commaEnd != null,
+        'GitJournal ignored member must not be final in $relativePath',
+      );
+      removed.add(_ByteSpan(member.start, member.commaEnd!));
+    }
+    removed.sort((left, right) => left.start.compareTo(right.start));
+    final replacement = _applyByteTransforms(original, const [], removed);
+    final replacementMembers = _scanTopLevelMembers(replacement);
+    final replacementKeys = <String>{};
+    for (final member in replacementMembers) {
+      _require(
+        replacementKeys.add(member.decodedKey),
+        'duplicate decoded key remains in $relativePath',
+      );
+    }
+    final replacementObject = _jsonObject(jsonDecode(utf8.decode(replacement)));
+    final canonicalReplacement = _canonicalCompact(replacementObject);
+    normalized[relativePath] = replacement;
+    if (removed.isNotEmpty) {
+      changedArbs.add({
+        'relativePath': relativePath,
+        'originalSha256': _sha256(original),
+        'copiedByteSpans': const <Object?>[],
+        'removedByteSpans': [
+          for (final span in removed)
+            {'start': span.start, 'endExclusive': span.endExclusive},
+        ],
+        'replacementSha256': _sha256(replacement),
+        'canonicalDecodedObjectSha256': _sha256(
+          utf8.encode(canonicalReplacement),
+        ),
+        'decodedObjectEquivalent': false,
+        'replacementHasDuplicateDecodedKeys': false,
+      });
+    }
+  }
+  _require(
+    changedArbs.length == 21,
+    'GitJournal normalized ARB count drifted to ${changedArbs.length}',
+  );
+  return _NormalizationResult(
+    normalizedBytesByPath: normalized,
+    manifest: {
+      'schemaVersion': 2,
+      'normalizationVersion': 'gitjournal-normalized-family-v1',
+      'repositorySha': spec.revision,
+      'policy': 'remove-generator-ignored-extraneous-members',
+      'changedArbs': changedArbs,
+    },
+  );
+}
+
+Future<_NormalizationResult> _buildSmoothNormalization(
+  Directory repository,
+  _FamilySpec spec,
+  String flutterExecutable,
+) async {
+  final normalized = <String, Uint8List>{};
+  final changedArbs = <Map<String, Object?>>[];
+  final arbPaths =
+      _gitPaths(repository, spec.revision)
+          .where(
+            (path) =>
+                path.startsWith('${spec.arbDirectory}/') &&
+                path.endsWith('.arb'),
+          )
+          .toList()
+        ..sort();
+  final templateObject = _jsonObject(
+    jsonDecode(
+      utf8.decode(_gitBlob(repository, spec.revision, spec.templateArb)),
+    ),
+  );
+  final invalidTemplateMetadataKeys = <String>{
+    for (final entry in templateObject.entries)
+      if (entry.key.startsWith('@') &&
+          !entry.key.startsWith('@@') &&
+          (templateObject[entry.key.substring(1)] is! String ||
+              !_sameStringSets(
+                _metadataPlaceholderNames(entry.value),
+                _messagePlaceholderNames(
+                  templateObject[entry.key.substring(1)]! as String,
+                ),
+              )))
+        entry.key,
+  };
+  for (final relativePath in arbPaths) {
+    final original = _gitBlob(repository, spec.revision, relativePath);
+    final members = _scanTopLevelMembers(original);
+    final object = _jsonObject(jsonDecode(utf8.decode(original)));
+    final decodedKeys = members.map((member) => member.decodedKey).toSet();
+    final isTemplate = relativePath == spec.templateArb;
+    final invalidLocaleMessageKeys = <String>{
+      if (!isTemplate)
+        for (final entry in object.entries)
+          if (!entry.key.startsWith('@') &&
+              (entry.value is! String ||
+                  templateObject[entry.key] is! String ||
+                  !_sameStringSets(
+                    _messagePlaceholderNames(entry.value as String),
+                    _messagePlaceholderNames(
+                      templateObject[entry.key]! as String,
+                    ),
+                  )))
+            entry.key,
+    };
+    final removedIndices = <int>[];
+    for (var index = 0; index < members.length; index++) {
+      final member = members[index];
+      final key = member.decodedKey;
+      final isMetadata = key.startsWith('@') && !key.startsWith('@@');
+      final metadataOwner = isMetadata ? key.substring(1) : null;
+      final removeMetadata =
+          isMetadata &&
+          (!decodedKeys.contains(metadataOwner) ||
+              invalidLocaleMessageKeys.contains(metadataOwner) ||
+              invalidTemplateMetadataKeys.contains(key) ||
+              isTemplate &&
+                  object[metadataOwner] is String &&
+                  !_sameStringSets(
+                    _metadataPlaceholderNames(object[key]),
+                    _messagePlaceholderNames(object[metadataOwner]! as String),
+                  ) ||
+              !isTemplate &&
+                  (templateObject[metadataOwner] is! String ||
+                      templateObject[key] is! Map ||
+                      !_sameStringSets(
+                        _metadataPlaceholderNames(object[key]),
+                        _metadataPlaceholderNames(templateObject[key]),
+                      )));
+      final removeLocaleMessage =
+          !key.startsWith('@') && invalidLocaleMessageKeys.contains(key);
+      if (!removeMetadata && !removeLocaleMessage) continue;
+      removedIndices.add(index);
+    }
+    final removed = <_ByteSpan>[];
+    for (var cursor = 0; cursor < removedIndices.length;) {
+      final first = removedIndices[cursor];
+      var last = first;
+      cursor++;
+      while (cursor < removedIndices.length &&
+          removedIndices[cursor] == last + 1) {
+        last = removedIndices[cursor];
+        cursor++;
+      }
+      if (last < members.length - 1) {
+        removed.add(_ByteSpan(members[first].start, members[last].commaEnd!));
+      } else {
+        _require(first > 0, 'Smooth normalization cannot remove every member');
+        removed.add(
+          _ByteSpan(
+            members[first - 1].endExclusive,
+            members[last].endExclusive,
+          ),
+        );
+      }
+    }
+    removed.sort((left, right) => left.start.compareTo(right.start));
+    final replacement = _applyByteTransforms(original, const [], removed);
+    final replacementMembers = _scanTopLevelMembers(replacement);
+    final replacementKeys = <String>{};
+    for (final member in replacementMembers) {
+      _require(
+        replacementKeys.add(member.decodedKey),
+        'duplicate decoded key remains in $relativePath',
+      );
+      final key = member.decodedKey;
+      _require(
+        !key.startsWith('@') ||
+            key.startsWith('@@') ||
+            replacementKeys.contains(key.substring(1)) ||
+            replacementMembers.any(
+              (candidate) => candidate.decodedKey == key.substring(1),
+            ),
+        'orphan metadata remains in $relativePath',
+      );
+    }
+    final replacementObject = _jsonObject(jsonDecode(utf8.decode(replacement)));
+    final canonicalReplacement = _canonicalCompact(replacementObject);
+    normalized[relativePath] = replacement;
+    if (removed.isNotEmpty) {
+      changedArbs.add({
+        'relativePath': relativePath,
+        'originalSha256': _sha256(original),
+        'copiedByteSpans': const <Object?>[],
+        'removedByteSpans': [
+          for (final span in removed)
+            {'start': span.start, 'endExclusive': span.endExclusive},
+        ],
+        'replacementSha256': _sha256(replacement),
+        'canonicalDecodedObjectSha256': _sha256(
+          utf8.encode(canonicalReplacement),
+        ),
+        'decodedObjectEquivalent': false,
+        'replacementHasDuplicateDecodedKeys': false,
+      });
+    }
+  }
+  _require(
+    changedArbs.length == arbPaths.length,
+    'Smooth orphan-metadata normalization membership drifted: '
+    '${changedArbs.length}/${arbPaths.length}',
+  );
+  final generatedBaseline = await _buildSmoothGeneratedBaseline(
+    repository: repository,
+    spec: spec,
+    normalizedBytesByPath: normalized,
+    flutterExecutable: flutterExecutable,
+  );
+  return _NormalizationResult(
+    normalizedBytesByPath: normalized,
+    manifest: {
+      'schemaVersion': 3,
+      'normalizationVersion': 'smooth-normalized-family-v2',
+      'repositorySha': spec.revision,
+      'policy': 'remove-generator-ignored-or-inconsistent-locale-members',
+      'changedArbs': changedArbs,
+      'generatedBaseline': {
+        'policy': 'regenerate-after-normalization-with-pinned-toolchain',
+        'changedOutputs': generatedBaseline,
+      },
+    },
+  );
+}
+
+Future<List<Map<String, Object?>>> _buildSmoothGeneratedBaseline({
+  required Directory repository,
+  required _FamilySpec spec,
+  required Map<String, Uint8List> normalizedBytesByPath,
+  required String flutterExecutable,
+}) async {
+  _require(
+    Platform.isMacOS || Platform.isLinux,
+    'Smooth generated baseline requires POSIX mode authority',
+  );
+  final flutter = File(flutterExecutable);
+  _require(
+    FileSystemEntity.typeSync(flutter.path, followLinks: false) ==
+        FileSystemEntityType.file,
+    'Smooth Flutter executable is not a regular file',
+  );
+  final canonicalFlutter = flutter.resolveSymbolicLinksSync();
+  final probeBefore = await _runRequired(canonicalFlutter, const [
+    '--version',
+    '--machine',
+  ], workingDirectory: flutter.parent.path);
+  _validateSmoothToolchain(probeBefore.stdout as String);
+
+  final ownedRoot = Directory.systemTemp.createTempSync(
+    'flutter-pruner-smooth-normalization-builder-',
+  );
+  final clone = Directory(p.join(ownedRoot.path, 'repository'));
+  try {
+    await _runRequired('git', [
+      'clone',
+      '--quiet',
+      '--no-local',
+      '--no-hardlinks',
+      '--no-checkout',
+      '--no-tags',
+      repository.path,
+      clone.path,
+    ], workingDirectory: ownedRoot.path);
+    await _runRequired('git', [
+      '-C',
+      clone.path,
+      'checkout',
+      '--detach',
+      '--force',
+      spec.revision,
+    ], workingDirectory: ownedRoot.path);
+    await _runRequired('git', [
+      '-C',
+      clone.path,
+      'remote',
+      'remove',
+      'origin',
+    ], workingDirectory: ownedRoot.path);
+    final packageRoot = Directory(p.join(clone.path, spec.packageRoot));
+    await _runRequired(canonicalFlutter, const [
+      'pub',
+      'get',
+      '--offline',
+    ], workingDirectory: packageRoot.path);
+    for (final entry in normalizedBytesByPath.entries) {
+      final target = File(p.joinAll([clone.path, ...entry.key.split('/')]));
+      _require(target.existsSync(), 'normalized Smooth ARB is missing');
+      target.writeAsBytesSync(entry.value, flush: true);
+      _require(
+        _sha256(target.readAsBytesSync()) == _sha256(entry.value),
+        'normalized Smooth ARB installation drifted',
+      );
+    }
+    final before = _regularFileStates(packageRoot);
+    await _runRequired(canonicalFlutter, const [
+      'gen-l10n',
+    ], workingDirectory: packageRoot.path);
+    final after = _regularFileStates(packageRoot);
+    final paths = <String>{...before.keys, ...after.keys}.toList()..sort();
+    final changed = <String>[
+      for (final path in paths)
+        if (before[path] != after[path]) path,
+    ];
+    _require(
+      changed.length == 64,
+      'Smooth normalized generated output count drifted to ${changed.length}',
+    );
+    final arbDirectoryWithinPackage = p
+        .relative(spec.arbDirectory, from: spec.packageRoot)
+        .replaceAll('\\', '/');
+    final records = <Map<String, Object?>>[];
+    for (final packagePath in changed) {
+      final original = before[packagePath];
+      final replacement = after[packagePath];
+      _require(
+        original != null &&
+            replacement != null &&
+            packagePath.startsWith('$arbDirectoryWithinPackage/') &&
+            packagePath.endsWith('.dart') &&
+            original.sha256 != replacement.sha256 &&
+            original.posixMode == replacement.posixMode,
+        'Smooth normalized generator changed an unauthorized path',
+      );
+      records.add({
+        'relativePath': p.posix.join(spec.packageRoot, packagePath),
+        'originalSha256': original!.sha256,
+        'replacementSha256': replacement!.sha256,
+        'posixMode': original.posixMode,
+      });
+    }
+    final probeAfter = await _runRequired(canonicalFlutter, const [
+      '--version',
+      '--machine',
+    ], workingDirectory: flutter.parent.path);
+    _validateSmoothToolchain(probeAfter.stdout as String);
+    _require(
+      probeBefore.stdout == probeAfter.stdout,
+      'Smooth Flutter machine identity drifted during generation',
+    );
+    return records;
+  } finally {
+    if (ownedRoot.existsSync()) ownedRoot.deleteSync(recursive: true);
+  }
+}
+
+Future<ProcessResult> _runRequired(
+  String executable,
+  List<String> arguments, {
+  required String workingDirectory,
+}) async {
+  final result = await Process.run(
+    executable,
+    arguments,
+    workingDirectory: workingDirectory,
+    environment: const {
+      'CI': 'true',
+      'FLUTTER_SUPPRESS_ANALYTICS': 'true',
+      'LANG': 'en_US.UTF-8',
+      'LC_ALL': 'en_US.UTF-8',
+    },
+    includeParentEnvironment: true,
+  );
+  _require(
+    result.exitCode == 0,
+    '$executable ${arguments.join(' ')} failed: ${result.stderr}',
+  );
+  return result;
+}
+
+void _validateSmoothToolchain(String rawMachine) {
+  final machine = _jsonObject(jsonDecode(rawMachine));
+  _require(machine['frameworkVersion'] == '3.44.9', 'Smooth Flutter drifted');
+  _require(
+    machine['frameworkRevision'] == _smoothFrameworkRevision,
+    'Smooth framework revision drifted',
+  );
+  _require(
+    machine['engineRevision'] == _smoothEngineRevision,
+    'Smooth engine revision drifted',
+  );
+  _require(
+    machine['dartSdkVersion'] == _smoothDartVersion,
+    'Smooth Dart SDK drifted',
+  );
+}
+
+Map<String, ({String sha256, int posixMode})> _regularFileStates(
+  Directory root,
+) {
+  final states = <String, ({String sha256, int posixMode})>{};
+  for (final entity in root.listSync(recursive: true, followLinks: false)) {
+    if (FileSystemEntity.typeSync(entity.path, followLinks: false) !=
+        FileSystemEntityType.file) {
+      continue;
+    }
+    final relativePath = p
+        .relative(entity.path, from: root.path)
+        .replaceAll('\\', '/');
+    final file = File(entity.path);
+    states[relativePath] = (
+      sha256: _sha256(file.readAsBytesSync()),
+      posixMode: file.statSync().mode & 0xfff,
+    );
+  }
+  return states;
 }
 
 List<_JsonMember> _scanTopLevelMembers(List<int> bytes) {
@@ -465,7 +1001,14 @@ List<_JsonMember> _scanTopLevelMembers(List<int> bytes) {
         'expected comma',
       );
     }
-    members.add(_JsonMember(start, commaEnd, decodedKey));
+    members.add(
+      _JsonMember(
+        start,
+        cursor - (commaEnd == null ? 0 : 1),
+        commaEnd,
+        decodedKey,
+      ),
+    );
   }
   _require(
     _skipWhitespace(bytes, cursor) == bytes.length,
@@ -534,16 +1077,71 @@ int _skipJsonValue(List<int> bytes, int cursor) {
   return cursor;
 }
 
-Uint8List _removeSpans(List<int> source, List<_ByteSpan> spans) {
+Uint8List _applyByteTransforms(
+  List<int> source,
+  List<_ByteCopy> copied,
+  List<_ByteSpan> removed,
+) {
+  final transforms =
+      <
+          ({
+            int start,
+            int endExclusive,
+            int? sourceStart,
+            int? sourceEndExclusive,
+          })
+        >[
+          for (final copy in copied)
+            (
+              start: copy.start,
+              endExclusive: copy.endExclusive,
+              sourceStart: copy.sourceStart,
+              sourceEndExclusive: copy.sourceEndExclusive,
+            ),
+          for (final span in removed)
+            (
+              start: span.start,
+              endExclusive: span.endExclusive,
+              sourceStart: null,
+              sourceEndExclusive: null,
+            ),
+        ]
+        ..sort((left, right) => left.start.compareTo(right.start));
   final builder = BytesBuilder(copy: false);
   var cursor = 0;
-  for (final span in spans) {
-    builder.add(source.sublist(cursor, span.start));
-    cursor = span.endExclusive;
+  for (final transform in transforms) {
+    builder.add(source.sublist(cursor, transform.start));
+    if (transform.sourceStart case final sourceStart?) {
+      builder.add(source.sublist(sourceStart, transform.sourceEndExclusive));
+    }
+    cursor = transform.endExclusive;
   }
   builder.add(source.sublist(cursor));
   return builder.takeBytes();
 }
+
+bool _sameStrings(List<String> left, List<String> right) {
+  if (left.length != right.length) return false;
+  for (var index = 0; index < left.length; index++) {
+    if (left[index] != right[index]) return false;
+  }
+  return true;
+}
+
+Set<String> _messagePlaceholderNames(String message) => RegExp(
+  r'\{\s*([A-Za-z_]\w*)\s*(?:\}|,)',
+).allMatches(message).map((match) => match.group(1)!).toSet();
+
+Set<String> _metadataPlaceholderNames(Object? metadata) {
+  if (metadata is! Map) return const {};
+  final placeholders = metadata['placeholders'];
+  return placeholders is Map
+      ? placeholders.keys.whereType<String>().toSet()
+      : const {};
+}
+
+bool _sameStringSets(Set<String> left, Set<String> right) =>
+    left.length == right.length && left.containsAll(right);
 
 Map<String, Object?> _probeGitjournalToolchain(
   Directory repository,
@@ -626,23 +1224,28 @@ Map<String, Object?> _familyRecord(
   List<String> arbPaths,
   Map<String, Object?>? gitjournalToolchain,
 ) {
+  final fixtureOverlays = _verifiedFixtureOverlays(spec.project, corpusRoot);
   final toolchain =
-      gitjournalToolchain ?? _fvmToolchainSelectionEvidence(repository, spec);
+      gitjournalToolchain ??
+      (spec.project == 'smooth'
+          ? {
+              'evidencePath': '.fvmrc',
+              'evidenceSha256': fixtureOverlays.singleWhere(
+                (overlay) => overlay['relativePath'] == '.fvmrc',
+              )['sha256'],
+              'frameworkVersion': spec.frameworkVersion,
+              'selectionKind': 'pinned-fvm-config',
+            }
+          : _fvmToolchainSelectionEvidence(repository, spec));
   final policy = <Map<String, Object?>>[];
   if (spec.project == 'smooth') {
     policy.add({
-      'workingDirectory': '.',
+      'workingDirectory': spec.packageRoot,
       'executable': {
         'kind': 'flutterByVersion',
         'version': spec.frameworkVersion,
       },
-      'arguments': [
-        'analyze',
-        '--no-pub',
-        '--fatal-infos',
-        '--fatal-warnings',
-        '.',
-      ],
+      'arguments': ['analyze', '--no-pub', '--fatal-infos', '--fatal-warnings'],
     });
     policy.add({
       'workingDirectory': spec.packageRoot,
@@ -654,17 +1257,19 @@ Map<String, Object?> _familyRecord(
     });
   } else {
     for (final command in const ['analyze', 'test']) {
+      final arguments = command == 'analyze' && spec.project == 'gitjournal'
+          ? const ['analyze', '--no-pub', '--no-fatal-infos']
+          : [command, '--no-pub'];
       policy.add({
         'workingDirectory': spec.packageRoot,
         'executable': {
           'kind': 'flutterByVersion',
           'version': spec.frameworkVersion,
         },
-        'arguments': [command, '--no-pub'],
+        'arguments': arguments,
       });
     }
   }
-  final fixtureOverlays = _verifiedFixtureOverlays(spec.project, corpusRoot);
   return {
     'project': spec.project,
     'repositorySha': spec.revision,
@@ -677,14 +1282,27 @@ Map<String, Object?> _familyRecord(
     'toolchainSelectionEvidence': toolchain,
     'verificationPolicy': policy,
     'fixtureOverlays': fixtureOverlays,
-    'normalizationOverlays': spec.project == 'gsy'
-        ? [
-            {
-              'manifest': 'gsy-normalized-family-v1.json',
-              'policy': 'remove-declared-byte-spans',
-            },
-          ]
-        : <Map<String, Object?>>[],
+    'normalizationOverlays': switch (spec.project) {
+      'gsy' => [
+        {
+          'manifest': 'gsy-normalized-family-v2.json',
+          'policy': 'apply-declared-byte-transforms',
+        },
+      ],
+      'gitjournal' => [
+        {
+          'manifest': 'gitjournal-normalized-family-v1.json',
+          'policy': 'apply-declared-byte-transforms',
+        },
+      ],
+      'smooth' => [
+        {
+          'manifest': 'smooth-normalized-family-v2.json',
+          'policy': 'apply-declared-byte-transforms',
+        },
+      ],
+      _ => <Map<String, Object?>>[],
+    },
   };
 }
 
@@ -724,6 +1342,15 @@ List<Map<String, Object?>> _verifiedFixtureOverlays(
     'gsy' => [
       _verifiedFixtureOverlay(
         corpusRoot: corpusRoot,
+        relativePath: 'flutter_pruner_v2_accuracy.yaml',
+        sourceIdentity:
+            'worktrees/v2-natural-accuracy/gsy/flutter_pruner_v2_accuracy.yaml',
+        purpose: 'scanner coverage authority',
+        expectedSha256:
+            '088014c7fc747e62ba52e705374da2e6fb12aea87fa4f0cdd9a0d3935d916beb',
+      ),
+      _verifiedFixtureOverlay(
+        corpusRoot: corpusRoot,
         relativePath: 'lib/common/config/ignoreConfig.dart',
         sourceIdentity:
             'worktrees/v2-natural-accuracy/gsy/lib/common/config/ignoreConfig.dart',
@@ -735,6 +1362,15 @@ List<Map<String, Object?>> _verifiedFixtureOverlays(
     'gitjournal' => [
       _verifiedFixtureOverlay(
         corpusRoot: corpusRoot,
+        relativePath: 'flutter_pruner_v2_accuracy.yaml',
+        sourceIdentity:
+            'worktrees/v2-natural-accuracy/gitjournal/flutter_pruner_v2_accuracy.yaml',
+        purpose: 'scanner coverage authority',
+        expectedSha256:
+            '4231078c9d2d427da754d28395a2727ddc4a4c054790c4381de2e256d9a35d05',
+      ),
+      _verifiedFixtureOverlay(
+        corpusRoot: corpusRoot,
         relativePath: 'lib/.env.dart',
         sourceIdentity:
             'worktrees/v2-natural-accuracy/gitjournal/lib/.env.dart',
@@ -743,7 +1379,26 @@ List<Map<String, Object?>> _verifiedFixtureOverlays(
             'a4aee8e49b8ae44f874ae182b464cbba1d00ba3045eaf37c14d745849da98b33',
       ),
     ],
-    _ => <Map<String, Object?>>[],
+    'smooth' => [
+      _verifiedFixtureOverlay(
+        corpusRoot: corpusRoot,
+        relativePath: '.fvmrc',
+        sourceIdentity: 'worktrees/v3-stage1/smooth/.fvmrc',
+        purpose: 'toolchain selector authority',
+        expectedSha256:
+            'b94a21e157a4ee1f8a34fa2b69e7b9d50fe06654cdcdbe6d6df65866e7129f94',
+      ),
+      _verifiedFixtureOverlay(
+        corpusRoot: corpusRoot,
+        relativePath: 'packages/smooth_app/flutter_pruner_v2_accuracy.yaml',
+        sourceIdentity:
+            'worktrees/v2-natural-accuracy/smooth/packages/smooth_app/flutter_pruner_v2_accuracy.yaml',
+        purpose: 'scanner coverage authority',
+        expectedSha256:
+            '9c50b97122bc7dc037f87f8bcd85e0ce05ba92ddadbb3d6e3ab5e52974ca3527',
+      ),
+    ],
+    _ => throw StateError('unknown fixture overlay project'),
   };
 }
 
@@ -1302,11 +1957,31 @@ final class _FamilySpec {
 }
 
 final class _JsonMember {
-  const _JsonMember(this.start, this.commaEnd, this.decodedKey);
+  const _JsonMember(
+    this.start,
+    this.endExclusive,
+    this.commaEnd,
+    this.decodedKey,
+  );
 
   final int start;
+  final int endExclusive;
   final int? commaEnd;
   final String decodedKey;
+}
+
+final class _ByteCopy {
+  const _ByteCopy(
+    this.start,
+    this.endExclusive,
+    this.sourceStart,
+    this.sourceEndExclusive,
+  );
+
+  final int start;
+  final int endExclusive;
+  final int sourceStart;
+  final int sourceEndExclusive;
 }
 
 final class _ByteSpan {

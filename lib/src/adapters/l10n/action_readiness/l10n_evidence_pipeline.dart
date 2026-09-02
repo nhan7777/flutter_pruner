@@ -1,6 +1,8 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:crypto/crypto.dart';
+import 'package:path/path.dart' as p;
 
 import '../../../analysis/analysis_snapshot.dart';
 import 'l10n_evidence_failure.dart';
@@ -29,6 +31,7 @@ final class L10nEvidenceRequest {
     required Iterable<String> selectedNodeIds,
     required this.sdkRegistry,
     required this.toolchainSelection,
+    this.toolchainAuthorityRoot,
   }) : selectedNodeIds = List<String>.unmodifiable(selectedNodeIds);
 
   /// Unchanged completed analysis whose graph facts authorize the request.
@@ -42,6 +45,13 @@ final class L10nEvidenceRequest {
 
   /// Frozen selector or retained evidence used to choose the toolchain.
   final L10nToolchainSelection toolchainSelection;
+
+  /// Repository authority containing project selectors for a nested package.
+  ///
+  /// When absent, the analyzed package root remains the selector authority.
+  /// A supplied root must be the same directory or a canonical ancestor of
+  /// [AnalysisSnapshot.project]'s root.
+  final Directory? toolchainAuthorityRoot;
 }
 
 /// Runs the complete internal l10n mutation-evidence transaction.
@@ -111,7 +121,7 @@ final class L10nEvidencePipeline {
     var boundary = 'toolchain-resolution';
     try {
       final resolution = await _toolchainResolver.resolve(
-        originalProjectRoot: request.analysis.project.root,
+        originalProjectRoot: _toolchainAuthorityRoot(request),
         sdkRegistry: request.sdkRegistry,
         selection: request.toolchainSelection,
       );
@@ -326,6 +336,7 @@ Future<void> _revalidateOriginalAuthorities(
   try {
     final result = await revalidator.revalidate(
       originalProjectRoot: state.request.analysis.project.root,
+      toolchainAuthorityRoot: state.request.toolchainAuthorityRoot,
       snapshot: snapshot,
       toolchain: toolchain,
     );
@@ -591,8 +602,40 @@ List<L10nEvidenceFailure> _validateRequest(L10nEvidenceRequest request) {
       ),
     ];
   }
+  final authorityRoot = request.toolchainAuthorityRoot;
+  if (authorityRoot != null) {
+    try {
+      final canonicalAuthority = p.normalize(
+        authorityRoot.resolveSymbolicLinksSync(),
+      );
+      final canonicalProject = p.normalize(
+        request.analysis.project.root.resolveSymbolicLinksSync(),
+      );
+      if (!p.equals(canonicalAuthority, canonicalProject) &&
+          !p.isWithin(canonicalAuthority, canonicalProject)) {
+        return const [
+          L10nEvidenceFailure(
+            code: L10nEvidenceRejectionCode.toolchainUnavailable,
+            stage: _pipelineStage,
+            detailCode: 'toolchain-authority-root-not-ancestor',
+          ),
+        ];
+      }
+    } on FileSystemException {
+      return const [
+        L10nEvidenceFailure(
+          code: L10nEvidenceRejectionCode.toolchainUnavailable,
+          stage: _pipelineStage,
+          detailCode: 'toolchain-authority-root-unavailable',
+        ),
+      ];
+    }
+  }
   return const [];
 }
+
+Directory _toolchainAuthorityRoot(L10nEvidenceRequest request) =>
+    request.toolchainAuthorityRoot ?? request.analysis.project.root;
 
 L10nEvidenceEvaluation _earlyRejection(
   Iterable<L10nEvidenceFailure> failures,

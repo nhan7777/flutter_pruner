@@ -107,6 +107,7 @@ abstract interface class L10nSnapshotRevalidator {
   /// Returns fresh identities or deterministic typed drift facts.
   Future<L10nSnapshotRevalidationResult> revalidate({
     required Directory originalProjectRoot,
+    Directory? toolchainAuthorityRoot,
     required L10nFamilySnapshot snapshot,
     required L10nToolchainResolved toolchain,
   });
@@ -139,6 +140,7 @@ final class DefaultL10nSnapshotRevalidator implements L10nSnapshotRevalidator {
   @override
   Future<L10nSnapshotRevalidationResult> revalidate({
     required Directory originalProjectRoot,
+    Directory? toolchainAuthorityRoot,
     required L10nFamilySnapshot snapshot,
     required L10nToolchainResolved toolchain,
   }) async {
@@ -202,7 +204,7 @@ final class DefaultL10nSnapshotRevalidator implements L10nSnapshotRevalidator {
     // observed by the final pass rather than escaping through a TOCTOU gap.
     final freshToolchainIdentity = await _revalidateToolchain(
       resolver: _toolchainResolver,
-      originalProjectRoot: originalProjectRoot,
+      originalProjectRoot: toolchainAuthorityRoot ?? originalProjectRoot,
       snapshot: snapshot,
       toolchain: toolchain,
       failures: failures,
@@ -577,6 +579,12 @@ void _revalidateOutputMembership({
       for (final path in snapshot.expectedGeneratedPaths)
         _asciiFold(path): path,
     };
+    final arbInputPaths = <String>{
+      for (final entry in snapshot.entries.values)
+        if (entry.role == L10nSnapshotRole.arbTemplate ||
+            entry.role == L10nSnapshotRole.arbLocale)
+          entry.relativePosixPath,
+    };
     final baseName = p.posix.basename(config.baseOutputPath);
     final dot = baseName.indexOf('.');
     if (dot <= 0) {
@@ -608,6 +616,7 @@ void _revalidateOutputMembership({
         continue;
       }
       if (relative == snapshot.optionalUntranslatedPath) continue;
+      if (arbInputPaths.contains(relative)) continue;
       final name = _asciiFold(p.posix.basename(relative));
       if (name.startsWith('${stem}_') && name.endsWith(suffix)) {
         throw const FileSystemException('unowned output family sibling');
@@ -631,6 +640,8 @@ void _revalidateAnalyzerAuthorities({
   try {
     final context = const L10nAnalyzerContextAuthorityProjector().project(
       project,
+      nestedAuthorityPaths:
+          snapshot.analysisOptionsProjection.nestedAuthorityPaths,
     );
     switch (context) {
       case L10nAnalyzerContextAuthorityProjectionReady(:final projection):

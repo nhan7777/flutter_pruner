@@ -10,7 +10,7 @@ import '../../../benchmark/accuracy/l10n_mutation_readiness.dart';
 const _fakeSha256 =
     '0000000000000000000000000000000000000000000000000000000000000000';
 const _productionManifestSha256 =
-    '58fb9adb4c5d4e1056c3485f482402eb29de59d9088bb9a9d582fcb4a0694fed';
+    '6c64080eb30fd59ad55db439ddaf17cc8340785828df31a53d0433669032387a';
 
 void main() {
   group('strict argv', () {
@@ -20,7 +20,7 @@ void main() {
     setUp(() {
       sandbox = _canonicalTempDirectory('l10n-readiness-options-');
       sdkArguments = [
-        for (final version in const ['3.38.7', '3.41.5', '3.44.1'])
+        for (final version in const ['3.41.5', '3.44.1', '3.44.9'])
           '$version=${_flutterBinary(sandbox, version).path}',
       ];
     });
@@ -32,7 +32,7 @@ void main() {
         ..writeAsStringSync('{}');
       final options = L10nMutationReadinessOptions.parse([
         '--manifest',
-        'benchmark/accuracy/manifests/l10n-mutation-readiness-v1.json',
+        'benchmark/accuracy/manifests/l10n-mutation-readiness-v2.json',
         '--corpus-root',
         sandbox.path,
         for (final sdk in sdkArguments) ...['--sdk', sdk],
@@ -46,7 +46,7 @@ void main() {
 
       expect(options.manifestPath, startsWith('benchmark/accuracy/'));
       expect(options.corpusRoot.path, sandbox.path);
-      expect(options.sdkFlutterByVersion.keys, ['3.38.7', '3.41.5', '3.44.1']);
+      expect(options.sdkFlutterByVersion.keys, ['3.41.5', '3.44.1', '3.44.9']);
       expect(options.resumeFile!.path, resume.path);
       expect(options.caseSelection, 'smooth:about_this_app');
       expect(options.familySelection, isNull);
@@ -55,7 +55,7 @@ void main() {
     test('rejects missing, duplicate, noncanonical, and ambiguous input', () {
       final valid = [
         '--manifest',
-        'benchmark/accuracy/manifests/l10n-mutation-readiness-v1.json',
+        'benchmark/accuracy/manifests/l10n-mutation-readiness-v2.json',
         '--corpus-root',
         sandbox.path,
         for (final sdk in sdkArguments) ...['--sdk', sdk],
@@ -87,10 +87,10 @@ void main() {
         [...valid, '--resume', resume.path],
         [
           '--manifest',
-          'benchmark/accuracy/manifests/l10n-mutation-readiness-v1.json',
+          'benchmark/accuracy/manifests/l10n-mutation-readiness-v2.json',
           '--corpus-root',
           sandbox.path,
-          for (final version in const ['3.38.7', '3.41.5', '3.44.1']) ...[
+          for (final version in const ['3.41.5', '3.44.1', '3.44.9']) ...[
             '--sdk',
             '$version=$sharedSdk',
           ],
@@ -146,9 +146,9 @@ void main() {
       );
 
       expect(plan.profile, L10nReadinessProfile.productionStage1);
-      expect(plan.oracleVersion, 'l10n-mutation-readiness-v1');
+      expect(plan.oracleVersion, 'l10n-mutation-readiness-v2');
       expect(plan.oracleCases, hasLength(2602));
-      expect(plan.individualCaseIds, hasLength(378));
+      expect(plan.individualCaseIds, hasLength(367));
       expect(plan.familyProjectIds, ['gitjournal', 'gsy', 'smooth']);
       expect(plan.mutationNegativeFixtures, hasLength(14));
       expect(
@@ -166,7 +166,7 @@ void main() {
       const rows = <(String, String, int, int)>[
         ('gitjournal', 'drawerFs', 38, 381),
         ('gsy', 'app_back_tip', 17, 386),
-        ('smooth', 'about_this_app', 323, 1457),
+        ('smooth', 'about_this_app', 312, 1468),
       ];
       for (final (projectId, key, positives, negatives) in rows) {
         for (final family in [false, true]) {
@@ -341,6 +341,33 @@ void main() {
   );
 
   test(
+    'project eligibility rejection skips repeated individual evaluation',
+    () async {
+      final fixture = _Fixture(enableProjectEligibilityPreflight: true)
+        ..evidenceAccepted = false;
+
+      expect(
+        await runL10nMutationReadiness(
+          fixture.argv(),
+          dependencies: fixture.dependencies(),
+        ),
+        1,
+      );
+      expect(fixture.calls.where((call) => call == 'scan:alpha'), hasLength(1));
+      expect(
+        fixture.calls,
+        isNot(
+          contains('verdict:alpha:l10n:unused_even_when_old_oracle_was_false'),
+        ),
+      );
+      final artifact = jsonDecode(fixture.store.writes.last) as Map;
+      final record = (artifact['cases'] as List).single as Map;
+      expect(record['failureReason'], 'projectEligibilityRejected');
+      expect(artifact['status'], 'failed');
+    },
+  );
+
+  test(
     'a positive remains required when expectedScannerPresence was false',
     () async {
       final fixture = _Fixture()..scanner.omitFalseLegacyPositive = true;
@@ -506,6 +533,13 @@ void main() {
     expect(record['failureReason'], 'internalVerdictRejected');
     expect(evidence['corpusPolicyIdentity'], 'notRun');
     expect(evidence['restorationIdentity'], 'notRun');
+    expect(evidence['verdictFailures'], [
+      {
+        'code': 'scanBlockerPresent',
+        'detailCode': 'selected-node-retained',
+        'stage': 'family-preflight',
+      },
+    ]);
     expect(fixture.calls, [
       'plan:case',
       'checkpoint',
@@ -1477,12 +1511,12 @@ void main() {
 
   test('production denominator constant remains frozen', () {
     expect(L10nReadinessDenominators.productionFull.toJson(), {
-      'individualKeys': 378,
+      'individualKeys': 367,
       'familyBatches': 3,
-      'staticPositiveCandidates': 378,
-      'staticNegativeNonCandidates': 2224,
+      'staticPositiveCandidates': 367,
+      'staticNegativeNonCandidates': 2235,
       'mutationNegativeFixtures': 14,
-      'requiredRestorations': 381,
+      'requiredRestorations': 370,
     });
   });
 }
@@ -1573,10 +1607,10 @@ L10nMutationReadinessOptions _productionOptions({
         ..createSync(recursive: true));
   return L10nMutationReadinessOptions.parse([
     '--manifest',
-    'benchmark/accuracy/manifests/l10n-mutation-readiness-v1.json',
+    'benchmark/accuracy/manifests/l10n-mutation-readiness-v2.json',
     '--corpus-root',
     corpusRoot.path,
-    for (final version in const ['3.38.7', '3.41.5', '3.44.1']) ...[
+    for (final version in const ['3.41.5', '3.44.1', '3.44.9']) ...[
       '--sdk',
       '$version=${_flutterBinary(sandbox, 'production-$version').path}',
     ],
@@ -1607,10 +1641,11 @@ final class _Fixture {
     this.scopeMismatch = false,
     this.reversePlanOrder = false,
     this.productionPlanFault = _ProductionPlanFault.none,
+    this.enableProjectEligibilityPreflight = false,
   }) : sandbox =
            existingSandbox ??
            _canonicalTempDirectory('l10n-readiness-harness-') {
-    for (final version in const ['3.38.7', '3.41.5', '3.44.1']) {
+    for (final version in const ['3.41.5', '3.44.1', '3.44.9']) {
       sdkArguments.add('$version=${_flutterBinary(sandbox, version).path}');
     }
     scanner = _FakeScanner(calls);
@@ -1661,6 +1696,7 @@ final class _Fixture {
   final bool scopeMismatch;
   final bool reversePlanOrder;
   final _ProductionPlanFault productionPlanFault;
+  final bool enableProjectEligibilityPreflight;
   bool _ownsSandbox = true;
 
   List<String> argv({
@@ -1670,7 +1706,7 @@ final class _Fixture {
     File? output,
   }) => [
     '--manifest',
-    'benchmark/accuracy/manifests/l10n-mutation-readiness-v1.json',
+    'benchmark/accuracy/manifests/l10n-mutation-readiness-v2.json',
     '--corpus-root',
     sandbox.path,
     for (final sdk in sdkArguments) ...['--sdk', sdk],
@@ -1726,6 +1762,7 @@ final class _Fixture {
       checkpointStore: store,
       monotonicMicros: _FakeClock(),
       onStaticGate: (projectId) => calls.add('static-gate:$projectId'),
+      enableProjectEligibilityPreflight: enableProjectEligibilityPreflight,
     );
   }
 
@@ -1966,6 +2003,15 @@ L10nInternalEvidenceResult _internalEvidence(
   candidateGeneratorMicros: 13,
   sampledPeakRssBytes: 1024,
   verdictIdentity: 'verdict-v1',
+  verdictFailures: accepted
+      ? const []
+      : [
+          L10nVerdictFailure(
+            code: 'scanBlockerPresent',
+            stage: 'family-preflight',
+            detailCode: 'selected-node-retained',
+          ),
+        ],
 );
 
 final class _FakeCorpusRunner implements L10nCorpusEvidenceRunner {

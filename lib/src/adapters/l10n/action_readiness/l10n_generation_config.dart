@@ -25,6 +25,9 @@ enum L10nGenerationSchemaVersion {
 
   /// Flutter 3.44.1 gen-l10n schema-v1.
   flutter3441,
+
+  /// Flutter 3.44.9 gen-l10n schema-v1.
+  flutter3449,
 }
 
 /// Result of loading strict, byte-bound gen-l10n configuration.
@@ -641,12 +644,58 @@ const _flutter3441Table = _SchemaV1Table(
   defaultUseNamedParameters: false,
   defaultSyntheticPackage: false,
 );
+const _flutter3449Table = _SchemaV1Table(
+  tableId: 'l10n-generation-schema-v1/flutter-3.44.9',
+  schemaVersion: L10nGenerationSchemaVersion.flutter3449,
+  optionRules: {
+    'arb-dir': _SchemaOptionRule.projectRelativePath,
+    'output-dir': _SchemaOptionRule.projectRelativePath,
+    'template-arb-file': _SchemaOptionRule.arbRelativePath,
+    'output-localization-file': _SchemaOptionRule.outputLocalizationFile,
+    'untranslated-messages-file': _SchemaOptionRule.projectRelativePath,
+    'output-class': _SchemaOptionRule.dartClassName,
+    'header': _SchemaOptionRule.headerText,
+    'header-file': _SchemaOptionRule.arbRelativePath,
+    'use-deferred-loading': _SchemaOptionRule.boolean,
+    'preferred-supported-locales': _SchemaOptionRule.preferredLocales,
+    'required-resource-attributes': _SchemaOptionRule.boolean,
+    'nullable-getter': _SchemaOptionRule.boolean,
+    'format': _SchemaOptionRule.boolean,
+    'use-escaping': _SchemaOptionRule.boolean,
+    'suppress-warnings': _SchemaOptionRule.boolean,
+    'relax-syntax': _SchemaOptionRule.boolean,
+    'use-named-parameters': _SchemaOptionRule.boolean,
+    'synthetic-package': _SchemaOptionRule.boolean,
+  },
+  headerAndHeaderFileMutuallyExclusive: true,
+  syntheticPackageTrueSupported: false,
+  defaultArbDirectory: 'lib/l10n',
+  defaultOutputDirectory: null,
+  defaultTemplateArbFile: 'app_en.arb',
+  defaultOutputLocalizationFile: 'app_localizations.dart',
+  defaultUntranslatedMessagesFile: null,
+  defaultOutputClass: 'AppLocalizations',
+  defaultHeader: null,
+  defaultHeaderFile: null,
+  defaultUseDeferredLoading: false,
+  defaultPreferredSupportedLocales: [],
+  defaultRequiredResourceAttributes: false,
+  defaultNullableGetter: true,
+  defaultYamlFormat: true,
+  defaultCommandFormat: false,
+  defaultUseEscaping: false,
+  defaultSuppressWarnings: false,
+  defaultRelaxSyntax: false,
+  defaultUseNamedParameters: false,
+  defaultSyntheticPackage: false,
+);
 
 _SchemaV1Table? _tableFor(Version version) {
   return switch (version.toString()) {
     '3.38.7' => _flutter3387Table,
     '3.41.5' => _flutter3415Table,
     '3.44.1' => _flutter3441Table,
+    '3.44.9' => _flutter3449Table,
     _ => null,
   };
 }

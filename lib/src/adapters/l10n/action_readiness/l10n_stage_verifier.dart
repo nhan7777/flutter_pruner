@@ -523,7 +523,11 @@ void _validateAnalyzerContext(
   L10nFamilySnapshot snapshot,
   List<L10nEvidenceFailure> failures,
 ) {
-  final result = const L10nAnalyzerContextAuthorityProjector().project(project);
+  final result = const L10nAnalyzerContextAuthorityProjector().project(
+    project,
+    nestedAuthorityPaths:
+        snapshot.analysisOptionsProjection.nestedAuthorityPaths,
+  );
   switch (result) {
     case L10nAnalyzerContextAuthorityProjectionRejected(:final failure):
       failures.add(

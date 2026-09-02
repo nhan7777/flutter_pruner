@@ -757,19 +757,28 @@ Each oracle-removable key is exercised independently so a family batch cannot
 hide the failing key. A second run removes the complete selected family batch
 to prove atomic batch semantics.
 
-The initial non-vacuous positive denominator is all 378 retained
-oracle-removable l10n keys: Smooth App 323, normalized GSY 17, and GitJournal
-38. The family denominator is three. All 378 individual candidates and all
+The corrected V2 non-vacuous positive denominator is all 367 retained
+oracle-removable l10n keys: Smooth App 312, normalized GSY 17, and GitJournal
+38. Eleven Smooth keys referenced by the full production analyze/test surface
+are frozen as mutation-negative corrections. The family denominator is three.
+All 367 individual candidates and all
 three family batches must be attempted under their exact target toolchains:
-Smooth App 3.38.7 from its repository `.fvmrc`, normalized GSY 3.44.1 from its
+Smooth App 3.44.9 from its frozen `.fvmrc` overlay, normalized GSY 3.44.1 from its
 repository `.fvmrc`, and GitJournal 3.41.5 from the retained CI-selected
-resolution evidence. The historical Smooth mutation run used Flutter 3.44.9;
-it remains supporting evidence but cannot satisfy this new target-pin gate.
+resolution evidence.
 Failure to provision one pinned project/toolchain blocks the gate; it does not
-shrink the denominator. The 2,224 retained used-key negatives must remain
+shrink the denominator. The 2,235 retained used-key negatives must remain
 non-candidates, and explicit malformed, blocker, stale-output, and
 unexpected-write negative fixtures must reject with their predeclared reason
 classes.
+
+GitJournal is provisioned with the frozen
+`gitjournal-normalized-family-v1.json` byte transform before scanning. It
+removes only the 21 locale-only `settingsExperimentalMerge` members and the
+inconsistent Russian `@rootFolder` metadata member that the pinned Flutter
+generator ignores. The transform is non-equivalent by declaration, names exact
+original/replacement hashes, and remains restricted to this repository SHA and
+policy; it does not weaken GSY's decoded-object-equivalence requirement.
 
 ## Stage 1 Exit Gate
 
@@ -783,12 +792,12 @@ Stage 1 is complete only when fresh evidence proves:
   failed baseline/candidate verification;
 - zero unexpected staged writes for every accepted candidate;
 - zero original-project byte, mode, or status drift;
-- accepted eligible keys equal the predeclared 378 of 378 and accepted family
+- accepted eligible keys equal the predeclared 367 of 367 and accepted family
   batches equal three of three;
-- disposable complete-copy no-resolution policies pass for all 378 individual
+- disposable complete-copy no-resolution policies pass for all 367 individual
   candidates and all three family batches, with zero full-policy failures and
-  381 of 381 proven restorations;
-- all 2,224 static negative keys remain non-candidates and every predeclared
+  370 of 370 proven restorations;
+- all 2,235 static negative keys remain non-candidates and every predeclared
   mutation-negative fixture rejects for an allowed reason;
 - candidate-level and whole-family evidence remain independently attributable;
   and

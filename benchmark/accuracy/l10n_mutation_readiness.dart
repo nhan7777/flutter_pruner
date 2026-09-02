@@ -13,10 +13,11 @@ import 'package:flutter_pruner/src/reporting/report_object_backend.dart';
 import 'package:path/path.dart' as p;
 
 import 'src/l10n_mutation_manifest.dart';
+import 'src/l10n_readiness_production.dart';
 
-const _schemaVersion = 1;
+const _schemaVersion = 2;
 const _artifactKind = 'flutter-pruner-l10n-stage1-readiness';
-const _requiredSdkVersions = <String>{'3.38.7', '3.41.5', '3.44.1'};
+const _requiredSdkVersions = <String>{'3.41.5', '3.44.1', '3.44.9'};
 const _topLevelKeys = <String>{
   'schemaVersion',
   'artifactKind',
@@ -206,12 +207,12 @@ final class L10nReadinessDenominators {
   });
 
   static const productionFull = L10nReadinessDenominators(
-    individualKeys: 378,
+    individualKeys: 367,
     familyBatches: 3,
-    staticPositiveCandidates: 378,
-    staticNegativeNonCandidates: 2224,
+    staticPositiveCandidates: 367,
+    staticNegativeNonCandidates: 2235,
     mutationNegativeFixtures: 14,
-    requiredRestorations: 381,
+    requiredRestorations: 370,
   );
 
   final int individualKeys;
@@ -548,6 +549,7 @@ abstract interface class L10nReadinessProjectView {
 final class L10nStaticScanResult {
   L10nStaticScanResult({
     required this.authorityIdentity,
+    this.analysisAuthority,
     required Map<String, String> actualNodeIdByOracleCaseId,
     required Set<String> candidateOracleCaseIds,
     required this.publicSafeL10n,
@@ -576,6 +578,10 @@ final class L10nStaticScanResult {
   }
 
   final String authorityIdentity;
+
+  /// Runtime-only immutable analysis authority. Production evaluation requires
+  /// object identity with the snapshot retained by its disposable view.
+  final Object? analysisAuthority;
   final Map<String, String> actualNodeIdByOracleCaseId;
   final Set<String> candidateOracleCaseIds;
   final int publicSafeL10n;
@@ -591,6 +597,35 @@ abstract interface class L10nHarnessScanner {
   );
 }
 
+/// One stable, redaction-safe internal verdict failure.
+final class L10nVerdictFailure {
+  L10nVerdictFailure({
+    required this.code,
+    required this.stage,
+    required this.detailCode,
+    this.relativePath,
+  }) {
+    if (!_safeIdentity(code) ||
+        !_safeIdentity(stage) ||
+        !_safeIdentity(detailCode) ||
+        relativePath != null && !_safeRelativePath(relativePath!)) {
+      throw ArgumentError('verdict failure is not redaction-safe');
+    }
+  }
+
+  final String code;
+  final String stage;
+  final String detailCode;
+  final String? relativePath;
+
+  Map<String, Object?> toJson() => {
+    'code': code,
+    'detailCode': detailCode,
+    if (relativePath != null) 'relativePath': relativePath,
+    'stage': stage,
+  };
+}
+
 /// Internal pipeline result. [mutationAuthority] stays process-local and is
 /// handed directly to the corpus runner only after an accepted verdict.
 final class L10nInternalEvidenceResult {
@@ -604,7 +639,8 @@ final class L10nInternalEvidenceResult {
     required this.candidateGeneratorMicros,
     required this.sampledPeakRssBytes,
     required this.verdictIdentity,
-  }) {
+    required List<L10nVerdictFailure> verdictFailures,
+  }) : verdictFailures = List.unmodifiable(verdictFailures) {
     for (final value in <int>[
       bytesCopied,
       stageMicros,
@@ -619,7 +655,8 @@ final class L10nInternalEvidenceResult {
     if (!_safeRecordIdentity(selectionIdentity) ||
         !_safeRecordIdentity(verdictIdentity) ||
         verdictIdentity == 'notRun' ||
-        accepted != (mutationAuthority != null)) {
+        accepted != (mutationAuthority != null) ||
+        accepted != this.verdictFailures.isEmpty) {
       throw ArgumentError('internal evidence authority is inconsistent');
     }
   }
@@ -633,6 +670,7 @@ final class L10nInternalEvidenceResult {
   final int candidateGeneratorMicros;
   final int sampledPeakRssBytes;
   final String verdictIdentity;
+  final List<L10nVerdictFailure> verdictFailures;
 }
 
 /// Complete-corpus policy and restoration result for one accepted verdict.
@@ -693,9 +731,10 @@ final class L10nEvidenceResult {
     required this.policyMicros,
     required this.sampledPeakRssBytes,
     required this.verdictIdentity,
+    required List<L10nVerdictFailure> verdictFailures,
     required this.corpusPolicyIdentity,
     required this.restorationIdentity,
-  });
+  }) : verdictFailures = List.unmodifiable(verdictFailures);
 
   factory L10nEvidenceResult.fromInternal(
     String selectionIdentity,
@@ -726,6 +765,7 @@ final class L10nEvidenceResult {
           ? internal.sampledPeakRssBytes
           : corpus.sampledPeakRssBytes,
       verdictIdentity: internal.verdictIdentity,
+      verdictFailures: internal.verdictFailures,
       corpusPolicyIdentity: corpus?.corpusPolicyIdentity ?? 'notRun',
       restorationIdentity: corpus?.restorationIdentity ?? 'notRun',
     );
@@ -744,6 +784,7 @@ final class L10nEvidenceResult {
   final int policyMicros;
   final int sampledPeakRssBytes;
   final String verdictIdentity;
+  final List<L10nVerdictFailure> verdictFailures;
   final String corpusPolicyIdentity;
   final String restorationIdentity;
 
@@ -769,6 +810,9 @@ final class L10nEvidenceResult {
     'selectionIdentity': selectionIdentity,
     'stageMicros': stageMicros,
     'unexpectedWriteCount': unexpectedWriteCount,
+    'verdictFailures': [
+      for (final failure in verdictFailures) failure.toJson(),
+    ],
     'verdictIdentity': verdictIdentity,
   };
 }
@@ -855,6 +899,7 @@ final class L10nMutationReadinessDependencies {
     required this.checkpointStore,
     required this.monotonicMicros,
     this.onStaticGate,
+    this.enableProjectEligibilityPreflight = false,
   });
 
   final L10nReadinessPlanLoader loadPlan;
@@ -866,6 +911,7 @@ final class L10nMutationReadinessDependencies {
   final L10nReadinessCheckpointStore checkpointStore;
   final MonotonicMicros monotonicMicros;
   final void Function(String projectId)? onStaticGate;
+  final bool enableProjectEligibilityPreflight;
 }
 
 /// Recursively sorts JSON object keys and appends exactly one final newline.
@@ -1243,7 +1289,8 @@ Future<int> runL10nMutationReadiness(
     plan = await dependencies.loadPlan(options);
     _validatePlanForOptions(plan, options);
     _validateOutputAuthority(plan, options);
-  } catch (_) {
+  } catch (error, stackTrace) {
+    _debugReadinessError(error, stackTrace);
     return 2;
   }
 
@@ -1266,9 +1313,39 @@ Future<int> runL10nMutationReadiness(
         // Prove checkpoint persistence before provisioning any mutable view.
         await _writeCheckpoint(lease, artifact);
       }
+      if (dependencies.enableProjectEligibilityPreflight) {
+        for (final projectId in [...plan.familyProjectIds]..sort()) {
+          if (artifact.familyBatches.containsKey(projectId)) continue;
+          final attempt = await _runFamilyAttempt(
+            plan: plan,
+            projectId: projectId,
+            dependencies: dependencies,
+          );
+          artifact.recordProject(attempt.project);
+          artifact.familyBatches[projectId] = attempt.record;
+          await _writeCheckpoint(lease, artifact);
+        }
+      }
+
       for (final caseId in [...plan.individualCaseIds]..sort()) {
         if (artifact.cases.containsKey(caseId)) continue;
         final oracleCase = artifact.oracleById[caseId]!;
+        final eligibility = dependencies.enableProjectEligibilityPreflight
+            ? artifact.familyBatches[oracleCase.projectId]
+            : null;
+        if (eligibility != null && eligibility['status'] == 'failed') {
+          final project = artifact.projects[oracleCase.projectId];
+          if (project == null) {
+            throw StateError('eligibility scan evidence is unavailable');
+          }
+          artifact.cases[caseId] = _eligibilityRejectedCaseRecord(
+            oracleCase,
+            project,
+            eligibility,
+          );
+          await _writeCheckpoint(lease, artifact);
+          continue;
+        }
         final attempt = await _runIndividualAttempt(
           plan: plan,
           oracleCase: oracleCase,
@@ -1279,16 +1356,18 @@ Future<int> runL10nMutationReadiness(
         await _writeCheckpoint(lease, artifact);
       }
 
-      for (final projectId in [...plan.familyProjectIds]..sort()) {
-        if (artifact.familyBatches.containsKey(projectId)) continue;
-        final attempt = await _runFamilyAttempt(
-          plan: plan,
-          projectId: projectId,
-          dependencies: dependencies,
-        );
-        artifact.recordProject(attempt.project);
-        artifact.familyBatches[projectId] = attempt.record;
-        await _writeCheckpoint(lease, artifact);
+      if (!dependencies.enableProjectEligibilityPreflight) {
+        for (final projectId in [...plan.familyProjectIds]..sort()) {
+          if (artifact.familyBatches.containsKey(projectId)) continue;
+          final attempt = await _runFamilyAttempt(
+            plan: plan,
+            projectId: projectId,
+            dependencies: dependencies,
+          );
+          artifact.recordProject(attempt.project);
+          artifact.familyBatches[projectId] = attempt.record;
+          await _writeCheckpoint(lease, artifact);
+        }
       }
 
       final fixtureIds = plan.mutationNegativeFixtures.keys.toList()..sort();
@@ -1307,7 +1386,8 @@ Future<int> runL10nMutationReadiness(
       await _writeCheckpoint(lease, artifact, finalArtifact: true);
       result = artifact.status == 'passed' ? 0 : 1;
     }
-  } catch (_) {
+  } catch (error, stackTrace) {
+    _debugReadinessError(error, stackTrace);
     result = 2;
   }
   if (lease != null) {
@@ -1318,6 +1398,14 @@ Future<int> runL10nMutationReadiness(
     }
   }
   return result;
+}
+
+void _debugReadinessError(Object error, StackTrace stackTrace) {
+  if (Platform.environment['FLUTTER_PRUNER_STAGE1_DEBUG'] == '1') {
+    stderr
+      ..writeln(error)
+      ..writeln(stackTrace);
+  }
 }
 
 Future<void> _writeCheckpoint(
@@ -1524,6 +1612,30 @@ Future<Map<String, Object?>> _runNegativeFixture(
   return record;
 }
 
+Map<String, Object?> _eligibilityRejectedCaseRecord(
+  L10nReadinessOracleCase oracleCase,
+  Map<String, Object?> project,
+  Map<String, Object?> family,
+) {
+  final staticMismatch = project['status'] == 'failed';
+  if (staticMismatch != (family['failureReason'] == 'staticOracleMismatch')) {
+    throw const FormatException('eligibility evidence is inconsistent');
+  }
+  return {
+    'actualNodeId': null,
+    'attemptMicros': 0,
+    'caseId': oracleCase.caseId,
+    'decodedKey': oracleCase.decodedKey,
+    'evidence': null,
+    'expectedScannerPresence': oracleCase.expectedScannerPresence,
+    'failureReason': staticMismatch
+        ? 'staticOracleMismatch'
+        : 'projectEligibilityRejected',
+    'projectId': oracleCase.projectId,
+    'status': 'failed',
+  };
+}
+
 List<L10nReadinessOracleCase> _projectCases(
   L10nReadinessPlan plan,
   String projectId,
@@ -1716,6 +1828,18 @@ final class _ReadinessArtifact {
           !staticMismatch && project['status'] != 'passed') {
         throw const FormatException(
           'mutation evidence lacks its exact project scan state',
+        );
+      }
+    }
+    for (final record in cases.values.where(
+      (entry) => entry['failureReason'] == 'projectEligibilityRejected',
+    )) {
+      final family = familyBatches[record['projectId']];
+      if (family == null ||
+          family['status'] != 'failed' ||
+          family['failureReason'] == 'staticOracleMismatch') {
+        throw const FormatException(
+          'eligibility rejection lacks its family evidence',
         );
       }
     }
@@ -1914,6 +2038,7 @@ const _evidenceKeys = <String>{
   'selectionIdentity',
   'stageMicros',
   'unexpectedWriteCount',
+  'verdictFailures',
   'verdictIdentity',
 };
 
@@ -2049,14 +2174,14 @@ void _validateCaseRecord(
     throw const FormatException('case evidence selection drift');
   }
   final passed = evidence != null && _evidencePasses(evidence);
-  final expectedFailureReason = evidence == null
-      ? 'staticOracleMismatch'
+  final expectedFailureReasons = evidence == null
+      ? const {'staticOracleMismatch', 'projectEligibilityRejected'}
       : evidence['acceptedInternalVerdict'] == false
-      ? 'internalVerdictRejected'
-      : 'corpusEvidenceRejected';
+      ? const {'internalVerdictRejected'}
+      : const {'corpusEvidenceRejected'};
   if ((record['status'] == 'passed') != passed ||
       (passed && record['failureReason'] != null) ||
-      (!passed && record['failureReason'] != expectedFailureReason)) {
+      (!passed && !expectedFailureReasons.contains(record['failureReason']))) {
     throw const FormatException('case record status is inconsistent');
   }
   final actualNodeId = record['actualNodeId'];
@@ -2171,6 +2296,36 @@ Map<String, Object?>? _validatedEvidence(Object? value) {
       throw const FormatException('evidence identity is malformed');
     }
   }
+  final verdictFailures = _objectList(
+    evidence['verdictFailures'],
+    'verdictFailures',
+  );
+  for (final value in verdictFailures) {
+    final failure = _stringMap(value);
+    final keys = failure.keys.toSet();
+    if (!_jsonEquals(
+      keys.toList()..sort(),
+      <String>[
+        'code',
+        'detailCode',
+        if (failure.containsKey('relativePath')) 'relativePath',
+        'stage',
+      ]..sort(),
+    )) {
+      throw const FormatException('verdict failure shape is malformed');
+    }
+    for (final key in const ['code', 'detailCode', 'stage']) {
+      final token = failure[key];
+      if (token is! String || !_safeIdentity(token)) {
+        throw const FormatException('verdict failure token is malformed');
+      }
+    }
+    final relativePath = failure['relativePath'];
+    if (relativePath != null &&
+        (relativePath is! String || !_safeRelativePath(relativePath))) {
+      throw const FormatException('verdict failure path is malformed');
+    }
+  }
   final accepted = evidence['acceptedInternalVerdict']! as bool;
   final rejectedShape =
       evidence['corpusPolicyPassed'] == false &&
@@ -2180,7 +2335,8 @@ Map<String, Object?>? _validatedEvidence(Object? value) {
       evidence['policyMicros'] == 0 &&
       evidence['corpusPolicyIdentity'] == 'notRun' &&
       evidence['restorationIdentity'] == 'notRun';
-  if (!accepted && !rejectedShape ||
+  if (accepted != verdictFailures.isEmpty ||
+      !accepted && !rejectedShape ||
       accepted &&
           (evidence['corpusPolicyIdentity'] == 'notRun' ||
               evidence['restorationIdentity'] == 'notRun') ||
@@ -2702,9 +2858,6 @@ Future<T> _runPreservingPrimary<T>(
   return result as T;
 }
 
-/// Task 15B supplies production dependencies. Until then the executable stays
-/// deliberately unavailable instead of pretending fake evidence is runnable.
 Future<void> main(List<String> arguments) async {
-  stderr.writeln('Production l10n readiness dependencies are not wired yet.');
-  exitCode = 2;
+  exitCode = await runProductionL10nMutationReadiness(arguments);
 }

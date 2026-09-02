@@ -33,6 +33,7 @@ void main() {
       );
       expect(config.readAsStringSync(), contains('mode: application'));
       expect(config.readAsStringSync(), contains('complete: false'));
+      expect(config.readAsStringSync(), contains('  excluded_entrypoints: []'));
       final loaded = await ProjectConfig.load(config, projectRoot: project);
       expect(loaded.targetMatrix.isComplete, isFalse);
       expect(
@@ -56,6 +57,7 @@ void main() {
     final config = File(p.join(project.path, '.flutter_pruner', 'config.yaml'));
     final content = config.readAsStringSync();
     expect(content, contains('mode: package'));
+    expect(content, isNot(contains('excluded_entrypoints:')));
     expect(content, isNot(contains('root_coverage:')));
     expect(content, contains('    - lib/example_package.dart'));
     final loaded = await ProjectConfig.load(config, projectRoot: project);
@@ -77,6 +79,7 @@ void main() {
     final config = File(p.join(project.path, '.flutter_pruner', 'config.yaml'));
     final loaded = await ProjectConfig.load(config, projectRoot: project);
     expect(loaded.analysisMode.wireName, 'package-internal');
+    expect(config.readAsStringSync(), isNot(contains('excluded_entrypoints:')));
     expect(loaded.targetMatrix.isComplete, isTrue);
     expect(loaded.rootCoverage.internalBoundaryComplete, isTrue);
     expect(loaded.rootCoverage.externalConsumersCovered, isFalse);
@@ -779,23 +782,27 @@ void main() {
     },
   );
 
-  test('init suggests the short scan command from project cwd', () async {
-    final project = _project(
-      'cwd_next',
-      name: 'cwd_next_app',
-      application: true,
-    );
+  test(
+    'init suggests the short scan command from project cwd',
+    () async {
+      final project = _project(
+        'cwd_next',
+        name: 'cwd_next_app',
+        application: true,
+      );
 
-    final result = await Process.run(Platform.resolvedExecutable, [
-      p.join(Directory.current.path, 'bin', 'flutter_pruner.dart'),
-      'init',
-      '--no-interactive',
-    ], workingDirectory: project.path);
+      final result = await Process.run(Platform.resolvedExecutable, [
+        p.join(Directory.current.path, 'bin', 'flutter_pruner.dart'),
+        'init',
+        '--no-interactive',
+      ], workingDirectory: project.path);
 
-    expect(result.exitCode, 0, reason: result.stderr as String);
-    expect(result.stdout, contains('Next: flutter_pruner scan'));
-    expect(result.stdout, isNot(contains('scan --project')));
-  }, timeout: const Timeout(Duration(minutes: 1)));
+      expect(result.exitCode, 0, reason: result.stderr as String);
+      expect(result.stdout, contains('Next: flutter_pruner scan'));
+      expect(result.stdout, isNot(contains('scan --project')));
+    },
+    timeout: const Timeout(Duration(minutes: 1)),
+  );
 }
 
 class _FakeInitPrompt implements InitPrompt, AnsiInitPrompt {

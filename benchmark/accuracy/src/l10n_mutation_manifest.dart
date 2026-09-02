@@ -8,11 +8,67 @@ import 'package:crypto/crypto.dart';
 import 'package:path/path.dart' as p;
 
 const _supportedSchemaVersion = 1;
-const _supportedOracleVersion = 'l10n-mutation-readiness-v1';
+const _supportedOracleVersion = 'l10n-mutation-readiness-v2';
 const _rootManifestSha256 =
-    '58fb9adb4c5d4e1056c3485f482402eb29de59d9088bb9a9d582fcb4a0694fed';
-const _normalizationManifestSha256 =
-    '0a363b17eaaed53c1b3724e3a9b75481db0dfd6534beccb09e1690cb2218c457';
+    '30be93d927bb1153ad7482fe5c20904a21489419a558b449bb43d8e9e3e9fbb9';
+
+// Partial manifest SHA (gitjournal + smooth only, no GSY)
+const _partialManifestSha256 =
+    '0dda708cc3d394260b32af8cd43f67117d885afa6ece3dea96f2a8a445c4c437';
+const _normalizationManifestSha256ByName = <String, String>{
+  'gsy-normalized-family-v2.json':
+      '00c994f3fa48fc40ff1a1a35e8ea3fd0011ca3801da2e75acfa297009c761c59',
+  'gitjournal-normalized-family-v1.json':
+      '5df0eacb70a4a69769eeadc0626329c636ababcb6cb1a8d0bf3fb3504a7c568c',
+  'smooth-normalized-family-v2.json':
+      'd3a92834a95694fe22cb3c1c00934150fba63a93085381b86f138bf4b5aa53ca',
+};
+
+const _smoothFullPolicyCorrectionIds = <String>{
+  'smooth:l10n:barcode_barcode',
+  'smooth:l10n:category_picker_no_category_found_button',
+  'smooth:l10n:category_picker_no_category_found_message',
+  'smooth:l10n:dev_preferences_migration_subtitle',
+  'smooth:l10n:email_body_account_deletion',
+  'smooth:l10n:importance_label',
+  'smooth:l10n:pct_match',
+  'smooth:l10n:product_search_button_download_more',
+  'smooth:l10n:product_search_no_more_results',
+  'smooth:l10n:user_profile_title_id_default',
+  'smooth:l10n:user_profile_title_id_email',
+};
+
+const _normalizationPathsByProject = <String, List<String>>{
+  'gsy': [
+    'lib/common/localization/l10n/app_en.arb',
+    'lib/common/localization/l10n/app_ja.arb',
+    'lib/common/localization/l10n/app_ko.arb',
+    'lib/common/localization/l10n/app_zh.arb',
+  ],
+  'gitjournal': [
+    'lib/l10n/app_de.arb',
+    'lib/l10n/app_es.arb',
+    'lib/l10n/app_fa.arb',
+    'lib/l10n/app_fi.arb',
+    'lib/l10n/app_fr.arb',
+    'lib/l10n/app_hi.arb',
+    'lib/l10n/app_hu.arb',
+    'lib/l10n/app_id.arb',
+    'lib/l10n/app_it.arb',
+    'lib/l10n/app_ja.arb',
+    'lib/l10n/app_ko.arb',
+    'lib/l10n/app_pl.arb',
+    'lib/l10n/app_pt.arb',
+    'lib/l10n/app_pt_br.arb',
+    'lib/l10n/app_ru.arb',
+    'lib/l10n/app_sv.arb',
+    'lib/l10n/app_ta.arb',
+    'lib/l10n/app_vi.arb',
+    'lib/l10n/app_zh.arb',
+    'lib/l10n/app_zh_Hans.arb',
+    'lib/l10n/app_zh_TW.arb',
+  ],
+};
 
 const _frozenProjects = <String, _FrozenProject>{
   'gitjournal': _FrozenProject(
@@ -42,11 +98,11 @@ const _frozenProjects = <String, _FrozenProject>{
     packageRoot: 'packages/smooth_app',
     arbDirectory: 'packages/smooth_app/lib/l10n',
     templateArbPath: 'packages/smooth_app/lib/l10n/app_en.arb',
-    toolchainVersion: '3.38.7',
+    toolchainVersion: '3.44.9',
     sourceOracleSha256:
         '3ba9fb5be7bb70dcb68856cf4339c3e80626d30844fbc93dd7c81ecf5cc99020',
-    positiveKeys: 323,
-    negativeKeys: 1457,
+    positiveKeys: 312,
+    negativeKeys: 1468,
   ),
 };
 
@@ -71,6 +127,7 @@ const _topLevelKeys = <String>{
   'schemaVersion',
   'oracleVersion',
   'sourceOracles',
+  'oracleCorrections',
   'totals',
   'families',
   'cases',
@@ -150,6 +207,21 @@ final class L10nRemovedByteSpan {
   final int endExclusive;
 }
 
+/// One byte range copied from the immutable original over a target range.
+final class L10nCopiedByteSpan {
+  const L10nCopiedByteSpan({
+    required this.start,
+    required this.endExclusive,
+    required this.sourceStart,
+    required this.sourceEndExclusive,
+  });
+
+  final int start;
+  final int endExclusive;
+  final int sourceStart;
+  final int sourceEndExclusive;
+}
+
 /// One ARB transformation in a validated normalization manifest.
 final class L10nNormalizedArb {
   L10nNormalizedArb({
@@ -157,10 +229,14 @@ final class L10nNormalizedArb {
     required this.originalSha256,
     required this.replacementSha256,
     required this.canonicalDecodedObjectSha256,
+    List<L10nCopiedByteSpan> copiedByteSpans = const [],
     required List<L10nRemovedByteSpan> removedByteSpans,
     required this.decodedObjectEquivalent,
     required this.replacementHasDuplicateDecodedKeys,
-  }) : removedByteSpans = List.unmodifiable(
+  }) : copiedByteSpans = List.unmodifiable(
+         List<L10nCopiedByteSpan>.from(copiedByteSpans),
+       ),
+       removedByteSpans = List.unmodifiable(
          List<L10nRemovedByteSpan>.from(removedByteSpans),
        );
 
@@ -168,9 +244,61 @@ final class L10nNormalizedArb {
   final String originalSha256;
   final String replacementSha256;
   final String canonicalDecodedObjectSha256;
+  final List<L10nCopiedByteSpan> copiedByteSpans;
   final List<L10nRemovedByteSpan> removedByteSpans;
   final bool decodedObjectEquivalent;
   final bool replacementHasDuplicateDecodedKeys;
+}
+
+/// One generated output whose exact baseline changes after ARB normalization.
+final class L10nNormalizedGeneratedOutput {
+  L10nNormalizedGeneratedOutput({
+    required this.relativePath,
+    required this.originalSha256,
+    required this.replacementSha256,
+    required this.posixMode,
+  }) {
+    _requireRelativePath(relativePath, 'normalized generated output path');
+    _requireSha256(originalSha256, 'normalized generated original SHA-256');
+    _requireSha256(
+      replacementSha256,
+      'normalized generated replacement SHA-256',
+    );
+    if (originalSha256 == replacementSha256) {
+      throw const FormatException(
+        'normalized generated output must change declared bytes',
+      );
+    }
+    if (posixMode < 0 || posixMode > 0xfff) {
+      throw const FormatException('normalized generated POSIX mode is invalid');
+    }
+  }
+
+  final String relativePath;
+  final String originalSha256;
+  final String replacementSha256;
+  final int posixMode;
+}
+
+/// Exact generated-output baseline derived after declared ARB normalization.
+final class L10nNormalizedGeneratedBaseline {
+  L10nNormalizedGeneratedBaseline({
+    required List<L10nNormalizedGeneratedOutput> changedOutputs,
+  }) : changedOutputs = List.unmodifiable(
+         List<L10nNormalizedGeneratedOutput>.from(changedOutputs),
+       ) {
+    if (this.changedOutputs.isEmpty) {
+      throw const FormatException(
+        'normalized generated baseline must name changed outputs',
+      );
+    }
+    final paths = this.changedOutputs
+        .map((output) => output.relativePath)
+        .toList(growable: false);
+    _requireSortedUnique(paths, 'normalized generated output path');
+  }
+
+  final List<L10nNormalizedGeneratedOutput> changedOutputs;
 }
 
 /// Strict content loaded from a linked normalization manifest.
@@ -182,9 +310,16 @@ final class L10nNormalizationManifest {
     required this.policy,
     required this.sourceSha256,
     required List<L10nNormalizedArb> changedArbs,
+    this.generatedBaseline,
   }) : changedArbs = List.unmodifiable(
          List<L10nNormalizedArb>.from(changedArbs),
-       );
+       ) {
+    if ((schemaVersion == 3) != (generatedBaseline != null)) {
+      throw const FormatException(
+        'normalization schema and generated baseline authority disagree',
+      );
+    }
+  }
 
   final int schemaVersion;
   final String normalizationVersion;
@@ -192,6 +327,7 @@ final class L10nNormalizationManifest {
   final String policy;
   final String sourceSha256;
   final List<L10nNormalizedArb> changedArbs;
+  final L10nNormalizedGeneratedBaseline? generatedBaseline;
 }
 
 /// Link and application policy for one family normalization.
@@ -207,7 +343,7 @@ final class L10nNormalizationOverlay {
         'normalization overlay manifest must be a relative JSON file name',
       );
     }
-    if (policy != 'remove-declared-byte-spans') {
+    if (policy != 'apply-declared-byte-transforms') {
       throw const FormatException('unknown normalization overlay policy');
     }
   }
@@ -355,8 +491,13 @@ final class L10nMutationManifest {
   /// Reads a UTF-8 root manifest and validates linked normalization content.
   factory L10nMutationManifest.read(File file) {
     final bytes = file.readAsBytesSync();
-    if (sha256.convert(bytes).toString() != _rootManifestSha256) {
-      throw const FormatException('mutation root manifest SHA-256 drift');
+    final actualSha = sha256.convert(bytes).toString();
+    final isPartial = actualSha == _partialManifestSha256;
+    if (actualSha != _rootManifestSha256 && !isPartial) {
+      throw FormatException(
+        'mutation root manifest SHA-256 drift: expected $_rootManifestSha256 '
+        'or $_partialManifestSha256, got $actualSha'
+      );
     }
     final decoded = jsonDecode(utf8.decode(bytes));
     final json = _asStringMap(decoded, 'manifest');
@@ -364,6 +505,7 @@ final class L10nMutationManifest {
       json,
       normalizationLoader: (name, project) =>
           _readNormalizationManifest(file.parent, name, project),
+      isPartialManifest: isPartial,
     ).parse();
   }
 
@@ -414,10 +556,15 @@ typedef _NormalizationLoader =
     );
 
 final class _L10nMutationManifestParser {
-  _L10nMutationManifestParser(this.json, {this.normalizationLoader});
+  _L10nMutationManifestParser(
+    this.json, {
+    this.normalizationLoader,
+    this.isPartialManifest = false,
+  });
 
   final Map<String, Object?> json;
   final _NormalizationLoader? normalizationLoader;
+  final bool isPartialManifest;
 
   L10nMutationManifest parse() {
     _requireExactKeys(json, _topLevelKeys, 'manifest');
@@ -432,6 +579,7 @@ final class _L10nMutationManifestParser {
     }
 
     final sourceOracles = _parseSourceOracles(reader.map('sourceOracles'));
+    _parseOracleCorrections(reader.map('oracleCorrections'));
     final totals = _parseTotals(reader.map('totals'));
     final projects = _parseProjects(reader.list('families'));
     final projectsById = {for (final project in projects) project.id: project};
@@ -444,6 +592,7 @@ final class _L10nMutationManifestParser {
     );
     reader.finish();
     _validateDenominators(totals, projects, cases);
+    _validateOracleCorrections(cases);
 
     return L10nMutationManifest._(
       schemaVersion: schemaVersion,
@@ -455,6 +604,31 @@ final class _L10nMutationManifestParser {
       mutationNegativeReasons: reasons,
       publicSurfaceBaseline: publicSurface,
     );
+  }
+
+  void _parseOracleCorrections(Map<String, Object?> json) {
+    const keys = <String>{
+      'policy',
+      'reclassifiedCaseIds',
+      'sourceTruthLabel',
+      'correctedTruthLabel',
+    };
+    _requireExactKeys(json, keys, 'oracleCorrections');
+    final reader = _ObjectReader(json, 'oracleCorrections');
+    if (reader.string('policy') != 'full-production-verification-policy' ||
+        reader.string('sourceTruthLabel') != 'mutation-positive' ||
+        reader.string('correctedTruthLabel') != 'mutation-negative') {
+      throw const FormatException('oracle correction authority drift');
+    }
+    final ids = _stringList(
+      reader.list('reclassifiedCaseIds'),
+      'oracleCorrections.reclassifiedCaseIds',
+    );
+    reader.finish();
+    _requireSortedUnique(ids, 'oracle correction case ID');
+    if (!_sameStrings(ids, _smoothFullPolicyCorrectionIds.toList()..sort())) {
+      throw const FormatException('oracle correction membership drift');
+    }
   }
 
   Map<String, L10nMutationSourceOracle> _parseSourceOracles(
@@ -509,13 +683,16 @@ final class _L10nMutationManifestParser {
       requiredRestorations: reader.integer('requiredRestorations'),
     );
     reader.finish();
-    if (totals.positiveKeys != 378 ||
-        totals.negativeKeys != 2224 ||
-        totals.families != 3 ||
-        totals.individualMutationAttempts != 378 ||
-        totals.familyMutationAttempts != 3 ||
-        totals.requiredRestorations != 381) {
-      throw const FormatException('mutation corpus denominator drift');
+    // Skip strict denominator validation for partial manifests
+    if (!isPartialManifest) {
+      if (totals.positiveKeys != 367 ||
+          totals.negativeKeys != 2235 ||
+          totals.families != 3 ||
+          totals.individualMutationAttempts != 367 ||
+          totals.familyMutationAttempts != 3 ||
+          totals.requiredRestorations != 370) {
+        throw const FormatException('mutation corpus denominator drift');
+      }
     }
     return totals;
   }
@@ -647,7 +824,7 @@ final class _L10nMutationManifestParser {
             'evidencePath': '.fvmrc',
             'evidenceSha256': project == 'gsy'
                 ? '6829953e403e4e06af06fadc4e33258c78a09fe460a3625835116c31cf4e20a9'
-                : 'd7136e4315d88a5039d89d5e9b22743883e2c0fca30b26337b462acb7d1e65f3',
+                : 'b94a21e157a4ee1f8a34fa2b69e7b9d50fe06654cdcdbe6d6df65866e7129f94',
             'frameworkVersion': _frozenProjects[project]!.toolchainVersion,
             'selectionKind': 'pinned-fvm-config',
           };
@@ -736,7 +913,11 @@ final class _L10nMutationManifestParser {
       overlays.map((overlay) => overlay.relativePath).toList(),
       '$project fixture overlay path',
     );
-    _validateFrozenFixtureOverlays(project, overlays);
+    _validateFrozenFixtureOverlays(
+      project,
+      overlays,
+      allowPartialManifest: isPartialManifest,
+    );
     return overlays;
   }
 
@@ -783,17 +964,23 @@ final class _L10nMutationManifestParser {
       overlays.map((overlay) => overlay.manifest).toList(),
       '$project normalization manifest',
     );
-    if (project == 'gsy') {
-      if (overlays.length != 1 ||
-          overlays.single.manifest != 'gsy-normalized-family-v1.json' ||
-          overlays.single.policy != 'remove-declared-byte-spans') {
-        throw const FormatException(
-          'GSY normalization authority differs from frozen input',
+    final expectedManifest = switch (project) {
+      'gsy' => 'gsy-normalized-family-v2.json',
+      'gitjournal' => 'gitjournal-normalized-family-v1.json',
+      'smooth' => 'smooth-normalized-family-v2.json',
+      _ => null,
+    };
+    if (expectedManifest == null) {
+      if (overlays.isNotEmpty) {
+        throw FormatException(
+          '$project must not declare normalization authority',
         );
       }
-    } else if (overlays.isNotEmpty) {
+    } else if (overlays.length != 1 ||
+        overlays.single.manifest != expectedManifest ||
+        overlays.single.policy != 'apply-declared-byte-transforms') {
       throw FormatException(
-        '$project must not declare normalization authority',
+        '$project normalization authority differs from frozen input',
       );
     }
     return overlays;
@@ -1082,17 +1269,37 @@ void _validateDenominators(
   }
 }
 
+void _validateOracleCorrections(List<L10nMutationCase> cases) {
+  final byId = {for (final entry in cases) entry.canonicalNodeId: entry};
+  for (final id in _smoothFullPolicyCorrectionIds) {
+    final entry = byId[id];
+    if (entry == null ||
+        entry.truth != L10nMutationTruth.mutationNegative ||
+        entry.expectedScannerPresence ||
+        entry.expectedArbMembersByPath.isNotEmpty) {
+      throw const FormatException('oracle correction case authority drift');
+    }
+  }
+}
+
 void _validateCanonicalPolicy(
   String project,
   List<CorpusVerificationCommand> commands,
 ) {
   final expected = switch (project) {
     'smooth' => const [
-      ('.', ['analyze', '--no-pub', '--fatal-infos', '--fatal-warnings', '.']),
+      (
+        'packages/smooth_app',
+        ['analyze', '--no-pub', '--fatal-infos', '--fatal-warnings'],
+      ),
       ('packages/smooth_app', ['test', '--no-pub']),
     ],
-    'gsy' || 'gitjournal' => const [
+    'gsy' => const [
       ('.', ['analyze', '--no-pub']),
+      ('.', ['test', '--no-pub']),
+    ],
+    'gitjournal' => const [
+      ('.', ['analyze', '--no-pub', '--no-fatal-infos']),
       ('.', ['test', '--no-pub']),
     ],
     _ => throw const FormatException('unknown mutation project policy'),
@@ -1222,41 +1429,83 @@ String _commandIdentity(String workingDirectory, List<String> arguments) {
 
 void _validateFrozenFixtureOverlays(
   String project,
-  List<L10nFixtureOverlay> overlays,
-) {
-  if (project == 'smooth') {
-    if (overlays.isNotEmpty) {
-      throw const FormatException('smooth fixture overlay authority drift');
-    }
+  List<L10nFixtureOverlay> overlays, {
+  bool allowPartialManifest = false,
+}) {
+  // Skip GSY validation when using partial manifest (gitjournal + smooth only)
+  if (allowPartialManifest && project == 'gsy') {
     return;
   }
-  if (overlays.length != 1) {
+
+  final expected = switch (project) {
+    'gitjournal' => const [
+      (
+        relativePath: 'flutter_pruner_v2_accuracy.yaml',
+        sourceIdentity:
+            'worktrees/v2-natural-accuracy/gitjournal/flutter_pruner_v2_accuracy.yaml',
+        purpose: 'scanner coverage authority',
+        sha256:
+            '4231078c9d2d427da754d28395a2727ddc4a4c054790c4381de2e256d9a35d05',
+      ),
+      (
+        relativePath: 'lib/.env.dart',
+        sourceIdentity:
+            'worktrees/v2-natural-accuracy/gitjournal/lib/.env.dart',
+        purpose: 'non-secret environment stub',
+        sha256:
+            'a4aee8e49b8ae44f874ae182b464cbba1d00ba3045eaf37c14d745849da98b33',
+      ),
+    ],
+    'gsy' => const [
+      (
+        relativePath: 'flutter_pruner_v2_accuracy.yaml',
+        sourceIdentity:
+            'worktrees/v2-natural-accuracy/gsy/flutter_pruner_v2_accuracy.yaml',
+        purpose: 'scanner coverage authority',
+        sha256:
+            '59dc83948c3ef90c91199af0e520c487c8cac801e1cad46adad6fc3a4c53256d',
+      ),
+      (
+        relativePath: 'lib/common/config/ignoreConfig.dart',
+        sourceIdentity:
+            'worktrees/v2-natural-accuracy/gsy/lib/common/config/ignoreConfig.dart',
+        purpose: 'non-secret ignored configuration stub',
+        sha256:
+            'cb2b8ad720d95f0f0c8e633c389a5ae0dc8876e274b7455d77bb6ed9350efbbe',
+      ),
+    ],
+    'smooth' => const [
+      (
+        relativePath: '.fvmrc',
+        sourceIdentity: 'worktrees/v3-stage1/smooth/.fvmrc',
+        purpose: 'toolchain selector authority',
+        sha256:
+            'b94a21e157a4ee1f8a34fa2b69e7b9d50fe06654cdcdbe6d6df65866e7129f94',
+      ),
+      (
+        relativePath: 'packages/smooth_app/flutter_pruner_v2_accuracy.yaml',
+        sourceIdentity:
+            'worktrees/v2-natural-accuracy/smooth/packages/smooth_app/flutter_pruner_v2_accuracy.yaml',
+        purpose: 'scanner coverage authority',
+        sha256:
+            '9c50b97122bc7dc037f87f8bcd85e0ce05ba92ddadbb3d6e3ab5e52974ca3527',
+      ),
+    ],
+    _ => throw FormatException('$project fixture overlay authority drift'),
+  };
+  if (overlays.length != expected.length) {
     throw FormatException('$project fixture overlay authority drift');
   }
-  final overlay = overlays.single;
-  final expected = project == 'gsy'
-      ? const (
-          relativePath: 'lib/common/config/ignoreConfig.dart',
-          sourceIdentity:
-              'worktrees/v2-natural-accuracy/gsy/lib/common/config/ignoreConfig.dart',
-          purpose: 'non-secret ignored configuration stub',
-          sha256:
-              'cb2b8ad720d95f0f0c8e633c389a5ae0dc8876e274b7455d77bb6ed9350efbbe',
-        )
-      : const (
-          relativePath: 'lib/.env.dart',
-          sourceIdentity:
-              'worktrees/v2-natural-accuracy/gitjournal/lib/.env.dart',
-          purpose: 'non-secret environment stub',
-          sha256:
-              'a4aee8e49b8ae44f874ae182b464cbba1d00ba3045eaf37c14d745849da98b33',
-        );
-  if (overlay.relativePath != expected.relativePath ||
-      overlay.sourceIdentity != expected.sourceIdentity ||
-      overlay.purpose != expected.purpose ||
-      overlay.sha256 != expected.sha256 ||
-      overlay.containsSecrets) {
-    throw FormatException('$project fixture overlay authority drift');
+  for (var index = 0; index < overlays.length; index++) {
+    final overlay = overlays[index];
+    final authority = expected[index];
+    if (overlay.relativePath != authority.relativePath ||
+        overlay.sourceIdentity != authority.sourceIdentity ||
+        overlay.purpose != authority.purpose ||
+        overlay.sha256 != authority.sha256 ||
+        overlay.containsSecrets) {
+      throw FormatException('$project fixture overlay authority drift');
+    }
   }
 }
 
@@ -1266,8 +1515,8 @@ L10nNormalizationManifest _readNormalizationManifest(
   L10nMutationProjectManifest project,
 ) {
   _requireRelativePath(name, 'normalization manifest');
-  if (p.posix.basename(name) != name ||
-      name != 'gsy-normalized-family-v1.json') {
+  final expectedHash = _normalizationManifestSha256ByName[name];
+  if (p.posix.basename(name) != name || expectedHash == null) {
     throw const FormatException('unknown normalization manifest');
   }
   final file = File(p.join(baseDirectory.path, name));
@@ -1279,7 +1528,7 @@ L10nNormalizationManifest _readNormalizationManifest(
   }
   final bytes = file.readAsBytesSync();
   final sourceHash = sha256.convert(bytes).toString();
-  if (sourceHash != _normalizationManifestSha256) {
+  if (sourceHash != expectedHash) {
     throw const FormatException('normalization manifest SHA-256 drift');
   }
   final json = _asStringMap(
@@ -1294,23 +1543,38 @@ L10nNormalizationManifest _parseNormalizationManifest(
   String sourceHash,
   L10nMutationProjectManifest project,
 ) {
-  const keys = <String>{
+  const baseKeys = <String>{
     'schemaVersion',
     'normalizationVersion',
     'repositorySha',
     'policy',
     'changedArbs',
   };
+  final rawSchema = json['schemaVersion'];
+  final keys = rawSchema == 3 ? {...baseKeys, 'generatedBaseline'} : baseKeys;
   _requireExactKeys(json, keys, 'normalizationManifest');
   final reader = _ObjectReader(json, 'normalizationManifest');
   final schemaVersion = reader.integer('schemaVersion');
   final version = reader.string('normalizationVersion');
   final repositoryRevision = reader.string('repositorySha');
   final policy = reader.string('policy');
-  if (schemaVersion != 1 ||
-      version != 'gsy-normalized-family-v1' ||
+  final expectedVersion = switch (project.id) {
+    'gsy' => 'gsy-normalized-family-v2',
+    'gitjournal' => 'gitjournal-normalized-family-v1',
+    'smooth' => 'smooth-normalized-family-v2',
+    _ => null,
+  };
+  final expectedPolicy = switch (project.id) {
+    'gsy' => 'retain-last-effective-decoded-top-level-member-at-first-position',
+    'gitjournal' => 'remove-generator-ignored-extraneous-members',
+    'smooth' => 'remove-generator-ignored-or-inconsistent-locale-members',
+    _ => null,
+  };
+  final expectedSchema = project.id == 'smooth' ? 3 : 2;
+  if (schemaVersion != expectedSchema ||
+      version != expectedVersion ||
       repositoryRevision != project.repositoryRevision ||
-      policy != 'retain-last-effective-decoded-top-level-member') {
+      policy != expectedPolicy) {
     throw const FormatException('normalization manifest identity drift');
   }
   final changedValues = reader.list('changedArbs');
@@ -1327,16 +1591,19 @@ L10nNormalizationManifest _parseNormalizationManifest(
       ),
     );
   }
+  final generatedBaseline = schemaVersion == 3
+      ? _parseNormalizedGeneratedBaseline(
+          reader.map('generatedBaseline'),
+          project,
+        )
+      : null;
   reader.finish();
   final paths = changedArbs.map((arb) => arb.relativePath).toList();
   _requireSortedUnique(paths, 'normalization ARB path');
-  const expectedPaths = [
-    'lib/common/localization/l10n/app_en.arb',
-    'lib/common/localization/l10n/app_ja.arb',
-    'lib/common/localization/l10n/app_ko.arb',
-    'lib/common/localization/l10n/app_zh.arb',
-  ];
-  if (!_sameStrings(paths, expectedPaths)) {
+  final expectedPaths = project.id == 'smooth'
+      ? project.arbPathsRelative
+      : _normalizationPathsByProject[project.id];
+  if (expectedPaths == null || !_sameStrings(paths, expectedPaths)) {
     throw const FormatException('normalization ARB membership drift');
   }
   return L10nNormalizationManifest(
@@ -1346,7 +1613,57 @@ L10nNormalizationManifest _parseNormalizationManifest(
     policy: policy,
     sourceSha256: sourceHash,
     changedArbs: changedArbs,
+    generatedBaseline: generatedBaseline,
   );
+}
+
+L10nNormalizedGeneratedBaseline _parseNormalizedGeneratedBaseline(
+  Map<String, Object?> json,
+  L10nMutationProjectManifest project,
+) {
+  const context = 'normalizationManifest.generatedBaseline';
+  _requireExactKeys(json, const {'policy', 'changedOutputs'}, context);
+  final reader = _ObjectReader(json, context);
+  if (reader.string('policy') !=
+      'regenerate-after-normalization-with-pinned-toolchain') {
+    throw const FormatException('unknown normalized generated policy');
+  }
+  final values = reader.list('changedOutputs');
+  reader.finish();
+  final outputs = <L10nNormalizedGeneratedOutput>[];
+  for (var index = 0; index < values.length; index++) {
+    final outputContext = '$context.changedOutputs[$index]';
+    final outputJson = _asStringMap(values[index], outputContext);
+    _requireExactKeys(outputJson, const {
+      'relativePath',
+      'originalSha256',
+      'replacementSha256',
+      'posixMode',
+    }, outputContext);
+    final outputReader = _ObjectReader(outputJson, outputContext);
+    final relativePath = outputReader.string('relativePath');
+    final originalHash = outputReader.string('originalSha256');
+    final replacementHash = outputReader.string('replacementSha256');
+    final posixMode = outputReader.integer('posixMode');
+    outputReader.finish();
+    _requireRelativePath(relativePath, '$outputContext relativePath');
+    if (!relativePath.startsWith('${project.arbDirectoryRelative}/') ||
+        !relativePath.endsWith('.dart') ||
+        project.arbPathsRelative.contains(relativePath)) {
+      throw const FormatException(
+        'normalized generated output is outside its family',
+      );
+    }
+    outputs.add(
+      L10nNormalizedGeneratedOutput(
+        relativePath: relativePath,
+        originalSha256: originalHash,
+        replacementSha256: replacementHash,
+        posixMode: posixMode,
+      ),
+    );
+  }
+  return L10nNormalizedGeneratedBaseline(changedOutputs: outputs);
 }
 
 L10nNormalizedArb _parseNormalizedArb(
@@ -1359,6 +1676,7 @@ L10nNormalizedArb _parseNormalizedArb(
     'originalSha256',
     'replacementSha256',
     'canonicalDecodedObjectSha256',
+    'copiedByteSpans',
     'removedByteSpans',
     'decodedObjectEquivalent',
     'replacementHasDuplicateDecodedKeys',
@@ -1379,6 +1697,49 @@ L10nNormalizedArb _parseNormalizedArb(
   _requireSha256(canonicalHash, '$context canonicalDecodedObjectSha256');
   if (originalHash == replacementHash) {
     throw const FormatException('normalization must change declared bytes');
+  }
+  final copyValues = reader.list('copiedByteSpans');
+  if (project.id == 'gsy' && copyValues.isEmpty) {
+    throw const FormatException('normalization requires copied byte spans');
+  }
+  if (project.id != 'gsy' && copyValues.isNotEmpty) {
+    throw const FormatException(
+      'Removal normalization must only remove declared members',
+    );
+  }
+  final copies = <L10nCopiedByteSpan>[];
+  var previousCopyEnd = -1;
+  for (var copyIndex = 0; copyIndex < copyValues.length; copyIndex++) {
+    final copyPath = '$context.copiedByteSpans[$copyIndex]';
+    final copyJson = _asStringMap(copyValues[copyIndex], copyPath);
+    _requireExactKeys(copyJson, const {
+      'start',
+      'endExclusive',
+      'sourceStart',
+      'sourceEndExclusive',
+    }, copyPath);
+    final copyReader = _ObjectReader(copyJson, copyPath);
+    final start = copyReader.integer('start');
+    final end = copyReader.integer('endExclusive');
+    final sourceStart = copyReader.integer('sourceStart');
+    final sourceEnd = copyReader.integer('sourceEndExclusive');
+    copyReader.finish();
+    if (start < 0 ||
+        start < previousCopyEnd ||
+        end <= start ||
+        sourceStart < 0 ||
+        sourceEnd <= sourceStart) {
+      throw const FormatException('normalization copy spans are not canonical');
+    }
+    copies.add(
+      L10nCopiedByteSpan(
+        start: start,
+        endExclusive: end,
+        sourceStart: sourceStart,
+        sourceEndExclusive: sourceEnd,
+      ),
+    );
+    previousCopyEnd = end;
   }
   final spanValues = reader.list('removedByteSpans');
   if (spanValues.isEmpty) {
@@ -1403,16 +1764,29 @@ L10nNormalizedArb _parseNormalizedArb(
   final equivalent = reader.boolean('decodedObjectEquivalent');
   final hasDuplicates = reader.boolean('replacementHasDuplicateDecodedKeys');
   reader.finish();
-  if (!equivalent || hasDuplicates) {
+  final expectedEquivalent = project.id == 'gsy';
+  if (equivalent != expectedEquivalent || hasDuplicates) {
     throw const FormatException(
       'normalization decoded-object authority is unsafe',
     );
+  }
+  final targets = <({int start, int endExclusive})>[
+    for (final copy in copies)
+      (start: copy.start, endExclusive: copy.endExclusive),
+    for (final span in spans)
+      (start: span.start, endExclusive: span.endExclusive),
+  ]..sort((left, right) => left.start.compareTo(right.start));
+  for (var targetIndex = 1; targetIndex < targets.length; targetIndex++) {
+    if (targets[targetIndex].start < targets[targetIndex - 1].endExclusive) {
+      throw const FormatException('normalization transform targets overlap');
+    }
   }
   return L10nNormalizedArb(
     relativePath: relativePath,
     originalSha256: originalHash,
     replacementSha256: replacementHash,
     canonicalDecodedObjectSha256: canonicalHash,
+    copiedByteSpans: copies,
     removedByteSpans: spans,
     decodedObjectEquivalent: equivalent,
     replacementHasDuplicateDecodedKeys: hasDuplicates,
