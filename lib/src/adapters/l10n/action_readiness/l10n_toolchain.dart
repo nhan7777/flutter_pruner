@@ -3739,6 +3739,7 @@ Version? _supportedVersion(String value) => switch (value) {
   '3.38.7' => Version(3, 38, 7),
   '3.41.5' => Version(3, 41, 5),
   '3.44.1' => Version(3, 44, 1),
+  '3.44.9' => Version(3, 44, 9),
   _ => null,
 };
 

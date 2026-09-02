@@ -1690,7 +1690,7 @@ Future<void> _runRealSdkFixture(String configured) async {
           as Map<String, Object?>;
   final versionText = versionControl['frameworkVersion'];
   if (versionText is! String ||
-      !const {'3.38.7', '3.41.5', '3.44.1'}.contains(versionText)) {
+      !const {'3.38.7', '3.41.5', '3.44.1', '3.44.9'}.contains(versionText)) {
     fail('The opt-in SDK must be one exact Stage 1 supported version.');
   }
   final version = Version.parse(versionText);

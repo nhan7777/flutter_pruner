@@ -193,6 +193,7 @@ final class DartDirectiveResolver {
             final environment = _configuredEnvironment(target);
             await _resolveForContext(
               sourcePath: sourcePath,
+              fromLibrary: library.element,
               directive: directive,
               alternatives: alternatives,
               environment: environment,
@@ -212,6 +213,7 @@ final class DartDirectiveResolver {
             );
             await _resolveForContext(
               sourcePath: sourcePath,
+              fromLibrary: library.element,
               directive: directive,
               alternatives: alternatives,
               environment: environment,
@@ -256,6 +258,7 @@ final class DartDirectiveResolver {
 
   Future<void> _resolveForContext({
     required String sourcePath,
+    required LibraryElement fromLibrary,
     required NamespaceDirective directive,
     required List<_DirectiveAlternative> alternatives,
     required _Environment environment,
@@ -320,7 +323,10 @@ final class DartDirectiveResolver {
       if (targetOwner.ownership == DartSourceOwnership.selectedPackage) {
         var resolved = knownLibraries[targetPath];
         if (resolved == null) {
-          final result = await workspace.resolveLibrary(targetPath);
+          final result = await workspace.resolveSelectedDirectiveTarget(
+            targetPath,
+            fromLibrary: fromLibrary,
+          );
           if (result is ResolvedLibraryResult) {
             resolved = result;
             knownLibraries[targetPath] = result;

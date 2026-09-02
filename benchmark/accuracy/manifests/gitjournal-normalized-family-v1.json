@@ -1,0 +1,327 @@
+{
+  "changedArbs": [
+    {
+      "canonicalDecodedObjectSha256": "73a23fbc4f223bf54cebd64941b49ba69a2a922a6a705627be2f3b32dcd91f95",
+      "copiedByteSpans": [],
+      "decodedObjectEquivalent": false,
+      "originalSha256": "9fcfd3ec916a53a6713245726a60beb30a49ea7d0e8b2d0df18bc0ec8167b1fa",
+      "relativePath": "lib/l10n/app_de.arb",
+      "removedByteSpans": [
+        {
+          "endExclusive": 9118,
+          "start": 9056
+        }
+      ],
+      "replacementHasDuplicateDecodedKeys": false,
+      "replacementSha256": "77ac71bb716be6c90c7b808bf81a14612569f37318f7ff3cc9d07c9f18865468"
+    },
+    {
+      "canonicalDecodedObjectSha256": "e0ea960d8b530807e3bb27abbee857848ffe98f5bfe26a0313021fc23a9ed6c6",
+      "copiedByteSpans": [],
+      "decodedObjectEquivalent": false,
+      "originalSha256": "fb4fbf31df9eb844c1ec5d82def6d82a7c84dc599e239a356ee7648ec5bb97ff",
+      "relativePath": "lib/l10n/app_es.arb",
+      "removedByteSpans": [
+        {
+          "endExclusive": 8973,
+          "start": 8911
+        }
+      ],
+      "replacementHasDuplicateDecodedKeys": false,
+      "replacementSha256": "4712bc050c149fac9bc63ff2a71302b8bb8a9048621856e3968babe039786465"
+    },
+    {
+      "canonicalDecodedObjectSha256": "b242f456e5ca5dff419a5b3a2887d476e31bf3d57b9f6f8e3349e0426679975d",
+      "copiedByteSpans": [],
+      "decodedObjectEquivalent": false,
+      "originalSha256": "ed402448a107f69e70f3ccd7ef020c39dd3a4fab0d6b2619d0b50c37c58645b4",
+      "relativePath": "lib/l10n/app_fa.arb",
+      "removedByteSpans": [
+        {
+          "endExclusive": 8967,
+          "start": 8905
+        }
+      ],
+      "replacementHasDuplicateDecodedKeys": false,
+      "replacementSha256": "66941ad3ffdb10a161f72b245f8a456c3eca59b6dff5a5f0e250172220fab591"
+    },
+    {
+      "canonicalDecodedObjectSha256": "969807451ed80149ebf7292db996380e223636cfd09abec0139c0e7c715465e2",
+      "copiedByteSpans": [],
+      "decodedObjectEquivalent": false,
+      "originalSha256": "bff368aa7309c60229151a6187ed39b17fb6a43bf11749554fd85e4c2a9dbad1",
+      "relativePath": "lib/l10n/app_fi.arb",
+      "removedByteSpans": [
+        {
+          "endExclusive": 8967,
+          "start": 8905
+        }
+      ],
+      "replacementHasDuplicateDecodedKeys": false,
+      "replacementSha256": "e8b2bae150e9a6aee1843f5d7eac9712f8e8f4b6fd57a7fee48fff5793cc1881"
+    },
+    {
+      "canonicalDecodedObjectSha256": "18e66a8873f4ba4edb09c60f212e3854342af0620cac36b580e34f631c34dbac",
+      "copiedByteSpans": [],
+      "decodedObjectEquivalent": false,
+      "originalSha256": "431068ba4596359f4073472723ddc2b39a4cbcf67d33a1eb810ae78ed92c3c80",
+      "relativePath": "lib/l10n/app_fr.arb",
+      "removedByteSpans": [
+        {
+          "endExclusive": 8974,
+          "start": 8912
+        }
+      ],
+      "replacementHasDuplicateDecodedKeys": false,
+      "replacementSha256": "6ce943ac8b29ce7c7bbb85e97b2f565fcb0e8e3b48ef591d9b376794a1554b00"
+    },
+    {
+      "canonicalDecodedObjectSha256": "ad808c7399bc4d261a99cde6e158e91341634bd5692833545eb5b9c246423bf5",
+      "copiedByteSpans": [],
+      "decodedObjectEquivalent": false,
+      "originalSha256": "747cef8e3c7aa95d144f3721ceec1b72703efded6b4de2f316d9aeb238c897e0",
+      "relativePath": "lib/l10n/app_hi.arb",
+      "removedByteSpans": [
+        {
+          "endExclusive": 8967,
+          "start": 8905
+        }
+      ],
+      "replacementHasDuplicateDecodedKeys": false,
+      "replacementSha256": "b762f5936cffb4e3d9292068fcac5d54a2827640e6ee5dd61f87d6b56488f02f"
+    },
+    {
+      "canonicalDecodedObjectSha256": "bbcf6d18d67dd3b742e9a549f398a4b43cadb117f6fc5c0e869d37c35956b539",
+      "copiedByteSpans": [],
+      "decodedObjectEquivalent": false,
+      "originalSha256": "8edb3fef32d91d405573879bb4de048474489df9256f743d7765d32d4c613d97",
+      "relativePath": "lib/l10n/app_hu.arb",
+      "removedByteSpans": [
+        {
+          "endExclusive": 8970,
+          "start": 8908
+        }
+      ],
+      "replacementHasDuplicateDecodedKeys": false,
+      "replacementSha256": "5d81ed2ea5a0754b23e18f6172cc78b5273356e0ddbce1469472eb6f10880f9b"
+    },
+    {
+      "canonicalDecodedObjectSha256": "dd66ecc82867165fd00a73ec205a1764053ecae6a5be07fd349c0eaa5d0c6cb2",
+      "copiedByteSpans": [],
+      "decodedObjectEquivalent": false,
+      "originalSha256": "a9a90b97ef323560a396662d7b494009db6ca05ef000fac921964c921a211e05",
+      "relativePath": "lib/l10n/app_id.arb",
+      "removedByteSpans": [
+        {
+          "endExclusive": 8967,
+          "start": 8905
+        }
+      ],
+      "replacementHasDuplicateDecodedKeys": false,
+      "replacementSha256": "c6ff32eec422130716ce38ef5259710ba7da69cf9b6a507bd04b6022ed7612aa"
+    },
+    {
+      "canonicalDecodedObjectSha256": "4c10fe215066f20946ca732f24ce607f3c986132e6a48211f2b2ca7fd83f7160",
+      "copiedByteSpans": [],
+      "decodedObjectEquivalent": false,
+      "originalSha256": "24064d5798c705c5208b3503480c1365e1e85ca2ba63cda93a6638219b970aec",
+      "relativePath": "lib/l10n/app_it.arb",
+      "removedByteSpans": [
+        {
+          "endExclusive": 8967,
+          "start": 8905
+        }
+      ],
+      "replacementHasDuplicateDecodedKeys": false,
+      "replacementSha256": "5120f78f1def63e36bbb9822168b8b2ba41fc23c89794da540a1af915c03fc6e"
+    },
+    {
+      "canonicalDecodedObjectSha256": "5261463b89713a0eb9d16f25e2a38af9e38bec22d4261ab6982d4e15d980aa94",
+      "copiedByteSpans": [],
+      "decodedObjectEquivalent": false,
+      "originalSha256": "b2d6448b75f3fc5d3eebb1f4954cd9be9863d01c05ea163300b48f42b6a85fd3",
+      "relativePath": "lib/l10n/app_ja.arb",
+      "removedByteSpans": [
+        {
+          "endExclusive": 8977,
+          "start": 8915
+        }
+      ],
+      "replacementHasDuplicateDecodedKeys": false,
+      "replacementSha256": "542b56185ba27de05080ab7b3bb52f523333014cd762f10600a09740e8195cbc"
+    },
+    {
+      "canonicalDecodedObjectSha256": "45ae2f12e3bee8ed5d4b72f659e0b587eb3891270c8b5531f6a2e2f9a1473d2b",
+      "copiedByteSpans": [],
+      "decodedObjectEquivalent": false,
+      "originalSha256": "794a096cdacd735480d25853090653174472e49e60cd6d05b2ef2cae7af787eb",
+      "relativePath": "lib/l10n/app_ko.arb",
+      "removedByteSpans": [
+        {
+          "endExclusive": 8972,
+          "start": 8910
+        }
+      ],
+      "replacementHasDuplicateDecodedKeys": false,
+      "replacementSha256": "c324ac35aefdd281bb710da3f3522283537a4bba9c0f8d4a875fa496940b938b"
+    },
+    {
+      "canonicalDecodedObjectSha256": "e1a8ac111b7c75895d287d31a51d306292dcd8abca98ffb9db28ae3632ee48fc",
+      "copiedByteSpans": [],
+      "decodedObjectEquivalent": false,
+      "originalSha256": "cb00264c8f6f530df1f5096c77440287aff3478ade4314cd28db338d5ed218d4",
+      "relativePath": "lib/l10n/app_pl.arb",
+      "removedByteSpans": [
+        {
+          "endExclusive": 8972,
+          "start": 8910
+        }
+      ],
+      "replacementHasDuplicateDecodedKeys": false,
+      "replacementSha256": "e11d35ab6eb334cdb81055ebbca5fd788c84dd0368fd56f40b22009d39afa61f"
+    },
+    {
+      "canonicalDecodedObjectSha256": "ee7f444005dfe7831ab96cb3de4234f2765a773d60d4f40cd8a662b37705068b",
+      "copiedByteSpans": [],
+      "decodedObjectEquivalent": false,
+      "originalSha256": "b3456a8c3906e794528f6c650203d726cc543ea6fa046ee6f0dc62db5ce27ed8",
+      "relativePath": "lib/l10n/app_pt.arb",
+      "removedByteSpans": [
+        {
+          "endExclusive": 8974,
+          "start": 8912
+        }
+      ],
+      "replacementHasDuplicateDecodedKeys": false,
+      "replacementSha256": "47b928dca626b7fd0befbc7c52515c9093e475da04c94ee5dc7fef613733a9e7"
+    },
+    {
+      "canonicalDecodedObjectSha256": "e2ac02a150afa855951d8b4c29fe6f23f311f9dd6a15a650f3075156c9ed2ece",
+      "copiedByteSpans": [],
+      "decodedObjectEquivalent": false,
+      "originalSha256": "571759885c97d4db5081959f20acdc0d3bb57bc45118fd6c5809bba89302b49b",
+      "relativePath": "lib/l10n/app_pt_br.arb",
+      "removedByteSpans": [
+        {
+          "endExclusive": 8970,
+          "start": 8908
+        }
+      ],
+      "replacementHasDuplicateDecodedKeys": false,
+      "replacementSha256": "ae6b4a112bb36187039e6d33643aacc9119f4048fd7692c34f065f99bbee4876"
+    },
+    {
+      "canonicalDecodedObjectSha256": "2c507203dfb4067230c338dd1909e4777c3d4e329e848fea05da40926fd7d7a3",
+      "copiedByteSpans": [],
+      "decodedObjectEquivalent": false,
+      "originalSha256": "205a0e99cc092e653bca2d1d5d3ed45b77aabc4b7324fee3a3f2026ca82cd472",
+      "relativePath": "lib/l10n/app_ru.arb",
+      "removedByteSpans": [
+        {
+          "endExclusive": 191,
+          "start": 94
+        },
+        {
+          "endExclusive": 9090,
+          "start": 9028
+        }
+      ],
+      "replacementHasDuplicateDecodedKeys": false,
+      "replacementSha256": "29670975ce30f721c032ecc38adbb5f9e16aa86d557d3d25088c936159b1bc17"
+    },
+    {
+      "canonicalDecodedObjectSha256": "cef356d0e622d93469acba6d406cece3d23ecec4807116ad22bb01f0534f0830",
+      "copiedByteSpans": [],
+      "decodedObjectEquivalent": false,
+      "originalSha256": "3b1d33468c75799fc1febda67b91b4e984bf1a62bf130c4cb02ff4ddc9159290",
+      "relativePath": "lib/l10n/app_sv.arb",
+      "removedByteSpans": [
+        {
+          "endExclusive": 8966,
+          "start": 8904
+        }
+      ],
+      "replacementHasDuplicateDecodedKeys": false,
+      "replacementSha256": "0ee2825ae788c19b7032afdc1c4eff24f4665607386cb8a44a557916b1b84c03"
+    },
+    {
+      "canonicalDecodedObjectSha256": "6899786e27f2d995bf3ee431bb0581416404e10e8c1510fdff8495601b134968",
+      "copiedByteSpans": [],
+      "decodedObjectEquivalent": false,
+      "originalSha256": "b1b3dc809c5d41e5998af22a7e820cb39762aa9e80a44a80ea0aad99633d2ed4",
+      "relativePath": "lib/l10n/app_ta.arb",
+      "removedByteSpans": [
+        {
+          "endExclusive": 8967,
+          "start": 8905
+        }
+      ],
+      "replacementHasDuplicateDecodedKeys": false,
+      "replacementSha256": "798aedd9134e6bc12743d0eeef8138911a1671e6e3bbf00628fe4f04ee5f53f7"
+    },
+    {
+      "canonicalDecodedObjectSha256": "fc8f0295d77d9168605badbc505c3b9ed57a49ed99d3aeb50311665673757324",
+      "copiedByteSpans": [],
+      "decodedObjectEquivalent": false,
+      "originalSha256": "35f39a69259bb876087de053db32687994f530ef234ede853880b93a15362ae4",
+      "relativePath": "lib/l10n/app_vi.arb",
+      "removedByteSpans": [
+        {
+          "endExclusive": 8967,
+          "start": 8905
+        }
+      ],
+      "replacementHasDuplicateDecodedKeys": false,
+      "replacementSha256": "609afb2503dfda28852c1a6c0cb8cf1c5c9ba36c36e94aadc6072319030b7ffc"
+    },
+    {
+      "canonicalDecodedObjectSha256": "9de70a9053aa3e00cc8ce42fdd32221309a9683931eeae27e3c40e4ad5842e5e",
+      "copiedByteSpans": [],
+      "decodedObjectEquivalent": false,
+      "originalSha256": "57d4ee923e2ba6b30aef26f640943b984664f149530ed878c79100837b357d6e",
+      "relativePath": "lib/l10n/app_zh.arb",
+      "removedByteSpans": [
+        {
+          "endExclusive": 8967,
+          "start": 8905
+        }
+      ],
+      "replacementHasDuplicateDecodedKeys": false,
+      "replacementSha256": "a0f2a3dc716f3fe28504448ad5eb2a6c0f4dccc8af2c17a251a75718d915b3df"
+    },
+    {
+      "canonicalDecodedObjectSha256": "289360e2213e2fc62bba3b8341bd1565742c89aacb0d30f5c1257509c774cfe2",
+      "copiedByteSpans": [],
+      "decodedObjectEquivalent": false,
+      "originalSha256": "7ce240ae603e65bc22a11d3332f7c9d804a40e6c082b94bfc0d3588775c7fd2f",
+      "relativePath": "lib/l10n/app_zh_Hans.arb",
+      "removedByteSpans": [
+        {
+          "endExclusive": 8970,
+          "start": 8908
+        }
+      ],
+      "replacementHasDuplicateDecodedKeys": false,
+      "replacementSha256": "ad46cfcd10e6e123685ed4bafccacb120b4e615c774d5085880ba0d19bdb0935"
+    },
+    {
+      "canonicalDecodedObjectSha256": "3f891c0671925171af7ad3cbd5d6b950d6069c87a3edbd8b98ee450a9140739b",
+      "copiedByteSpans": [],
+      "decodedObjectEquivalent": false,
+      "originalSha256": "c9e5c01fa4fd6597767ab9f772283c15100f4001316c964e5cab7b3207756d7e",
+      "relativePath": "lib/l10n/app_zh_TW.arb",
+      "removedByteSpans": [
+        {
+          "endExclusive": 8970,
+          "start": 8908
+        }
+      ],
+      "replacementHasDuplicateDecodedKeys": false,
+      "replacementSha256": "78764e0058e283ff41ba00f67db23b50b9cf2287d82fa3fe6097a98d7d791785"
+    }
+  ],
+  "normalizationVersion": "gitjournal-normalized-family-v1",
+  "policy": "remove-generator-ignored-extraneous-members",
+  "repositorySha": "c8a67e098db06335762f822d7733c330f4bd0d6b",
+  "schemaVersion": 2
+}

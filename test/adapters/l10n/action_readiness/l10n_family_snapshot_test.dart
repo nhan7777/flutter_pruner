@@ -98,13 +98,21 @@ void main() {
           pubspec: pubspec,
           packageName: 'fixture',
           analysisMode: AnalysisMode.application,
-          targetMatrix: TargetMatrix.declared([
-            BuildTarget(
-              name: 'app',
-              platform: 'android',
-              entrypoint: 'lib/main.dart',
-            ),
-          ]),
+          targetMatrix: TargetMatrix.declared(
+            [
+              BuildTarget(
+                name: 'app',
+                platform: 'android',
+                entrypoint: 'lib/main.dart',
+              ),
+            ],
+            excludedEntrypoints: const [
+              ExcludedApplicationEntrypoint(
+                path: 'tool/guard.dart',
+                reason: 'tracked guard is not launchable',
+              ),
+            ],
+          ),
           rootCoverage: RootCoverage.applicationApi(),
         ),
       );
@@ -138,6 +146,12 @@ void main() {
         snapshot.analyzerClosurePaths,
       );
       expect(snapshot.provenUnrelatedOutputSiblings, {'lib/l10n/helper.dart'});
+      expect(snapshot.projectSemantics.targetMatrix.excludedEntrypoints, const [
+        ExcludedApplicationEntrypoint(
+          path: 'tool/guard.dart',
+          reason: 'tracked guard is not launchable',
+        ),
+      ]);
       expect((snapshot.projectSemantics.pubspec['nested'] as Map)['values'], [
         'one',
       ]);

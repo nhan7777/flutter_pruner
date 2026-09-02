@@ -9,7 +9,27 @@ import 'package:path/path.dart' as p;
 import 'package:yaml/yaml.dart';
 
 import '../../core/graph/execution_target.dart';
+import '../../core/project/analysis_mode.dart';
 import '../../core/project/project_context.dart';
+import '../../core/project/target_matrix.dart';
+
+const _driverLibraryUris = {
+  'package:flutter_driver/flutter_driver.dart',
+  'package:integration_test/integration_test_driver.dart',
+  'package:integration_test/integration_test_driver_extended.dart',
+};
+
+const _integrationTestLibraryUri =
+    'package:integration_test/integration_test.dart';
+
+const _flutterApplicationPlatforms = {
+  'android',
+  'ios',
+  'macos',
+  'linux',
+  'windows',
+  'web',
+};
 
 /// One fail-closed issue found while deriving an auxiliary context.
 final class AuxiliaryExecutionTargetDetectionIssue {
@@ -45,6 +65,40 @@ final class AuxiliaryExecutionTargetDetection {
   final List<AuxiliaryExecutionTargetDetectionIssue> issues;
 }
 
+/// Detected test targets and any issue preventing a closed test environment.
+final class TestAuxiliaryExecutionTargetDetection {
+  /// Creates an immutable multi-target test detection.
+  TestAuxiliaryExecutionTargetDetection({
+    required List<AuxiliaryExecutionTarget> targets,
+    List<AuxiliaryExecutionTargetDetectionIssue> issues = const [],
+  }) : targets = List.unmodifiable(targets),
+       issues = List.unmodifiable(issues) {
+    if (targets.isEmpty ||
+        targets.map((target) => target.id).toSet().length != targets.length) {
+      throw ArgumentError(
+        'Test targets must be non-empty and uniquely identified.',
+      );
+    }
+    if (issues.isEmpty) {
+      if (targets.any((target) => !target.environmentComplete)) {
+        throw ArgumentError(
+          'Complete test detection contains an incomplete target.',
+        );
+      }
+    } else if (targets.length != 1 || targets.single.environmentComplete) {
+      throw ArgumentError(
+        'Incomplete test detection must contain one incomplete target.',
+      );
+    }
+  }
+
+  /// Detected test targets.
+  final List<AuxiliaryExecutionTarget> targets;
+
+  /// Issues that make the test detection incomplete.
+  final List<AuxiliaryExecutionTargetDetectionIssue> issues;
+}
+
 /// Runtime targets copied from every compatible configured target.
 final class RuntimeAuxiliaryExecutionTargetDetection {
   /// Creates an immutable runtime-target detection.
@@ -70,7 +124,7 @@ final class AuxiliaryExecutionTargetDetector {
   final ProjectContext project;
 
   /// Detects one test execution context from tracked source metadata.
-  AuxiliaryExecutionTargetDetection detectTest({
+  TestAuxiliaryExecutionTargetDetection detectTest({
     required String relativePath,
     ResolvedLibraryResult? library,
   }) {
@@ -82,50 +136,104 @@ final class AuxiliaryExecutionTargetDetector {
       (null, final configured?) => configured,
       _ => const <String>{},
     };
-    if (effectivePlatforms.length == 1 && effectivePlatforms.single == 'vm') {
-      return AuxiliaryExecutionTargetDetection(
-        target: AuxiliaryExecutionTarget(
-          id: 'aux:test:${_stablePathId(relativePath)}:vm',
-          domain: AuxiliaryExecutionDomain.test,
-          environmentValues: _sdkEnvironment(
-            'vm',
-            flutterUiAvailable: _hasFlutterSdk,
+    final inferredFlutterHostVm =
+        filePlatforms == null &&
+        projectPlatforms == null &&
+        _hasFlutterSdk &&
+        _firstPathSegment(relativePath) == 'test';
+    final isStandaloneDriver = _firstPathSegment(relativePath) == 'test_driver';
+    final hasStandaloneDriverImport = _directlyImportsAny(
+      library,
+      _driverLibraryUris,
+    );
+    final inferredPatrolNative =
+        filePlatforms == null &&
+        projectPlatforms == null &&
+        _hasClosedPatrolDeviceAuthority(relativePath);
+    final inferredStandaloneDriverVm =
+        isStandaloneDriver &&
+        _hasFlutterSdk &&
+        hasStandaloneDriverImport &&
+        ((filePlatforms == null && projectPlatforms == null) ||
+            (effectivePlatforms.length == 1 &&
+                effectivePlatforms.single == 'vm'));
+    if (isStandaloneDriver) {
+      if (inferredStandaloneDriverVm) {
+        return TestAuxiliaryExecutionTargetDetection(
+          targets: [
+            AuxiliaryExecutionTarget(
+              id: 'aux:test:${_stablePathId(relativePath)}:driver-vm',
+              domain: AuxiliaryExecutionDomain.test,
+              environmentValues: _sdkEnvironment(
+                'vm',
+                flutterUiAvailable: false,
+              ),
+              environmentComplete: true,
+              reason:
+                  'Flutter drive test driver uses the standalone host Dart VM',
+            ),
+          ],
+        );
+      }
+      return _incompleteTestDetection(relativePath);
+    }
+    if (_firstPathSegment(relativePath) == 'integration_test') {
+      return _integrationTestTargets(relativePath, library);
+    }
+    if ((effectivePlatforms.length == 1 && effectivePlatforms.single == 'vm') ||
+        inferredFlutterHostVm) {
+      return TestAuxiliaryExecutionTargetDetection(
+        targets: [
+          AuxiliaryExecutionTarget(
+            id: 'aux:test:${_stablePathId(relativePath)}:vm',
+            domain: AuxiliaryExecutionDomain.test,
+            environmentValues: _sdkEnvironment(
+              'vm',
+              flutterUiAvailable: _hasFlutterSdk,
+            ),
+            environmentComplete: true,
+            reason: inferredFlutterHostVm
+                ? 'Flutter unit test uses the Flutter host VM'
+                : 'test is explicitly constrained to the Dart VM',
           ),
-          environmentComplete: true,
-          reason: 'test is explicitly constrained to the Dart VM',
-        ),
+        ],
       );
     }
     if (effectivePlatforms.length == 1 &&
         effectivePlatforms.single == 'browser') {
-      return AuxiliaryExecutionTargetDetection(
-        target: AuxiliaryExecutionTarget(
-          id: 'aux:test:${_stablePathId(relativePath)}:browser',
-          domain: AuxiliaryExecutionDomain.test,
-          environmentValues: _sdkEnvironment(
-            'web',
-            flutterUiAvailable: _hasFlutterSdk,
+      return TestAuxiliaryExecutionTargetDetection(
+        targets: [
+          AuxiliaryExecutionTarget(
+            id: 'aux:test:${_stablePathId(relativePath)}:browser',
+            domain: AuxiliaryExecutionDomain.test,
+            environmentValues: _sdkEnvironment(
+              'web',
+              flutterUiAvailable: _hasFlutterSdk,
+            ),
+            environmentComplete: true,
+            reason: 'test is explicitly constrained to the browser',
           ),
-          environmentComplete: true,
-          reason: 'test is explicitly constrained to the browser',
-        ),
+        ],
       );
     }
-    const issue = AuxiliaryExecutionTargetDetectionIssue(
-      code: 'test-environment-incomplete',
-      reason: 'test platform metadata does not close one supported environment',
-      requiresGlobalBlocker: false,
-    );
-    return AuxiliaryExecutionTargetDetection(
-      target: AuxiliaryExecutionTarget(
-        id: 'aux:test:${_stablePathId(relativePath)}:incomplete',
-        domain: AuxiliaryExecutionDomain.test,
-        environmentValues: const {},
-        environmentComplete: false,
-        reason: issue.reason,
-      ),
-      issues: const [issue],
-    );
+    if (inferredPatrolNative) {
+      return TestAuxiliaryExecutionTargetDetection(
+        targets: [
+          AuxiliaryExecutionTarget(
+            id: 'aux:test:${_stablePathId(relativePath)}:patrol-native',
+            domain: AuxiliaryExecutionDomain.test,
+            environmentValues: _sdkEnvironment(
+              'android',
+              flutterUiAvailable: true,
+            ),
+            environmentComplete: true,
+            reason:
+                'Patrol test uses the declared complete native device matrix',
+          ),
+        ],
+      );
+    }
+    return _incompleteTestDetection(relativePath);
   }
 
   /// Detects a standalone Dart executable whose launch environment is open.
@@ -366,6 +474,54 @@ final class AuxiliaryExecutionTargetDetector {
     return false;
   }
 
+  bool get _hasFlutterApplicationAuthority {
+    if (project.analysisMode != AnalysisMode.application ||
+        project.rootCoverage.mode != RootCoverageMode.applicationEntrypoints) {
+      return false;
+    }
+    final dependencies = project.pubspec['dependencies'];
+    if (dependencies is! Map) return false;
+    final flutter = dependencies['flutter'];
+    return flutter is Map && flutter['sdk'] == 'flutter';
+  }
+
+  bool _hasClosedPatrolDeviceAuthority(String relativePath) {
+    if (!_hasFlutterSdk ||
+        _firstPathSegment(relativePath) != 'patrol_test' ||
+        !project.targetMatrix.isComplete ||
+        project.targets.isEmpty) {
+      return false;
+    }
+    final devDependencies = project.pubspec['dev_dependencies'];
+    final dependencies = project.pubspec['dependencies'];
+    final declaresPatrol =
+        (devDependencies is Map && devDependencies.containsKey('patrol')) ||
+        (dependencies is Map && dependencies.containsKey('patrol'));
+    final patrol = project.pubspec['patrol'];
+    if (!declaresPatrol ||
+        patrol is! Map ||
+        patrol['test_directory'] != 'patrol_test') {
+      return false;
+    }
+    return project.targets.every(
+      (target) =>
+          target.dartDefines.isEmpty &&
+          const {'android', 'ios', 'macos'}.contains(target.platform),
+    );
+  }
+
+  bool _directlyImportsAny(ResolvedLibraryResult? library, Set<String> uris) {
+    if (library == null) {
+      return false;
+    }
+    for (final imported in library.element.firstFragment.importedLibraries) {
+      if (uris.contains(imported.firstFragment.source.uri.toString())) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   bool _supports(CallbackBoundaryCapability capability, String platform) {
     const nativePlatforms = {'android', 'ios', 'macos', 'linux', 'windows'};
     return switch (capability) {
@@ -381,7 +537,141 @@ final class AuxiliaryExecutionTargetDetector {
       CallbackBoundaryCapability.unknown => false,
     };
   }
+
+  TestAuxiliaryExecutionTargetDetection _integrationTestTargets(
+    String relativePath,
+    ResolvedLibraryResult? library,
+  ) {
+    final filePlatforms = _testOnPlatforms(library);
+    final projectPlatforms = _trackedProjectIntegrationTestPlatforms();
+    final effectivePlatforms = switch ((filePlatforms, projectPlatforms)) {
+      (final file?, final configured?) => file.intersection(configured),
+      (final file?, null) => file,
+      (null, final configured?) => configured,
+      _ => null,
+    };
+    if (!_hasFlutterApplicationAuthority ||
+        !_directlyImportsAny(library, const {_integrationTestLibraryUri}) ||
+        project.targetMatrix.status != TargetMatrixStatus.declaredComplete) {
+      return _incompleteTestDetection(relativePath);
+    }
+    if (effectivePlatforms != null &&
+        (effectivePlatforms.length != 1 ||
+            !const {'vm', 'browser'}.contains(effectivePlatforms.single))) {
+      return _incompleteTestDetection(relativePath);
+    }
+
+    final configuredTargets = <BuildTarget>[];
+    for (final target in project.targets) {
+      if (effectivePlatforms != null &&
+          !_matchesIntegrationTestPlatformFilter(
+            target.platform,
+            effectivePlatforms.single,
+          )) {
+        continue;
+      }
+      if (!_flutterApplicationPlatforms.contains(target.platform)) {
+        return _incompleteTestDetection(relativePath);
+      }
+      configuredTargets.add(BuildTarget.snapshot(target));
+    }
+    if (configuredTargets.isEmpty) {
+      return _incompleteTestDetection(relativePath);
+    }
+
+    final targets = <AuxiliaryExecutionTarget>[];
+    for (final target in configuredTargets) {
+      final environment = <String, String>{
+        ..._sdkEnvironment(target.platform, flutterUiAvailable: true),
+      };
+      for (final define in target.dartDefines.entries) {
+        if (define.key.startsWith('dart.library.')) {
+          if (environment[define.key] != define.value) {
+            return _incompleteTestDetection(
+              relativePath,
+              issue: AuxiliaryExecutionTargetDetectionIssue(
+                code: 'reserved-environment-conflict',
+                reason:
+                    'configured integration target conflicts with SDK-owned '
+                    '${define.key}',
+                requiresGlobalBlocker: true,
+              ),
+            );
+          }
+          continue;
+        }
+        environment[define.key] = define.value;
+      }
+      targets.add(
+        AuxiliaryExecutionTarget(
+          id:
+              'aux:test:${_stablePathId(relativePath)}:'
+              'integration-${_shortHash(_targetIdentity(target))}',
+          domain: AuxiliaryExecutionDomain.test,
+          environmentValues: environment,
+          environmentComplete: true,
+          reason:
+              'Flutter integration test copied from a declared application target',
+          sourceConfiguredTarget: target,
+        ),
+      );
+    }
+    targets.sort((left, right) => left.id.compareTo(right.id));
+    return TestAuxiliaryExecutionTargetDetection(targets: targets);
+  }
+
+  Set<String>? _trackedProjectIntegrationTestPlatforms() {
+    final config = File(p.join(project.root.path, 'dart_test.yaml'));
+    if (!config.existsSync()) return null;
+    try {
+      final yaml = loadYaml(config.readAsStringSync());
+      if (yaml is! YamlMap) return const {};
+      if (!yaml.containsKey('platforms')) return null;
+      final rawPlatforms = yaml['platforms'];
+      if (rawPlatforms is! YamlList || rawPlatforms.isEmpty) return const {};
+      if (rawPlatforms.length != 1) return const {};
+      final platform = rawPlatforms.single.toString().trim().toLowerCase();
+      if (platform == 'vm') return const {'vm'};
+      if (platform == 'browser') return const {'browser'};
+      return const {};
+    } on Object {
+      return const {};
+    }
+  }
+
+  bool _matchesIntegrationTestPlatformFilter(String platform, String filter) =>
+      switch (filter) {
+        'vm' => platform != 'web',
+        'browser' => platform == 'web',
+        _ => false,
+      };
 }
+
+TestAuxiliaryExecutionTargetDetection _incompleteTestDetection(
+  String relativePath, {
+  AuxiliaryExecutionTargetDetectionIssue
+  issue = const AuxiliaryExecutionTargetDetectionIssue(
+    code: 'test-environment-incomplete',
+    reason: 'test platform metadata does not close one supported environment',
+    requiresGlobalBlocker: false,
+  ),
+}) {
+  return TestAuxiliaryExecutionTargetDetection(
+    targets: [
+      AuxiliaryExecutionTarget(
+        id: 'aux:test:${_stablePathId(relativePath)}:incomplete',
+        domain: AuxiliaryExecutionDomain.test,
+        environmentValues: const {},
+        environmentComplete: false,
+        reason: issue.reason,
+      ),
+    ],
+    issues: [issue],
+  );
+}
+
+String _firstPathSegment(String relativePath) =>
+    relativePath.replaceAll('\\', '/').split('/').first;
 
 Map<String, String> _sdkEnvironment(
   String platform, {

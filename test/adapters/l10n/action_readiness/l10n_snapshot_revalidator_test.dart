@@ -23,6 +23,7 @@ import 'package:test/test.dart';
 const _templatePath = 'lib/l10n/app_en.arb';
 const _localePath = 'lib/l10n/app_vi.arb';
 const _outputPath = 'lib/generated/app.dart';
+const _sharedOutputPath = 'lib/l10n/app.dart';
 const _mainPath = 'lib/main.dart';
 const _selectedKey = 'dead';
 const _identity =
@@ -30,6 +31,15 @@ const _identity =
 
 void main() {
   group('DefaultL10nSnapshotRevalidator', () {
+    test('keeps captured ARBs out of shared output membership', () async {
+      final fixture = await _Fixture.create(sharedArbAndOutputDirectory: true);
+      addTearDown(fixture.dispose);
+
+      final result = await fixture.revalidate();
+
+      expect(result, isA<L10nSnapshotStillCurrent>());
+    });
+
     test(
       'returns freshly proven immutable identities when still current',
       () async {
@@ -46,6 +56,7 @@ void main() {
 
         final result = await revalidator.revalidate(
           originalProjectRoot: fixture.projectRoot,
+          toolchainAuthorityRoot: fixture.scratch,
           snapshot: fixture.snapshot,
           toolchain: fixture.toolchain,
         );
@@ -62,6 +73,7 @@ void main() {
         );
         expect(current.toolchainIdentity, fixture.toolchain.identitySha256);
         expect(resolver.revalidateCalls, 1);
+        expect(resolver.lastOriginalProjectRoot?.path, fixture.scratch.path);
         expect(loader.loadCalls, 1);
       },
     );
@@ -529,6 +541,7 @@ final class _Resolver implements L10nToolchainResolver {
   final Object? error;
   final Future<void> Function()? beforeReturn;
   int revalidateCalls = 0;
+  Directory? lastOriginalProjectRoot;
 
   @override
   Future<L10nToolchainResolution> resolve({
@@ -543,6 +556,7 @@ final class _Resolver implements L10nToolchainResolver {
     required L10nToolchainResolved expected,
   }) async {
     revalidateCalls++;
+    lastOriginalProjectRoot = originalProjectRoot;
     final thrown = error;
     if (thrown != null) _throwInjected(thrown);
     await beforeReturn?.call();
@@ -616,7 +630,9 @@ final class _Fixture {
     );
   }
 
-  static Future<_Fixture> create() async {
+  static Future<_Fixture> create({
+    bool sharedArbAndOutputDirectory = false,
+  }) async {
     final allocated = Directory.systemTemp.createTempSync(
       'l10n-snapshot-revalidator-test-',
     );
@@ -661,7 +677,15 @@ final class _Fixture {
           'flutterVersion': '${toolchain.machineIdentity.frameworkVersion}',
         }),
       );
-      _writeProject(projectRoot, packageConfigBytes);
+      final outputPath = sharedArbAndOutputDirectory
+          ? _sharedOutputPath
+          : _outputPath;
+      _writeProject(
+        projectRoot,
+        packageConfigBytes,
+        sharedArbAndOutputDirectory: sharedArbAndOutputDirectory,
+        outputPath: outputPath,
+      );
       final project = _project(projectRoot);
       final configResult = await const DefaultL10nGenerationConfigLoader().load(
         project: project,
@@ -697,6 +721,7 @@ final class _Fixture {
           contextIdentity: contextResult.projection.identity,
           packageProjection: packageResult.projection,
           toolchainIdentity: toolchain.identitySha256,
+          outputPath: outputPath,
         ),
       );
     } catch (_) {
@@ -721,7 +746,12 @@ ProjectContext _project(Directory root) => ProjectContext(
   rootCoverage: RootCoverage.applicationApi(),
 );
 
-void _writeProject(Directory root, List<int> packageConfigBytes) {
+void _writeProject(
+  Directory root,
+  List<int> packageConfigBytes, {
+  required bool sharedArbAndOutputDirectory,
+  required String outputPath,
+}) {
   void write(String relativePath, String contents) {
     final file = File(p.join(root.path, relativePath));
     file.parent.createSync(recursive: true);
@@ -730,12 +760,20 @@ void _writeProject(Directory root, List<int> packageConfigBytes) {
 
   write('pubspec.yaml', _pubspecSource);
   write('pubspec.lock', 'packages: {}\n');
-  write('l10n.yaml', _l10nYamlSource);
+  write(
+    'l10n.yaml',
+    sharedArbAndOutputDirectory
+        ? _l10nYamlSource.replaceFirst(
+            'output-dir: lib/generated',
+            'output-dir: lib/l10n',
+          )
+        : _l10nYamlSource,
+  );
   write('analysis_options.yaml', _analysisOptionsSource);
   write(_mainPath, 'void main() {}\n');
   write(_templatePath, _sourceArb);
   write(_localePath, _localeArb);
-  write(_outputPath, _generatedSource);
+  write(outputPath, _generatedSource);
   final packageConfig = File(
     p.join(root.path, '.dart_tool', 'package_config.json'),
   );
@@ -751,6 +789,7 @@ L10nFamilySnapshot _snapshot({
   required String contextIdentity,
   required L10nPackageConfigProjection packageProjection,
   required String toolchainIdentity,
+  required String outputPath,
 }) {
   final template = ImmutableBytes.copyOf(utf8.encode(_sourceArb));
   final locale = ImmutableBytes.copyOf(utf8.encode(_localeArb));
@@ -816,7 +855,7 @@ L10nFamilySnapshot _snapshot({
       _mainPath: present(_mainPath, L10nSnapshotRole.analyzerSource),
       _templatePath: present(_templatePath, L10nSnapshotRole.arbTemplate),
       _localePath: present(_localePath, L10nSnapshotRole.arbLocale),
-      _outputPath: present(_outputPath, L10nSnapshotRole.generatedBase),
+      outputPath: present(outputPath, L10nSnapshotRole.generatedBase),
     },
     mutationPlan: mutation.plan,
     selectedNodeIds: const {'l10n:fixture:dead'},
@@ -825,10 +864,10 @@ L10nFamilySnapshot _snapshot({
       'alive': ArbGeneratedMemberKind.getter,
       'dead': ArbGeneratedMemberKind.getter,
     },
-    expectedGeneratedPaths: const {_outputPath},
+    expectedGeneratedPaths: {outputPath},
     optionalUntranslatedPath: null,
     verificationClosure: L10nVerificationClosure(
-      projectOwnedDartPaths: const {_mainPath, _outputPath},
+      projectOwnedDartPaths: {_mainPath, outputPath},
       analyzerRootIdentity: _hash('analyzer'),
     ),
     analysisOptionsProjection: L10nAnalysisOptionsProjection(

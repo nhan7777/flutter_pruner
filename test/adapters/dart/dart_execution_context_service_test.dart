@@ -592,49 +592,439 @@ void partSibling() {}
   });
 
   group('executable auxiliary roots', () {
+    test('integration_test roots fan out across exact derived targets', () async {
+      final fixture = await _createExecutionRootFixture(
+        {
+          'integration_test/live_test.dart': '''
+import 'package:integration_test/integration_test.dart';
+
+void main() {}
+''',
+          'integration_test/generated_live_test.g.dart': '''
+import 'package:integration_test/integration_test.dart';
+
+void main() {}
+''',
+        },
+        includeFlutterIntegrationPackages: true,
+        targetMatrix: TargetMatrix(
+          targets: [
+            BuildTarget(
+              name: 'android',
+              platform: 'android',
+              entrypoint: 'lib/main.dart',
+            ),
+            BuildTarget(
+              name: 'ios',
+              platform: 'ios',
+              entrypoint: 'lib/main.dart',
+            ),
+          ],
+          status: TargetMatrixStatus.declaredComplete,
+          source: 'fixture',
+        ),
+      );
+      addTearDown(() => fixture.project.root.deleteSync(recursive: true));
+
+      final snapshot = await DefaultDartExecutionContextService(
+        workspace: fixture.workspace,
+      ).resolve(fixture.project);
+
+      final registeredAuxiliaryTargetIds = snapshot.auxiliaryExecutionTargets
+          .map((target) => target.id)
+          .toSet();
+      expect(
+        snapshot.roots
+            .where((root) => root.domain == RootDomain.auxiliary)
+            .every(
+              (root) => registeredAuxiliaryTargetIds.contains(
+                root.auxiliaryExecutionTargetId,
+              ),
+            ),
+        isTrue,
+      );
+      expect(
+        snapshot.issues.where(
+          (issue) => issue.code == 'test-environment-incomplete',
+        ),
+        isEmpty,
+      );
+
+      final integrationTargets = snapshot.auxiliaryExecutionTargets
+          .where(
+            (target) => target.id.startsWith(
+              'aux:test:integration_test/live_test.dart:integration-',
+            ),
+          )
+          .toList();
+      expect(integrationTargets, hasLength(2));
+      expect(
+        integrationTargets.map((target) => target.sourceConfiguredTarget),
+        {
+          BuildTarget(
+            name: 'android',
+            platform: 'android',
+            entrypoint: 'lib/main.dart',
+          ),
+          BuildTarget(
+            name: 'ios',
+            platform: 'ios',
+            entrypoint: 'lib/main.dart',
+          ),
+        },
+      );
+      final integrationLibraryId =
+          'dart:execution_roots/integration_test/live_test.dart';
+      final integrationRootsByTarget = <String, Set<String>>{};
+      for (final root in snapshot.roots.where(
+        (root) => root.owningLibraryId == integrationLibraryId,
+      )) {
+        integrationRootsByTarget
+            .putIfAbsent(root.auxiliaryExecutionTargetId!, () => <String>{})
+            .add(root.nodeId);
+      }
+      expect(integrationRootsByTarget, {
+        for (final target in integrationTargets)
+          target.id: {integrationLibraryId, '$integrationLibraryId#main'},
+      });
+
+      final generatedLibraryId =
+          'dart:execution_roots/integration_test/generated_live_test.g.dart';
+      final generatedArtifactId =
+          'dart-generated:execution_roots/integration_test/generated_live_test.g.dart';
+      final generatedTargets = snapshot.auxiliaryExecutionTargets
+          .where(
+            (target) => target.id.startsWith(
+              'aux:test:integration_test/generated_live_test.g.dart:integration-',
+            ),
+          )
+          .toList();
+      expect(generatedTargets, hasLength(2));
+      expect(
+        snapshot.roots
+            .where((root) => root.owningLibraryId == generatedLibraryId)
+            .map((root) => root.nodeId)
+            .toSet(),
+        {generatedArtifactId},
+      );
+      expect(
+        snapshot.issues.where(
+          (issue) => issue.code == 'generated-executable-main-incomplete',
+        ),
+        hasLength(1),
+      );
+    });
+
     test(
-      'integration_test and test_driver are explicit test-runner roots',
+      'test_driver roots stay on one driver-vm target and configured main stays configured-only',
       () async {
-        final fixture = await _createExecutionRootFixture({
-          'integration_test/live_test.dart': 'void main() {}\n',
-          'test_driver/driver.dart': 'void drive() {}\n',
-        });
+        final fixture = await _createExecutionRootFixture(
+          {
+            'test_driver/main.dart': 'void main() {}\n',
+            'test_driver/screenshot_driver.dart': '''
+import 'package:flutter_driver/flutter_driver.dart';
+
+void drive() {}
+''',
+          },
+          includeFlutterIntegrationPackages: true,
+          targetMatrix: TargetMatrix(
+            targets: [
+              BuildTarget(
+                name: 'driver-android',
+                platform: 'android',
+                entrypoint: 'test_driver/main.dart',
+              ),
+              BuildTarget(
+                name: 'driver-web',
+                platform: 'web',
+                entrypoint: 'test_driver/main.dart',
+              ),
+            ],
+            status: TargetMatrixStatus.declaredComplete,
+            source: 'fixture',
+          ),
+        );
         addTearDown(() => fixture.project.root.deleteSync(recursive: true));
 
         final snapshot = await DefaultDartExecutionContextService(
           workspace: fixture.workspace,
         ).resolve(fixture.project);
 
-        for (final path in const [
-          'integration_test/live_test.dart',
-          'test_driver/driver.dart',
-        ]) {
-          final libraryId = 'dart:execution_roots/$path';
-          final roots = snapshot.roots.where(
-            (root) => root.owningLibraryId == libraryId,
-          );
-          expect(
-            roots.map((root) => root.nodeId),
-            contains(libraryId),
-            reason: path,
-          );
-          expect(
-            roots.every(
-              (root) =>
-                  root.domain == RootDomain.auxiliary &&
-                  root.auxiliaryExecutionTargetId!.startsWith('aux:test:'),
-            ),
-            isTrue,
-            reason: path,
-          );
-        }
         expect(
-          snapshot.roots.map((root) => root.nodeId),
-          contains('dart:execution_roots/integration_test/live_test.dart#main'),
+          snapshot.auxiliaryExecutionTargets.where(
+            (target) => target.id.contains('test_driver/main.dart'),
+          ),
+          isEmpty,
+        );
+        final driverTargets = snapshot.auxiliaryExecutionTargets
+            .where(
+              (target) =>
+                  target.id ==
+                  'aux:test:test_driver/screenshot_driver.dart:driver-vm',
+            )
+            .toList();
+        expect(driverTargets, hasLength(1));
+        expect(
+          snapshot.issues.where(
+            (issue) => issue.code == 'test-environment-incomplete',
+          ),
+          isEmpty,
+        );
+        final registeredAuxiliaryTargetIds = snapshot.auxiliaryExecutionTargets
+            .map((target) => target.id)
+            .toSet();
+        expect(
+          snapshot.roots
+              .where((root) => root.domain == RootDomain.auxiliary)
+              .every(
+                (root) => registeredAuxiliaryTargetIds.contains(
+                  root.auxiliaryExecutionTargetId,
+                ),
+              ),
+          isTrue,
+        );
+        final driverLibraryId =
+            'dart:execution_roots/test_driver/screenshot_driver.dart';
+        expect(
+          snapshot.roots
+              .where((root) => root.owningLibraryId == driverLibraryId)
+              .map((root) => root.nodeId)
+              .toSet(),
+          {driverLibraryId},
         );
         expect(
-          snapshot.roots.map((root) => root.nodeId),
-          isNot(contains('dart:execution_roots/test_driver/driver.dart#main')),
+          snapshot.roots
+              .where(
+                (root) =>
+                    root.owningLibraryId ==
+                    'dart:execution_roots/test_driver/main.dart',
+              )
+              .every((root) => root.domain == RootDomain.configuredTarget),
+          isTrue,
+        );
+      },
+    );
+
+    test(
+      'unrecognized auxiliary imports stay on one incomplete fallback target',
+      () async {
+        final fixture = await _createExecutionRootFixture(
+          {
+            'integration_test/unrecognized_control.dart': '''
+void main() {}
+''',
+          },
+          includeFlutterIntegrationPackages: true,
+          targetMatrix: TargetMatrix(
+            targets: [
+              BuildTarget(
+                name: 'android',
+                platform: 'android',
+                entrypoint: 'lib/main.dart',
+              ),
+              BuildTarget(
+                name: 'ios',
+                platform: 'ios',
+                entrypoint: 'lib/main.dart',
+              ),
+            ],
+            status: TargetMatrixStatus.declaredComplete,
+            source: 'fixture',
+          ),
+        );
+        addTearDown(() => fixture.project.root.deleteSync(recursive: true));
+
+        final snapshot = await DefaultDartExecutionContextService(
+          workspace: fixture.workspace,
+        ).resolve(fixture.project);
+
+        final targets = snapshot.auxiliaryExecutionTargets
+            .where(
+              (target) =>
+                  target.id ==
+                  'aux:test:integration_test/unrecognized_control.dart:incomplete',
+            )
+            .toList();
+        expect(targets, hasLength(1));
+        expect(targets.single.environmentComplete, isFalse);
+        expect(
+          snapshot.issues.where(
+            (issue) => issue.code == 'test-environment-incomplete',
+          ),
+          hasLength(1),
+        );
+        final libraryId =
+            'dart:execution_roots/integration_test/unrecognized_control.dart';
+        expect(
+          snapshot.roots
+              .where((root) => root.owningLibraryId == libraryId)
+              .map((root) => root.nodeId)
+              .toSet(),
+          {libraryId, '$libraryId#main'},
+        );
+      },
+    );
+
+    test(
+      'recognized Flutter auxiliary surfaces stay complete while an unrecognized sibling stays incomplete',
+      () async {
+        final fixture = await _createExecutionRootFixture(
+          {
+            'lib/platform_value.dart': '''
+export 'platform_native.dart'
+    if (dart.library.html) 'platform_web.dart';
+''',
+            'lib/platform_native.dart':
+                "const String platformValue = 'native';\n",
+            'lib/platform_web.dart': "const String platformValue = 'web';\n",
+            'integration_test/live_test.dart': '''
+import 'package:execution_roots/platform_value.dart';
+import 'package:integration_test/integration_test.dart';
+
+void main() {
+  platformValue;
+}
+''',
+            'integration_test/unrecognized_control.dart': '''
+import 'package:execution_roots/platform_value.dart';
+
+void main() {
+  platformValue;
+}
+''',
+            'test_driver/screenshot_driver.dart': '''
+import 'package:execution_roots/platform_value.dart';
+import 'package:flutter_driver/flutter_driver.dart';
+
+void drive() {
+  platformValue;
+}
+''',
+          },
+          includeFlutterIntegrationPackages: true,
+          targetMatrix: TargetMatrix(
+            targets: [
+              BuildTarget(
+                name: 'android',
+                platform: 'android',
+                entrypoint: 'lib/main.dart',
+              ),
+              BuildTarget(
+                name: 'ios',
+                platform: 'ios',
+                entrypoint: 'lib/main.dart',
+              ),
+              BuildTarget(
+                name: 'web',
+                platform: 'web',
+                entrypoint: 'lib/main.dart',
+              ),
+            ],
+            status: TargetMatrixStatus.declaredComplete,
+            source: 'fixture',
+          ),
+        );
+        addTearDown(() => fixture.project.root.deleteSync(recursive: true));
+
+        final snapshot = await DefaultDartExecutionContextService(
+          workspace: fixture.workspace,
+        ).resolve(fixture.project);
+
+        final integrationTargets = snapshot.auxiliaryExecutionTargets
+            .where(
+              (target) => target.id.startsWith(
+                'aux:test:integration_test/live_test.dart:integration-',
+              ),
+            )
+            .toList();
+        expect(integrationTargets, hasLength(3));
+        expect(
+          integrationTargets.every((target) => target.environmentComplete),
+          isTrue,
+        );
+        expect(
+          integrationTargets.map((target) => target.sourceConfiguredTarget),
+          {
+            BuildTarget(
+              name: 'android',
+              platform: 'android',
+              entrypoint: 'lib/main.dart',
+            ),
+            BuildTarget(
+              name: 'ios',
+              platform: 'ios',
+              entrypoint: 'lib/main.dart',
+            ),
+            BuildTarget(
+              name: 'web',
+              platform: 'web',
+              entrypoint: 'lib/main.dart',
+            ),
+          },
+        );
+
+        final driverTargets = snapshot.auxiliaryExecutionTargets
+            .where(
+              (target) =>
+                  target.id ==
+                  'aux:test:test_driver/screenshot_driver.dart:driver-vm',
+            )
+            .toList();
+        expect(driverTargets, hasLength(1));
+        expect(driverTargets.single.environmentComplete, isTrue);
+        expect(driverTargets.single.sourceConfiguredTarget, isNull);
+
+        final unrecognizedTargets = snapshot.auxiliaryExecutionTargets
+            .where(
+              (target) =>
+                  target.id ==
+                  'aux:test:integration_test/unrecognized_control.dart:incomplete',
+            )
+            .toList();
+        expect(unrecognizedTargets, hasLength(1));
+        expect(unrecognizedTargets.single.environmentComplete, isFalse);
+
+        expect(
+          snapshot.issues.where(
+            (issue) => issue.code == 'test-environment-incomplete',
+          ),
+          hasLength(1),
+        );
+
+        final liveLibraryId =
+            'dart:execution_roots/integration_test/live_test.dart';
+        final liveRootsByTarget = <String, Set<String>>{};
+        for (final root in snapshot.roots.where(
+          (root) => root.owningLibraryId == liveLibraryId,
+        )) {
+          liveRootsByTarget
+              .putIfAbsent(root.auxiliaryExecutionTargetId!, () => <String>{})
+              .add(root.nodeId);
+        }
+        expect(liveRootsByTarget, {
+          for (final target in integrationTargets)
+            target.id: {liveLibraryId, '$liveLibraryId#main'},
+        });
+
+        const driverLibraryId =
+            'dart:execution_roots/test_driver/screenshot_driver.dart';
+        expect(
+          snapshot.roots
+              .where((root) => root.owningLibraryId == driverLibraryId)
+              .map((root) => root.nodeId)
+              .toSet(),
+          {driverLibraryId},
+        );
+
+        const controlLibraryId =
+            'dart:execution_roots/integration_test/unrecognized_control.dart';
+        expect(
+          snapshot.roots
+              .where((root) => root.owningLibraryId == controlLibraryId)
+              .map((root) => root.nodeId)
+              .toSet(),
+          {controlLibraryId, '$controlLibraryId#main'},
         );
       },
     );
@@ -1140,6 +1530,265 @@ analyzer:
                 issue.requiresGlobalBlocker,
           ),
         ),
+      );
+    });
+
+    test(
+      'excluded analyzer-resolved main is classified without a target or root',
+      () async {
+        const exclusion = ExcludedApplicationEntrypoint(
+          path: 'scripts/guard.dart',
+          reason: 'tracked guard is not launchable',
+        );
+        final fixture = await _createExecutionRootFixture({
+          'scripts/guard.dart': 'void main() {}\n',
+        }, targetMatrix: _completeApplicationMatrix(exclusion));
+        addTearDown(() => fixture.project.root.deleteSync(recursive: true));
+
+        final snapshot = await DefaultDartExecutionContextService(
+          workspace: fixture.workspace,
+        ).resolve(fixture.project);
+
+        const guardLibraryId = 'dart:execution_roots/scripts/guard.dart';
+        expect(
+          snapshot.roots.map((root) => root.nodeId),
+          isNot(
+            anyOf(contains(guardLibraryId), contains('$guardLibraryId#main')),
+          ),
+        );
+        expect(
+          snapshot.auxiliaryExecutionTargets.where(
+            (target) =>
+                target.id.contains('scripts/guard.dart') ||
+                target.reason == exclusion.reason,
+          ),
+          isEmpty,
+        );
+        expect(
+          snapshot.roots.where((root) => root.reason == exclusion.reason),
+          isEmpty,
+        );
+        expect(
+          snapshot.issues
+              .map((issue) => issue.code)
+              .where(
+                const {
+                  'unclassified-dart-entrypoint',
+                  'excluded-dart-entrypoint-unresolved',
+                }.contains,
+              ),
+          isEmpty,
+        );
+      },
+    );
+
+    for (final path in const ['bin/worker.dart', 'tool/run.dart']) {
+      test(
+        'excluded standalone $path retains executable roots and fails closed',
+        () async {
+          final exclusion = ExcludedApplicationEntrypoint(
+            path: path,
+            reason: 'tracked application exclusion overlaps an executable',
+          );
+          final fixture = await _createExecutionRootFixture({
+            path: 'void main() {}\n',
+          }, targetMatrix: _completeApplicationMatrix(exclusion));
+          addTearDown(() => fixture.project.root.deleteSync(recursive: true));
+
+          final snapshot = await DefaultDartExecutionContextService(
+            workspace: fixture.workspace,
+          ).resolve(fixture.project);
+
+          final targetId = 'aux:runtime:executable:$path:incomplete';
+          expect(
+            snapshot.auxiliaryExecutionTargets
+                .where((target) => target.id == targetId)
+                .map((target) => target.domain),
+            [AuxiliaryExecutionDomain.runtime],
+          );
+          final libraryId = 'dart:execution_roots/$path';
+          expect(
+            snapshot.roots
+                .where((root) => root.auxiliaryExecutionTargetId == targetId)
+                .map((root) => root.nodeId)
+                .toSet(),
+            {libraryId, '$libraryId#main'},
+          );
+          final unresolved = snapshot.issues.where(
+            (issue) => issue.code == 'excluded-dart-entrypoint-unresolved',
+          );
+          expect(unresolved, hasLength(1));
+          expect(unresolved.single.requiresGlobalBlocker, isTrue);
+          expect(
+            snapshot.issues.where(
+              (issue) => issue.code == 'unclassified-dart-entrypoint',
+            ),
+            isEmpty,
+          );
+        },
+      );
+    }
+
+    test('excluded file that loses main fails closed once globally', () async {
+      const exclusion = ExcludedApplicationEntrypoint(
+        path: 'scripts/guard.dart',
+        reason: 'tracked guard is not launchable',
+      );
+      final fixture = await _createExecutionRootFixture({
+        'scripts/guard.dart': 'void main() {}\n',
+      }, targetMatrix: _completeApplicationMatrix(exclusion));
+      addTearDown(() => fixture.project.root.deleteSync(recursive: true));
+      File(
+        fixture.project.resolve(exclusion.path),
+      ).writeAsStringSync('void guard() {}\n');
+
+      final snapshot = await DefaultDartExecutionContextService(
+        workspace: fixture.workspace,
+      ).resolve(fixture.project);
+
+      final unresolved = snapshot.issues.where(
+        (issue) => issue.code == 'excluded-dart-entrypoint-unresolved',
+      );
+      expect(unresolved, hasLength(1));
+      expect(unresolved.single.requiresGlobalBlocker, isTrue);
+      expect(unresolved.single.reason, isNot(contains(exclusion.reason)));
+    });
+
+    test(
+      'analyzer-excluded entrypoint exclusion fails closed globally',
+      () async {
+        const exclusion = ExcludedApplicationEntrypoint(
+          path: 'scripts/guard.dart',
+          reason: 'tracked guard is not launchable',
+        );
+        final fixture = await _createExecutionRootFixture(
+          {'scripts/guard.dart': 'void main() {}\n'},
+          targetMatrix: _completeApplicationMatrix(exclusion),
+          analysisOptions: '''
+analyzer:
+  exclude:
+    - scripts/**
+''',
+        );
+        addTearDown(() => fixture.project.root.deleteSync(recursive: true));
+        expect(
+          fixture.workspace.dartFiles.map(fixture.project.relative),
+          isNot(contains(exclusion.path)),
+        );
+
+        final snapshot = await DefaultDartExecutionContextService(
+          workspace: fixture.workspace,
+        ).resolve(fixture.project);
+
+        final unresolved = snapshot.issues.where(
+          (issue) => issue.code == 'excluded-dart-entrypoint-unresolved',
+        );
+        expect(unresolved, hasLength(1));
+        expect(unresolved.single.requiresGlobalBlocker, isTrue);
+      },
+    );
+
+    test(
+      'direct API rejects a generated excluded main before analysis',
+      () async {
+        final fixture = await _createExecutionRootFixture({
+          'scripts/guard.g.dart': 'void main() {}\n',
+        });
+        addTearDown(() => fixture.project.root.deleteSync(recursive: true));
+
+        expect(
+          () => ProjectContext(
+            root: fixture.project.root,
+            pubspec: const {'name': 'execution_roots'},
+            packageName: 'execution_roots',
+            targetMatrix: _completeApplicationMatrix(
+              const ExcludedApplicationEntrypoint(
+                path: 'scripts/guard.g.dart',
+                reason: 'tracked guard is not launchable',
+              ),
+            ),
+            rootCoverage: RootCoverage.applicationApi(),
+          ),
+          throwsA(
+            isA<ArgumentError>().having(
+              (error) => error.message,
+              'message',
+              contains('generated Dart output'),
+            ),
+          ),
+        );
+      },
+    );
+
+    test('excluded main does not classify a second unlisted main', () async {
+      const exclusion = ExcludedApplicationEntrypoint(
+        path: 'scripts/guard.dart',
+        reason: 'tracked guard is not launchable',
+      );
+      final fixture = await _createExecutionRootFixture({
+        'scripts/guard.dart': 'void main() {}\n',
+        'scripts/unknown.dart': 'void main() {}\n',
+      }, targetMatrix: _completeApplicationMatrix(exclusion));
+      addTearDown(() => fixture.project.root.deleteSync(recursive: true));
+
+      final snapshot = await DefaultDartExecutionContextService(
+        workspace: fixture.workspace,
+      ).resolve(fixture.project);
+
+      expect(
+        snapshot.issues,
+        contains(
+          predicate<DartExecutionContextIssue>(
+            (issue) =>
+                issue.code == 'unclassified-dart-entrypoint' &&
+                issue.requiresGlobalBlocker,
+          ),
+        ),
+      );
+      expect(
+        snapshot.issues.where(
+          (issue) => issue.code == 'excluded-dart-entrypoint-unresolved',
+        ),
+        isEmpty,
+      );
+    });
+
+    test('Patrol test entrypoints are modeled as test runner roots', () async {
+      final fixture = await _createExecutionRootFixture({
+        'patrol_test/app_regression_test.dart': 'void main() {}\n',
+      });
+      addTearDown(() => fixture.project.root.deleteSync(recursive: true));
+
+      final snapshot = await DefaultDartExecutionContextService(
+        workspace: fixture.workspace,
+      ).resolve(fixture.project);
+
+      final target = snapshot.auxiliaryExecutionTargets.singleWhere(
+        (target) => target.id.startsWith(
+          'aux:test:patrol_test/app_regression_test.dart:',
+        ),
+      );
+      expect(target.domain, AuxiliaryExecutionDomain.test);
+      expect(
+        snapshot.roots
+            .where(
+              (root) =>
+                  root.auxiliaryExecutionTargetId == target.id &&
+                  root.owningLibraryId ==
+                      'dart:execution_roots/patrol_test/app_regression_test.dart',
+            )
+            .map((root) => root.nodeId)
+            .toSet(),
+        {
+          'dart:execution_roots/patrol_test/app_regression_test.dart',
+          'dart:execution_roots/patrol_test/app_regression_test.dart#main',
+        },
+      );
+      expect(
+        snapshot.issues.where(
+          (issue) => issue.code == 'unclassified-dart-entrypoint',
+        ),
+        isEmpty,
       );
     });
 
@@ -1904,16 +2553,46 @@ final class _ExecutionRootFixture {
   final DartAnalysisWorkspace workspace;
 }
 
+TargetMatrix _completeApplicationMatrix(
+  ExcludedApplicationEntrypoint exclusion,
+) => TargetMatrix(
+  targets: [
+    BuildTarget(
+      name: 'android',
+      platform: 'android',
+      entrypoint: 'lib/main.dart',
+    ),
+  ],
+  status: TargetMatrixStatus.declaredComplete,
+  source: 'fixture',
+  excludedEntrypoints: [exclusion],
+);
+
 Future<_ExecutionRootFixture> _createExecutionRootFixture(
   Map<String, String> sources, {
   String? analysisOptions,
   bool includeNestedPackage = false,
   List<BuildTarget>? targets,
+  bool includeFlutterIntegrationPackages = false,
+  TargetMatrix? targetMatrix,
 }) async {
   final root = await Directory.systemTemp.createTemp('execution-roots-');
+  final pubspecBuffer = StringBuffer()
+    ..writeln('name: execution_roots')
+    ..writeln('environment:')
+    ..writeln('  sdk: ^3.9.0');
+  if (includeFlutterIntegrationPackages) {
+    pubspecBuffer
+      ..writeln('dependencies:')
+      ..writeln('  flutter:')
+      ..writeln('    sdk: flutter')
+      ..writeln('dev_dependencies:')
+      ..writeln('  integration_test:')
+      ..writeln('    sdk: flutter');
+  }
   File(p.join(root.path, 'pubspec.yaml'))
     ..createSync(recursive: true)
-    ..writeAsStringSync('name: execution_roots\nenvironment:\n  sdk: ^3.9.0\n');
+    ..writeAsStringSync(pubspecBuffer.toString());
   File(p.join(root.path, 'lib/main.dart'))
     ..createSync(recursive: true)
     ..writeAsStringSync('void main() {}\n');
@@ -1922,6 +2601,22 @@ Future<_ExecutionRootFixture> _createExecutionRootFixture(
       ..createSync(recursive: true)
       ..writeAsStringSync(entry.value);
   }
+  if (includeFlutterIntegrationPackages) {
+    for (final entry in const {
+      'fake_packages/integration_test/lib/integration_test.dart':
+          'void integrationTestBinding() {}\n',
+      'fake_packages/integration_test/lib/integration_test_driver.dart':
+          'void integrationTestDriver() {}\n',
+      'fake_packages/integration_test/lib/integration_test_driver_extended.dart':
+          'void integrationTestDriverExtended() {}\n',
+      'fake_packages/flutter_driver/lib/flutter_driver.dart':
+          'void flutterDriverBinding() {}\n',
+    }.entries) {
+      File(p.join(root.path, entry.key))
+        ..createSync(recursive: true)
+        ..writeAsStringSync(entry.value);
+    }
+  }
   if (analysisOptions != null) {
     File(
       p.join(root.path, 'analysis_options.yaml'),
@@ -1929,22 +2624,37 @@ Future<_ExecutionRootFixture> _createExecutionRootFixture(
   }
   _writePackageConfig(root, '''
 {"configVersion":2,"packages":[
-  {"name":"execution_roots","rootUri":"../","packageUri":"lib/","languageVersion":"3.9"}${includeNestedPackage ? ',\n  {"name":"nested_owner","rootUri":"../nested/","packageUri":"lib/","languageVersion":"3.9"}' : ''}
+  {"name":"execution_roots","rootUri":"../","packageUri":"lib/","languageVersion":"3.9"}${includeNestedPackage ? ',\n  {"name":"nested_owner","rootUri":"../nested/","packageUri":"lib/","languageVersion":"3.9"}' : ''}${includeFlutterIntegrationPackages ? ',\n  {"name":"integration_test","rootUri":"../fake_packages/integration_test/","packageUri":"lib/","languageVersion":"3.9"},\n  {"name":"flutter_driver","rootUri":"../fake_packages/flutter_driver/","packageUri":"lib/","languageVersion":"3.9"}' : ''}
 ]}
 ''');
+  final effectivePubspec = includeFlutterIntegrationPackages
+      ? const {
+          'name': 'execution_roots',
+          'dependencies': {
+            'flutter': {'sdk': 'flutter'},
+          },
+          'dev_dependencies': {
+            'integration_test': {'sdk': 'flutter'},
+          },
+        }
+      : const {'name': 'execution_roots'};
   final project = ProjectContext(
     root: root,
-    pubspec: const {'name': 'execution_roots'},
+    pubspec: effectivePubspec,
     packageName: 'execution_roots',
-    targets:
-        targets ??
-        [
-          BuildTarget(
-            name: 'android',
-            platform: 'android',
-            entrypoint: 'lib/main.dart',
-          ),
-        ],
+    targetMatrix:
+        targetMatrix ??
+        (targets == null ? null : TargetMatrix.declared(targets)),
+    targets: targetMatrix == null
+        ? (targets ??
+              [
+                BuildTarget(
+                  name: 'android',
+                  platform: 'android',
+                  entrypoint: 'lib/main.dart',
+                ),
+              ])
+        : null,
     rootCoverage: RootCoverage.applicationApi(),
   );
   return _ExecutionRootFixture(

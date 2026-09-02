@@ -589,6 +589,11 @@ List<L10nEvidenceFailure> _ownershipFailures(
         path == allowlist.untranslatedSidecarPath) {
       return null;
     }
+    final role = snapshot.entries[path]?.role;
+    if (role == L10nSnapshotRole.arbTemplate ||
+        role == L10nSnapshotRole.arbLocale) {
+      return null;
+    }
     final name = _asciiFold(
       pathSlash < 0 ? path : path.substring(pathSlash + 1),
     );

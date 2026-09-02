@@ -1,10 +1,15 @@
 import 'dart:io';
 
+import 'package:flutter_pruner/src/adapters/analyzer_adapter.dart';
+import 'package:flutter_pruner/src/adapters/dart/dart_adapter.dart';
+import 'package:flutter_pruner/src/adapters/dart/dart_adapter_profile.dart';
 import 'package:flutter_pruner/src/adapters/dart/dart_analysis_workspace.dart';
 import 'package:flutter_pruner/src/adapters/dart/dart_package_ownership.dart';
 import 'package:flutter_pruner/src/adapters/l10n/arb_inventory.dart';
 import 'package:flutter_pruner/src/adapters/l10n/l10n_config.dart';
 import 'package:flutter_pruner/src/adapters/l10n/l10n_usage_resolver.dart';
+import 'package:flutter_pruner/src/analysis/project_analyzer.dart';
+import 'package:flutter_pruner/src/core/graph/reachability_graph.dart';
 import 'package:flutter_pruner/src/core/project/project_context.dart';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
@@ -233,6 +238,56 @@ void main() {
         firstReferences,
       );
     });
+
+    test(
+      'ignores qualified and cascade pure writes that match an ARB key',
+      () async {
+        final root = await _resolverFixture();
+        addTearDown(() => root.delete(recursive: true));
+        await File(
+          p.join(root.path, 'lib/non_l10n_write.dart'),
+        ).writeAsString('''
+class Product {
+  String? welcome;
+}
+
+Product qualifiedWrite(Product product) {
+  product.welcome = 'qualified';
+  return product;
+}
+
+Product cascadeWrite() => Product()..welcome = 'cascade';
+''');
+        final project = await ProjectContext.load(root);
+        final config = (L10nConfig.load(project) as L10nConfigValid).config;
+        final resolver = L10nUsageResolver(
+          project,
+          config,
+          ArbInventory.read(project, config),
+        );
+
+        await resolver.analyzeProject(
+          workspace: DartAnalysisWorkspace(project),
+        );
+
+        expect(
+          resolver.references.where(
+            (reference) =>
+                reference.location.contains('non_l10n_write.dart'),
+          ),
+          isEmpty,
+        );
+        expect(
+          resolver.blockers.where(
+            (blocker) =>
+                blocker.reason ==
+                    'dynamic localization member access cannot be resolved' &&
+                (blocker.location?.contains('non_l10n_write.dart') ?? false),
+          ),
+          isEmpty,
+        );
+      },
+    );
 
     test(
       'blocks missing configured output and missing member shapes',
@@ -490,6 +545,253 @@ String broken(AppLocalizations localizations) =>
       );
     },
   );
+
+  test('does not promote a non-error analyzer diagnostic to a blocker', () async {
+    final root = await _resolverFixture();
+    addTearDown(() => root.delete(recursive: true));
+    await File(p.join(root.path, 'lib/warned_consumer.dart')).writeAsString('''
+import 'l10n/app_localizations.dart';
+String warned(AppLocalizations localizations) {
+  final unused = localizations;
+  return localizations.welcome;
+}
+''');
+    final project = await ProjectContext.load(root);
+    final config = (L10nConfig.load(project) as L10nConfigValid).config;
+    final resolver = L10nUsageResolver(
+      project,
+      config,
+      ArbInventory.read(project, config),
+    );
+
+    await resolver.analyzeProject(workspace: DartAnalysisWorkspace(project));
+
+    expect(
+      resolver.blockers.where(
+        (blocker) =>
+            blocker.reason ==
+                'analyzer errors prevent semantic localization usage classification' &&
+            (blocker.location?.contains('warned_consumer.dart') ?? false),
+      ),
+      isEmpty,
+    );
+  });
+
+  test(
+    'does not promote a proven external conditional issue to an app blocker',
+    () async {
+      final root = await _resolverFixture();
+      addTearDown(() => root.delete(recursive: true));
+      final external = Directory(p.join(root.path, 'external_pkg'));
+      await File(p.join(external.path, 'pubspec.yaml')).create(recursive: true);
+      await File(p.join(external.path, 'pubspec.yaml')).writeAsString('''
+name: external_pkg
+environment:
+  sdk: ^3.9.0
+''');
+      await File(
+        p.join(external.path, 'lib', 'external.dart'),
+      ).create(recursive: true);
+      await File(p.join(external.path, 'lib', 'external.dart')).writeAsString(
+        '''
+import 'safe.dart' if (dart.library.html) 'web.dart';
+void externalEntry() => branchEntry();
+''',
+      );
+      await File(
+        p.join(external.path, 'lib', 'safe.dart'),
+      ).writeAsString('void branchEntry() {}\n');
+      await File(
+        p.join(external.path, 'lib', 'web.dart'),
+      ).writeAsString('void branchEntry() {}\n');
+      await File(p.join(root.path, 'lib', 'main.dart')).writeAsString('''
+import 'package:external_pkg/external.dart';
+void main() => externalEntry();
+''');
+      await File(
+        p.join(root.path, '.dart_tool', 'package_config.json'),
+      ).writeAsString('''
+{"configVersion":2,"packages":[
+  {"name":"l10n_test","rootUri":"../","packageUri":"lib/","languageVersion":"3.9"},
+  {"name":"external_pkg","rootUri":"../external_pkg/","packageUri":"lib/","languageVersion":"3.9"}
+]}
+''');
+      final project = await ProjectContext.load(root);
+      final workspace = DartAnalysisWorkspace(project);
+      await const DartAdapter().analyzeWithServices(
+        project,
+        GraphBuilder(ReachabilityGraph(), 'dart'),
+        AdapterServices(dartWorkspace: workspace),
+      );
+      expect((await workspace.boundedClosureSnapshot()).issues, isNotEmpty);
+      final config = (L10nConfig.load(project) as L10nConfigValid).config;
+      final resolver = L10nUsageResolver(
+        project,
+        config,
+        ArbInventory.read(project, config),
+      );
+
+      await resolver.analyzeProject(workspace: workspace);
+
+      expect(
+        resolver.blockers.map((blocker) => blocker.reason),
+        isNot(
+          contains(
+            'conditional external Dart closure may use configured localization members',
+          ),
+        ),
+      );
+    },
+  );
+
+  test(
+    'does not promote a proven external dynamic call to an app blocker',
+    () async {
+      final root = await _resolverFixture();
+      addTearDown(() => root.delete(recursive: true));
+      final external = Directory(p.join(root.path, 'external_pkg'));
+      await File(p.join(external.path, 'pubspec.yaml')).create(recursive: true);
+      await File(p.join(external.path, 'pubspec.yaml')).writeAsString('''
+name: external_pkg
+environment:
+  sdk: ^3.9.0
+''');
+      await File(
+        p.join(external.path, 'lib', 'external.dart'),
+      ).create(recursive: true);
+      await File(p.join(external.path, 'lib', 'external.dart')).writeAsString(
+        '''
+dynamic dependencyValue;
+void externalEntry() => dependencyValue.perform();
+''',
+      );
+      await File(p.join(root.path, 'lib', 'main.dart')).writeAsString('''
+import 'package:external_pkg/external.dart';
+void main() => externalEntry();
+''');
+      await File(
+        p.join(root.path, '.dart_tool', 'package_config.json'),
+      ).writeAsString('''
+{"configVersion":2,"packages":[
+  {"name":"l10n_test","rootUri":"../","packageUri":"lib/","languageVersion":"3.9"},
+  {"name":"external_pkg","rootUri":"../external_pkg/","packageUri":"lib/","languageVersion":"3.9"}
+]}
+''');
+      final project = await ProjectContext.load(root);
+      final workspace = DartAnalysisWorkspace(project);
+      await const DartAdapter().analyzeWithServices(
+        project,
+        GraphBuilder(ReachabilityGraph(), 'dart'),
+        AdapterServices(dartWorkspace: workspace),
+      );
+      final config = (L10nConfig.load(project) as L10nConfigValid).config;
+      final resolver = L10nUsageResolver(
+        project,
+        config,
+        ArbInventory.read(project, config),
+      );
+
+      await resolver.analyzeProject(workspace: workspace);
+
+      expect(
+        resolver.blockers.where(
+          (blocker) =>
+              blocker.reason == 'dynamic localization API cannot be resolved' &&
+              (blocker.location?.contains('external_pkg') ?? false),
+        ),
+        isEmpty,
+      );
+    },
+  );
+
+  test('bounds execution-selected external worklist selection cost', () async {
+    final root = await _resolverFixture();
+    addTearDown(() => root.delete(recursive: true));
+    final external = Directory(p.join(root.path, 'external_pkg'));
+    await File(p.join(external.path, 'pubspec.yaml')).create(recursive: true);
+    await File(p.join(external.path, 'pubspec.yaml')).writeAsString('''
+name: external_pkg
+environment:
+  sdk: ^3.9.0
+''');
+    final imports = <String>[];
+    for (var index = 0; index < 16; index++) {
+      final name = 'dependency_$index.dart';
+      imports.add("import '$name';");
+      await File(p.join(external.path, 'lib', name)).create(recursive: true);
+      await File(
+        p.join(external.path, 'lib', name),
+      ).writeAsString('void dependency$index() {}\n');
+    }
+    await File(p.join(external.path, 'lib', 'external.dart')).writeAsString('''
+${imports.join('\n')}
+void externalEntry() => dependency0();
+''');
+    await File(p.join(root.path, 'lib', 'main.dart')).writeAsString('''
+import 'package:external_pkg/external.dart';
+void main() => externalEntry();
+''');
+    await File(
+      p.join(root.path, '.dart_tool', 'package_config.json'),
+    ).writeAsString('''
+{"configVersion":2,"packages":[
+  {"name":"l10n_test","rootUri":"../","packageUri":"lib/","languageVersion":"3.9"},
+  {"name":"external_pkg","rootUri":"../external_pkg/","packageUri":"lib/","languageVersion":"3.9"}
+]}
+''');
+    final project = await ProjectContext.load(root);
+    final profile = DartAdapterProfile();
+
+    await ProjectAnalyzer(
+      project: project,
+      only: const {'l10n'},
+      dartProfile: profile,
+    ).analyze();
+
+    final counters = profile.snapshot()['counters']! as Map;
+    final admitted = counters['l10nExternalLibrariesAdmitted'] as int;
+    final comparisons =
+        counters['l10nExternalWorklistSelectionComparisons'] as int;
+    expect(admitted, greaterThan(10));
+    expect(comparisons, lessThanOrEqualTo(admitted * 2));
+  });
+
+  test('does not treat an unrelated local dynamic call as l10n', () async {
+    final root = await _resolverFixture();
+    addTearDown(() => root.delete(recursive: true));
+    await File(
+      p.join(root.path, 'lib', 'unrelated_dynamic.dart'),
+    ).writeAsString('''
+dynamic dependencyValue;
+void invokeDependency() => dependencyValue.perform();
+''');
+    final project = await ProjectContext.load(root);
+    final config = (L10nConfig.load(project) as L10nConfigValid).config;
+    final resolver = L10nUsageResolver(
+      project,
+      config,
+      ArbInventory.read(project, config),
+    );
+
+    await resolver.analyzeProject(workspace: DartAnalysisWorkspace(project));
+
+    expect(
+      resolver.blockers.where(
+        (blocker) =>
+            blocker.reason == 'dynamic localization API cannot be resolved' &&
+            (blocker.location?.contains('unrelated_dynamic.dart') ?? false),
+      ),
+      isEmpty,
+    );
+    expect(
+      resolver.blockers.where(
+        (blocker) =>
+            blocker.reason == 'dynamic localization API cannot be resolved' &&
+            (blocker.location?.contains('consumer.dart') ?? false),
+      ),
+      isNotEmpty,
+    );
+  });
 
   test('blocks a diagnostic configured output class', () async {
     final root = await _resolverFixture();

@@ -23,13 +23,68 @@ const _managedFingerprintSchema = 'corpus-managed-files-v1';
 const _policyFingerprintSchema = 'corpus-policy-v1';
 const _protectedFingerprintSchema = 'corpus-protected-authority-v1';
 const _viewFingerprintSchema = 'corpus-project-view-v1';
-const _normalizationManifestSha256 =
-    '0a363b17eaaed53c1b3724e3a9b75481db0dfd6534beccb09e1690cb2218c457';
+const _normalizationManifestSha256ByProject = <String, String>{
+  'gsy': '00c994f3fa48fc40ff1a1a35e8ea3fd0011ca3801da2e75acfa297009c761c59',
+  'gitjournal':
+      '5df0eacb70a4a69769eeadc0626329c636ababcb6cb1a8d0bf3fb3504a7c568c',
+  'smooth': 'd3a92834a95694fe22cb3c1c00934150fba63a93085381b86f138bf4b5aa53ca',
+};
 const _gsyNormalizedPaths = <String>[
   'lib/common/localization/l10n/app_en.arb',
   'lib/common/localization/l10n/app_ja.arb',
   'lib/common/localization/l10n/app_ko.arb',
   'lib/common/localization/l10n/app_zh.arb',
+];
+const _gitjournalNormalizedPaths = <String>[
+  'lib/l10n/app_de.arb',
+  'lib/l10n/app_es.arb',
+  'lib/l10n/app_fa.arb',
+  'lib/l10n/app_fi.arb',
+  'lib/l10n/app_fr.arb',
+  'lib/l10n/app_hi.arb',
+  'lib/l10n/app_hu.arb',
+  'lib/l10n/app_id.arb',
+  'lib/l10n/app_it.arb',
+  'lib/l10n/app_ja.arb',
+  'lib/l10n/app_ko.arb',
+  'lib/l10n/app_pl.arb',
+  'lib/l10n/app_pt.arb',
+  'lib/l10n/app_pt_br.arb',
+  'lib/l10n/app_ru.arb',
+  'lib/l10n/app_sv.arb',
+  'lib/l10n/app_ta.arb',
+  'lib/l10n/app_vi.arb',
+  'lib/l10n/app_zh.arb',
+  'lib/l10n/app_zh_Hans.arb',
+  'lib/l10n/app_zh_TW.arb',
+];
+const _gitjournalArbPaths = <String>[
+  'lib/l10n/app_de.arb',
+  'lib/l10n/app_en.arb',
+  'lib/l10n/app_es.arb',
+  'lib/l10n/app_fa.arb',
+  'lib/l10n/app_fi.arb',
+  'lib/l10n/app_fr.arb',
+  'lib/l10n/app_hi.arb',
+  'lib/l10n/app_hu.arb',
+  'lib/l10n/app_id.arb',
+  'lib/l10n/app_it.arb',
+  'lib/l10n/app_ja.arb',
+  'lib/l10n/app_ko.arb',
+  'lib/l10n/app_pl.arb',
+  'lib/l10n/app_pt.arb',
+  'lib/l10n/app_pt_br.arb',
+  'lib/l10n/app_ru.arb',
+  'lib/l10n/app_sv.arb',
+  'lib/l10n/app_ta.arb',
+  'lib/l10n/app_vi.arb',
+  'lib/l10n/app_zh.arb',
+  'lib/l10n/app_zh_Hans.arb',
+  'lib/l10n/app_zh_TW.arb',
+];
+const _flutterPubEphemeralPaths = <String>[
+  'ios/Flutter/ephemeral/flutter_lldb_helper.py',
+  'ios/Flutter/ephemeral/flutter_lldbinit',
 ];
 
 /// Final state of one complete-corpus mutation transaction.
@@ -375,17 +430,35 @@ final class CorpusVerificationPolicyValidator {
         throw ArgumentError('Duplicate corpus command identity.');
       }
     }
-    if (project.id == 'gsy') {
-      if (project.normalizationOverlays.length != 1 ||
-          project.normalizationOverlays.single.manifest !=
-              'gsy-normalized-family-v1.json' ||
-          project.normalizationOverlays.single.policy !=
-              'remove-declared-byte-spans' ||
-          !_sameStrings(project.arbPathsRelative, _gsyNormalizedPaths)) {
-        throw ArgumentError('GSY requires its complete frozen normalization.');
+    final expectedManifest = switch (project.id) {
+      'gsy' => 'gsy-normalized-family-v2.json',
+      'gitjournal' => 'gitjournal-normalized-family-v1.json',
+      'smooth'
+          when project.repositoryRevision ==
+              'bac71afd115f72e379c0b501b95e5ede20ecd636' =>
+        'smooth-normalized-family-v2.json',
+      _ => null,
+    };
+    final expectedPaths = switch (project.id) {
+      'gsy' => _gsyNormalizedPaths,
+      'gitjournal' => _gitjournalArbPaths,
+      'smooth' => project.arbPathsRelative,
+      _ => null,
+    };
+    if (expectedManifest == null) {
+      if (project.normalizationOverlays.isNotEmpty) {
+        throw ArgumentError(
+          'Normalization is not authorized for ${project.id}.',
+        );
       }
-    } else if (project.normalizationOverlays.isNotEmpty) {
-      throw ArgumentError('Normalization is only authorized for GSY.');
+    } else if (project.normalizationOverlays.length != 1 ||
+        project.normalizationOverlays.single.manifest != expectedManifest ||
+        project.normalizationOverlays.single.policy !=
+            'apply-declared-byte-transforms' ||
+        !_sameStrings(project.arbPathsRelative, expectedPaths!)) {
+      throw ArgumentError(
+        '${project.id} requires its complete frozen normalization.',
+      );
     }
   }
 }
@@ -457,6 +530,11 @@ final class DefaultCorpusProjectViewFactory
         const CorpusVerificationPolicyValidator(),
     CorpusTemporaryDirectoryFactory? temporaryDirectoryFactory,
     Directory? manifestDirectory,
+    L10nNormalizationManifest Function(
+      L10nMutationProjectManifest,
+      L10nNormalizationOverlay,
+    )?
+    normalizationManifestLoaderForTesting,
     String? gitExecutable,
     Duration commandTimeout = _defaultTimeout,
     int maxOutputBytesPerStream = _defaultOutputLimit,
@@ -467,6 +545,8 @@ final class DefaultCorpusProjectViewFactory
        _manifestDirectory =
            manifestDirectory ??
            Directory(p.join('benchmark', 'accuracy', 'manifests')),
+       _normalizationManifestLoaderForTesting =
+           normalizationManifestLoaderForTesting,
        _gitExecutable = gitExecutable ?? _platformGitExecutable,
        _commandTimeout = commandTimeout,
        _maxOutputBytesPerStream = maxOutputBytesPerStream {
@@ -479,6 +559,11 @@ final class DefaultCorpusProjectViewFactory
   final CorpusVerificationPolicyValidator _policyValidator;
   final CorpusTemporaryDirectoryFactory _temporaryDirectoryFactory;
   final Directory _manifestDirectory;
+  final L10nNormalizationManifest Function(
+    L10nMutationProjectManifest,
+    L10nNormalizationOverlay,
+  )?
+  _normalizationManifestLoaderForTesting;
   final String _gitExecutable;
   final Duration _commandTimeout;
   final int _maxOutputBytesPerStream;
@@ -609,20 +694,24 @@ final class DefaultCorpusProjectViewFactory
       repository = _canonicalDirectoryEntry(repository);
       final expectedRepositoryPath = repository.path;
       lease.captureAuthority();
-      _validateToolchainSelectionEvidence(project, repository);
+      _validateToolchainSelectionEvidence(
+        project,
+        repository,
+        allowAuthorizedReplacement: true,
+      );
 
       final packageRoot = _existingDirectoryWithin(
         repository,
         project.packageRootRelative,
       );
       final expectedPackagePath = packageRoot.path;
-      final overlayWrites = _preflightOverlayWrites(
+      final overlayPlan = _preflightOverlayWrites(
         project,
         retained,
         repository,
         fixtureSources,
       );
-      for (final write in overlayWrites) {
+      for (final write in overlayPlan.fixtureWrites) {
         await _installOverlay(repository, write);
       }
 
@@ -645,10 +734,42 @@ final class DefaultCorpusProjectViewFactory
             from: repository.path,
           )
           .replaceAll('\\', '/');
+      final flutterPubEphemeralPaths = <String>[
+        for (final relativePath in _flutterPubEphemeralPaths)
+          p
+              .relative(
+                p.join(packageRoot.path, relativePath),
+                from: repository.path,
+              )
+              .replaceAll('\\', '/'),
+      ];
+      final trackedFlutterPubEphemeralPaths = (await _gitText(
+        repository,
+        ['ls-files', '--', ...flutterPubEphemeralPaths],
+        environment: gitEnvironment,
+      )).split('\n').where((entry) => entry.isNotEmpty).toSet();
+      final generatedFlutterPubEphemeralPaths = flutterPubEphemeralPaths
+          .where(
+            (relativePath) =>
+                !trackedFlutterPubEphemeralPaths.contains(relativePath),
+          )
+          .toList(growable: false);
+      for (final relativePath in generatedFlutterPubEphemeralPaths) {
+        if (FileSystemEntity.typeSync(
+              _joinWithin(repository, relativePath),
+              followLinks: false,
+            ) !=
+            FileSystemEntityType.notFound) {
+          throw const _CorpusGateException();
+        }
+      }
       final sourceStatusBeforePub = await _gitStatus(
         repository,
         environment: gitEnvironment,
-        excludedRelativePath: packageLockRelative,
+        excludedRelativePaths: [
+          packageLockRelative,
+          ...generatedFlutterPubEphemeralPaths,
+        ],
       );
       if (_retainedGitControlFingerprint(repository) !=
               repositoryGitControlBeforePub ||
@@ -671,6 +792,11 @@ final class DefaultCorpusProjectViewFactory
         maxOutputBytesPerStream: _maxOutputBytesPerStream,
       );
       if (!_processPassed(pubGet)) {
+        if (Platform.environment['FLUTTER_PRUNER_STAGE1_DEBUG'] == '1') {
+          stderr
+            ..writeln(utf8.decode(pubGet.stdout.capturedPayload))
+            ..writeln(utf8.decode(pubGet.stderr.capturedPayload));
+        }
         failureStatus = _processStatus(pubGet);
         throw const _CorpusGateException();
       }
@@ -692,14 +818,26 @@ final class DefaultCorpusProjectViewFactory
         failureStatus = 'toolchainDrift';
         throw const _CorpusGateException();
       }
-      if (!_overlayTargetsStillMatch(repository, overlayWrites)) {
+      if (!_overlayTargetsStillMatch(repository, overlayPlan.fixtureWrites)) {
         failureStatus = 'overlayTargetDrift';
         throw const _CorpusGateException();
+      }
+      for (final relativePath in flutterPubEphemeralPaths) {
+        final type = FileSystemEntity.typeSync(
+          _joinWithin(repository, relativePath),
+          followLinks: false,
+        );
+        if (type != FileSystemEntityType.notFound) {
+          _readRegularFile(_regularFileWithin(repository, relativePath));
+        }
       }
       final sourceStatusAfterPub = await _gitStatus(
         repository,
         environment: gitEnvironment,
-        excludedRelativePath: packageLockRelative,
+        excludedRelativePaths: [
+          packageLockRelative,
+          ...generatedFlutterPubEphemeralPaths,
+        ],
       );
       if (!_sameBytes(sourceStatusBeforePub, sourceStatusAfterPub) ||
           _retainedGitControlFingerprint(repository) !=
@@ -714,6 +852,25 @@ final class DefaultCorpusProjectViewFactory
         failureStatus = 'pubSourceDrift';
         throw const _CorpusGateException();
       }
+      for (final write in overlayPlan.normalizationWrites) {
+        await _installOverlay(repository, write);
+      }
+      for (final baseline in overlayPlan.generatedBaselines) {
+        final baselineFailure = await _regenerateNormalizedGeneratedBaseline(
+          repository: repository,
+          packageRoot: packageRoot,
+          flutter: flutter,
+          baseline: baseline,
+          processRunner: _processRunner,
+          timeout: _commandTimeout,
+          maxOutputBytesPerStream: _maxOutputBytesPerStream,
+        );
+        if (baselineFailure != null) {
+          failureStatus = baselineFailure;
+          throw const _CorpusGateException();
+        }
+      }
+      final overlayWrites = overlayPlan.allWrites;
       final toolchainProbeAfter = await _probeToolchain(
         flutter,
         project,
@@ -892,7 +1049,12 @@ final class DefaultCorpusProjectViewFactory
       return CorpusProjectViewRejected(
         _provisioningOutcome(project, failureStatus),
       );
-    } catch (_) {
+    } catch (error, stackTrace) {
+      if (Platform.environment['FLUTTER_PRUNER_STAGE1_DEBUG'] == '1') {
+        stderr
+          ..writeln(error)
+          ..writeln(stackTrace);
+      }
       if (lease != null && !lease.isPoisoned) {
         if (!await lease.dispose()) failureStatus = 'cleanupFailed';
       }
@@ -922,10 +1084,10 @@ final class DefaultCorpusProjectViewFactory
   Future<Uint8List> _gitStatus(
     Directory repository, {
     required Map<String, String> environment,
-    String? excludedRelativePath,
+    List<String> excludedRelativePaths = const [],
   }) async {
-    if (excludedRelativePath != null &&
-        !_isSafeRelativePath(excludedRelativePath)) {
+    if (excludedRelativePaths.any((path) => !_isSafeRelativePath(path)) ||
+        excludedRelativePaths.toSet().length != excludedRelativePaths.length) {
       throw const _CorpusGateException();
     }
     final result = await _processRunner.run(
@@ -938,10 +1100,11 @@ final class DefaultCorpusProjectViewFactory
         '-z',
         '--untracked-files=all',
         '--ignore-submodules=none',
-        if (excludedRelativePath != null) ...[
+        if (excludedRelativePaths.isNotEmpty) ...[
           '--',
           '.',
-          ':(exclude,top,literal)$excludedRelativePath',
+          for (final path in excludedRelativePaths)
+            ':(exclude,top,literal)$path',
         ],
       ]),
       workingDirectory: repository.path,
@@ -972,20 +1135,54 @@ final class DefaultCorpusProjectViewFactory
     return utf8.decode(result.stdout.capturedPayload).trim();
   }
 
-  List<_OverlayWrite> _preflightOverlayWrites(
+  _OverlayWritePlan _preflightOverlayWrites(
     L10nMutationProjectManifest project,
     Directory retained,
     Directory repository,
     List<_FixtureSource> fixtureSources,
   ) {
-    final writes = <_OverlayWrite>[
-      for (final source in fixtureSources)
-        _OverlayWrite.createNew(
+    final fixtureWrites = <_OverlayWrite>[];
+    for (final source in fixtureSources) {
+      final targetPath = _joinWithin(repository, source.overlay.relativePath);
+      if (FileSystemEntity.typeSync(targetPath, followLinks: false) ==
+          FileSystemEntityType.notFound) {
+        fixtureWrites.add(
+          _OverlayWrite.createNew(
+            source.overlay.relativePath,
+            source.bytes,
+            source.mode,
+          ),
+        );
+      } else {
+        final target = _regularFileWithin(
+          repository,
           source.overlay.relativePath,
-          source.bytes,
-          source.mode,
-        ),
-    ];
+        );
+        final state = _readRegularFile(target);
+        if (!state.bytes.contentEquals(source.bytes) ||
+            state.mode != source.mode) {
+          final evidence = project.toolchainSelectionEvidence;
+          final authorizedSelectorReplacement =
+              source.overlay.purpose == 'toolchain selector authority' &&
+              source.overlay.relativePath == evidence['evidencePath'] &&
+              source.overlay.sha256 == evidence['evidenceSha256'] &&
+              state.mode == source.mode;
+          if (!authorizedSelectorReplacement) {
+            throw const _CorpusGateException();
+          }
+        }
+        fixtureWrites.add(
+          _OverlayWrite.replace(
+            source.overlay.relativePath,
+            state.bytes,
+            source.bytes,
+            state.mode,
+          ),
+        );
+      }
+    }
+    final normalizationWrites = <_OverlayWrite>[];
+    final generatedBaselines = <L10nNormalizedGeneratedBaseline>[];
     for (final overlay in project.normalizationOverlays) {
       final manifest = _loadNormalizationManifest(project, overlay);
       _validateNormalizationManifest(project, manifest);
@@ -993,24 +1190,31 @@ final class DefaultCorpusProjectViewFactory
       if (embedded != null && !_sameNormalizationManifest(embedded, manifest)) {
         throw const _CorpusGateException();
       }
+      if (manifest.generatedBaseline case final baseline?) {
+        generatedBaselines.add(baseline);
+      }
       for (final arb in manifest.changedArbs) {
         final file = _regularFileWithin(repository, arb.relativePath);
         final bytes = ImmutableBytes.copyOf(file.readAsBytesSync());
         if (bytes.sha256Hex != arb.originalSha256) {
           throw const _CorpusGateException();
         }
-        final replacement = _removeDeclaredSpans(bytes, arb.removedByteSpans);
+        final replacement = _applyDeclaredByteTransforms(
+          bytes,
+          arb.copiedByteSpans,
+          arb.removedByteSpans,
+        );
         if (replacement.sha256Hex != arb.replacementSha256 ||
-            !arb.decodedObjectEquivalent ||
             arb.replacementHasDuplicateDecodedKeys ||
             !_normalizationSemanticsMatch(
               bytes,
               replacement,
               arb.canonicalDecodedObjectSha256,
+              decodedObjectEquivalent: arb.decodedObjectEquivalent,
             )) {
           throw const _CorpusGateException();
         }
-        writes.add(
+        normalizationWrites.add(
           _OverlayWrite.replace(
             arb.relativePath,
             bytes,
@@ -1020,8 +1224,13 @@ final class DefaultCorpusProjectViewFactory
         );
       }
     }
-    _validateOverlayWriteSet(writes);
-    for (final write in writes) {
+    final plan = _OverlayWritePlan(
+      fixtureWrites: fixtureWrites,
+      normalizationWrites: normalizationWrites,
+      generatedBaselines: generatedBaselines,
+    );
+    _validateOverlayWriteSet(plan.allWrites);
+    for (final write in plan.allWrites) {
       final targetPath = _joinWithin(repository, write.relativePath);
       final type = FileSystemEntity.typeSync(targetPath, followLinks: false);
       if (write.mustCreate) {
@@ -1037,13 +1246,15 @@ final class DefaultCorpusProjectViewFactory
         }
       }
     }
-    return List<_OverlayWrite>.unmodifiable(writes);
+    return plan;
   }
 
   L10nNormalizationManifest _loadNormalizationManifest(
     L10nMutationProjectManifest project,
     L10nNormalizationOverlay overlay,
   ) {
+    final testingLoader = _normalizationManifestLoaderForTesting;
+    if (testingLoader != null) return testingLoader(project, overlay);
     return _parseNormalizationManifest(
       File(_joinWithin(_manifestDirectory, overlay.manifest)),
       project,
@@ -1060,7 +1271,11 @@ bool _sameNormalizationManifest(
       left.repositoryRevision != right.repositoryRevision ||
       left.policy != right.policy ||
       left.sourceSha256 != right.sourceSha256 ||
-      left.changedArbs.length != right.changedArbs.length) {
+      left.changedArbs.length != right.changedArbs.length ||
+      !_sameGeneratedBaseline(
+        left.generatedBaseline,
+        right.generatedBaseline,
+      )) {
     return false;
   }
   for (var index = 0; index < left.changedArbs.length; index++) {
@@ -1073,8 +1288,20 @@ bool _sameNormalizationManifest(
         a.decodedObjectEquivalent != b.decodedObjectEquivalent ||
         a.replacementHasDuplicateDecodedKeys !=
             b.replacementHasDuplicateDecodedKeys ||
+        a.copiedByteSpans.length != b.copiedByteSpans.length ||
         a.removedByteSpans.length != b.removedByteSpans.length) {
       return false;
+    }
+    for (var span = 0; span < a.copiedByteSpans.length; span++) {
+      if (a.copiedByteSpans[span].start != b.copiedByteSpans[span].start ||
+          a.copiedByteSpans[span].endExclusive !=
+              b.copiedByteSpans[span].endExclusive ||
+          a.copiedByteSpans[span].sourceStart !=
+              b.copiedByteSpans[span].sourceStart ||
+          a.copiedByteSpans[span].sourceEndExclusive !=
+              b.copiedByteSpans[span].sourceEndExclusive) {
+        return false;
+      }
     }
     for (var span = 0; span < a.removedByteSpans.length; span++) {
       if (a.removedByteSpans[span].start != b.removedByteSpans[span].start ||
@@ -1087,6 +1314,25 @@ bool _sameNormalizationManifest(
   return true;
 }
 
+bool _sameGeneratedBaseline(
+  L10nNormalizedGeneratedBaseline? left,
+  L10nNormalizedGeneratedBaseline? right,
+) {
+  if (left == null || right == null) return left == null && right == null;
+  if (left.changedOutputs.length != right.changedOutputs.length) return false;
+  for (var index = 0; index < left.changedOutputs.length; index++) {
+    final a = left.changedOutputs[index];
+    final b = right.changedOutputs[index];
+    if (a.relativePath != b.relativePath ||
+        a.originalSha256 != b.originalSha256 ||
+        a.replacementSha256 != b.replacementSha256 ||
+        a.posixMode != b.posixMode) {
+      return false;
+    }
+  }
+  return true;
+}
+
 void _validateNormalizationManifest(
   L10nMutationProjectManifest project,
   L10nNormalizationManifest manifest,
@@ -1094,24 +1340,68 @@ void _validateNormalizationManifest(
   final paths = manifest.changedArbs
       .map((arb) => arb.relativePath)
       .toList(growable: false);
-  if (project.id != 'gsy' ||
-      manifest.schemaVersion != 1 ||
-      manifest.normalizationVersion != 'gsy-normalized-family-v1' ||
+  final expectedVersion = switch (project.id) {
+    'gsy' => 'gsy-normalized-family-v2',
+    'gitjournal' => 'gitjournal-normalized-family-v1',
+    'smooth' => 'smooth-normalized-family-v2',
+    _ => null,
+  };
+  final expectedPolicy = switch (project.id) {
+    'gsy' => 'retain-last-effective-decoded-top-level-member-at-first-position',
+    'gitjournal' => 'remove-generator-ignored-extraneous-members',
+    'smooth' => 'remove-generator-ignored-or-inconsistent-locale-members',
+    _ => null,
+  };
+  final expectedPaths = switch (project.id) {
+    'gsy' => _gsyNormalizedPaths,
+    'gitjournal' => _gitjournalNormalizedPaths,
+    'smooth' => project.arbPathsRelative,
+    _ => null,
+  };
+  final expectedFamilyPaths = switch (project.id) {
+    'gsy' => _gsyNormalizedPaths,
+    'gitjournal' => _gitjournalArbPaths,
+    'smooth' => project.arbPathsRelative,
+    _ => null,
+  };
+  final expectedHash = _normalizationManifestSha256ByProject[project.id];
+  final expectedSchema = manifest.generatedBaseline == null ? 2 : 3;
+  if (manifest.schemaVersion != expectedSchema ||
+      manifest.normalizationVersion != expectedVersion ||
       manifest.repositoryRevision != project.repositoryRevision ||
-      manifest.policy != 'retain-last-effective-decoded-top-level-member' ||
-      manifest.sourceSha256 != _normalizationManifestSha256 ||
-      !_sameStrings(paths, _gsyNormalizedPaths) ||
-      !_sameStrings(project.arbPathsRelative, _gsyNormalizedPaths)) {
+      manifest.policy != expectedPolicy ||
+      manifest.sourceSha256 != expectedHash ||
+      expectedPaths == null ||
+      !_sameStrings(paths, expectedPaths) ||
+      expectedFamilyPaths == null ||
+      !_sameStrings(project.arbPathsRelative, expectedFamilyPaths)) {
     throw const _CorpusGateException();
   }
+  if (project.id == 'smooth' && manifest.generatedBaseline == null) {
+    throw const _CorpusGateException();
+  }
+  final expectedEquivalent = project.id == 'gsy';
   for (final arb in manifest.changedArbs) {
-    if (!arb.decodedObjectEquivalent ||
+    if (arb.decodedObjectEquivalent != expectedEquivalent ||
         arb.replacementHasDuplicateDecodedKeys ||
         !_isSha256(arb.originalSha256) ||
         !_isSha256(arb.replacementSha256) ||
         !_isSha256(arb.canonicalDecodedObjectSha256) ||
+        (project.id == 'gsy' && arb.copiedByteSpans.isEmpty) ||
+        (project.id != 'gsy' && arb.copiedByteSpans.isNotEmpty) ||
         arb.removedByteSpans.isEmpty) {
       throw const _CorpusGateException();
+    }
+    var previousCopyEnd = -1;
+    for (final span in arb.copiedByteSpans) {
+      if (span.start < 0 ||
+          span.start < previousCopyEnd ||
+          span.endExclusive <= span.start ||
+          span.sourceStart < 0 ||
+          span.sourceEndExclusive <= span.sourceStart) {
+        throw const _CorpusGateException();
+      }
+      previousCopyEnd = span.endExclusive;
     }
     var previousEnd = -1;
     for (final span in arb.removedByteSpans) {
@@ -1121,6 +1411,27 @@ void _validateNormalizationManifest(
         throw const _CorpusGateException();
       }
       previousEnd = span.endExclusive;
+    }
+  }
+  final generated = manifest.generatedBaseline;
+  if (generated != null) {
+    final packagePrefix = project.packageRootRelative == '.'
+        ? ''
+        : '${project.packageRootRelative}/';
+    final arbPrefix = '${project.arbDirectoryRelative}/';
+    for (final output in generated.changedOutputs) {
+      if (!_isSafeRelativePath(output.relativePath) ||
+          !output.relativePath.startsWith(packagePrefix) ||
+          !output.relativePath.startsWith(arbPrefix) ||
+          !output.relativePath.endsWith('.dart') ||
+          !_isSha256(output.originalSha256) ||
+          !_isSha256(output.replacementSha256) ||
+          output.originalSha256 == output.replacementSha256 ||
+          output.posixMode < 0 ||
+          output.posixMode > 0xfff ||
+          project.arbPathsRelative.contains(output.relativePath)) {
+        throw const _CorpusGateException();
+      }
     }
   }
 }
@@ -1916,6 +2227,25 @@ final class _FixtureSource {
   final String physicalFingerprint;
 }
 
+final class _OverlayWritePlan {
+  _OverlayWritePlan({
+    required List<_OverlayWrite> fixtureWrites,
+    required List<_OverlayWrite> normalizationWrites,
+    required List<L10nNormalizedGeneratedBaseline> generatedBaselines,
+  }) : fixtureWrites = List.unmodifiable(fixtureWrites),
+       normalizationWrites = List.unmodifiable(normalizationWrites),
+       generatedBaselines = List.unmodifiable(generatedBaselines),
+       allWrites = List.unmodifiable([
+         ...fixtureWrites,
+         ...normalizationWrites,
+       ]);
+
+  final List<_OverlayWrite> fixtureWrites;
+  final List<_OverlayWrite> normalizationWrites;
+  final List<L10nNormalizedGeneratedBaseline> generatedBaselines;
+  final List<_OverlayWrite> allWrites;
+}
+
 final class _OverlayWrite {
   const _OverlayWrite._({
     required this.relativePath,
@@ -2058,8 +2388,9 @@ List<_FixtureSource> _preflightFixtureSources(
 
 void _validateToolchainSelectionEvidence(
   L10nMutationProjectManifest project,
-  Directory repository,
-) {
+  Directory repository, {
+  bool allowAuthorizedReplacement = false,
+}) {
   final evidence = project.toolchainSelectionEvidence;
   final declaredVersion = evidence['frameworkVersion'];
   if (declaredVersion != null && declaredVersion != project.toolchainVersion) {
@@ -2076,7 +2407,15 @@ void _validateToolchainSelectionEvidence(
   }
   final file = _regularFileWithin(repository, evidencePath);
   if (_readRegularFile(file).bytes.sha256Hex != evidenceHash) {
-    throw const _CorpusGateException();
+    final authorizedReplacement = project.fixtureOverlays.where(
+      (overlay) =>
+          overlay.relativePath == evidencePath &&
+          overlay.sha256 == evidenceHash &&
+          overlay.purpose == 'toolchain selector authority',
+    );
+    if (!allowAuthorizedReplacement || authorizedReplacement.length != 1) {
+      throw const _CorpusGateException();
+    }
   }
 }
 
@@ -2250,6 +2589,219 @@ Future<void> _installOverlay(Directory repository, _OverlayWrite write) async {
     desiredMode: write.mode,
   );
 }
+
+Future<String?> _regenerateNormalizedGeneratedBaseline({
+  required Directory repository,
+  required Directory packageRoot,
+  required File flutter,
+  required L10nNormalizedGeneratedBaseline baseline,
+  required ProcessExecutionRunner processRunner,
+  required Duration timeout,
+  required int maxOutputBytesPerStream,
+}) async {
+  final packagePaths = <String, L10nNormalizedGeneratedOutput>{};
+  for (final output in baseline.changedOutputs) {
+    final repositoryPath = _joinWithin(repository, output.relativePath);
+    final relative = p
+        .relative(repositoryPath, from: packageRoot.path)
+        .replaceAll('\\', '/');
+    if (!_isSafeRelativePath(relative) ||
+        relative.startsWith('../') ||
+        !relative.endsWith('.dart') ||
+        packagePaths.containsKey(relative)) {
+      return 'managedAuthorityDrift';
+    }
+    final before = _readRegularFile(_regularFileWithin(packageRoot, relative));
+    if (before.bytes.sha256Hex != output.originalSha256 ||
+        (_isPosix && before.mode != output.posixMode)) {
+      return 'managedAuthorityDrift';
+    }
+    packagePaths[relative] = output;
+  }
+
+  late final Map<String, _NormalizedGenerationEntry> before;
+  try {
+    before = await _captureNormalizedGenerationTree(packageRoot);
+  } on Object {
+    return 'managedAuthorityDrift';
+  }
+
+  final result = await processRunner.run(
+    flutter.path,
+    const ['gen-l10n'],
+    workingDirectory: packageRoot.path,
+    timeout: timeout,
+    maxOutputBytesPerStream: maxOutputBytesPerStream,
+  );
+  if (!_processPassed(result)) return _processStatus(result);
+
+  late final Map<String, _NormalizedGenerationEntry> after;
+  try {
+    after = await _captureNormalizedGenerationTree(packageRoot);
+  } on Object {
+    return 'managedAuthorityDrift';
+  }
+
+  final paths = <String>{...before.keys, ...after.keys};
+  final changed = <String>{};
+  for (final path in paths) {
+    if (before[path] != after[path]) {
+      changed.add(path);
+    }
+  }
+  if (!_sameStringSets(changed, packagePaths.keys.toSet())) {
+    return 'managedAuthorityDrift';
+  }
+  for (final entry in packagePaths.entries) {
+    final output = entry.value;
+    final generated = after[entry.key];
+    if (generated?.kind != _NormalizedGenerationEntryKind.regularFile ||
+        generated?.sha256 != output.replacementSha256 ||
+        (_isPosix && generated?.posixMode != output.posixMode)) {
+      return 'managedAuthorityDrift';
+    }
+  }
+  return null;
+}
+
+Future<Map<String, _NormalizedGenerationEntry>>
+_captureNormalizedGenerationTree(Directory suppliedRoot) async {
+  final root = _canonicalDirectoryEntry(suppliedRoot);
+  final rootIdentity = _directoryPhysicalFingerprint(root);
+  final enumerated = _enumerateNormalizedGenerationTree(root);
+  final entries = SplayTreeMap<String, _NormalizedGenerationEntry>();
+  for (final item in enumerated) {
+    final path = item.entity.path;
+    final canonical = p.normalize(item.entity.resolveSymbolicLinksSync());
+    if (!p.equals(canonical, p.normalize(path)) ||
+        !p.isWithin(root.path, canonical)) {
+      throw const _CorpusGateException();
+    }
+    final initialType = FileSystemEntity.typeSync(path, followLinks: false);
+    if (initialType == FileSystemEntityType.directory) {
+      final before = item.entity.statSync();
+      final after = item.entity.statSync();
+      if (!_sameStableStat(before, after, FileSystemEntityType.directory)) {
+        throw const _CorpusGateException();
+      }
+      entries[item.relativePath] = _NormalizedGenerationEntry(
+        kind: _NormalizedGenerationEntryKind.directory,
+        sha256: null,
+        posixMode: _isPosix ? after.mode & 0xfff : null,
+      );
+      continue;
+    }
+    if (initialType != FileSystemEntityType.file) {
+      throw const _CorpusGateException();
+    }
+    final file = File(canonical);
+    final before = file.statSync();
+    final digest = await sha256.bind(file.openRead()).first;
+    final after = file.statSync();
+    if (!_sameStableStat(before, after, FileSystemEntityType.file)) {
+      throw const _CorpusGateException();
+    }
+    entries[item.relativePath] = _NormalizedGenerationEntry(
+      kind: _NormalizedGenerationEntryKind.regularFile,
+      sha256: digest.toString(),
+      posixMode: _isPosix ? after.mode & 0xfff : null,
+    );
+  }
+  final finalPaths = _enumerateNormalizedGenerationTree(
+    root,
+  ).map((item) => item.relativePath).toList(growable: false);
+  if (_directoryPhysicalFingerprint(root) != rootIdentity ||
+      !_sameStrings(
+        enumerated.map((item) => item.relativePath).toList(growable: false),
+        finalPaths,
+      )) {
+    throw const _CorpusGateException();
+  }
+  return Map.unmodifiable(entries);
+}
+
+List<({FileSystemEntity entity, String relativePath})>
+_enumerateNormalizedGenerationTree(Directory root) {
+  final entries = <({FileSystemEntity entity, String relativePath})>[];
+  for (final entity in root.listSync(recursive: true, followLinks: false)) {
+    final absolute = p.normalize(entity.absolute.path);
+    if (!p.isWithin(root.path, absolute)) {
+      throw const _CorpusGateException();
+    }
+    final relative = p
+        .relative(absolute, from: root.path)
+        .replaceAll('\\', '/');
+    if (!_isEnumeratedPackagePath(relative)) {
+      throw const _CorpusGateException();
+    }
+    entries.add((entity: entity, relativePath: relative));
+  }
+  entries.sort(
+    (left, right) => left.relativePath.compareTo(right.relativePath),
+  );
+  for (var index = 1; index < entries.length; index++) {
+    if (entries[index - 1].relativePath == entries[index].relativePath) {
+      throw const _CorpusGateException();
+    }
+  }
+  return entries;
+}
+
+bool _isEnumeratedPackagePath(String value) {
+  if (value.isEmpty ||
+      value == '.' ||
+      value.startsWith('/') ||
+      value.endsWith('/') ||
+      value.contains('\\') ||
+      value.contains('\u0000') ||
+      value.codeUnits.any((unit) => unit < 0x20 || unit == 0x7f)) {
+    return false;
+  }
+  return value
+      .split('/')
+      .every(
+        (segment) => segment.isNotEmpty && segment != '.' && segment != '..',
+      );
+}
+
+bool _sameStableStat(
+  FileStat before,
+  FileStat after,
+  FileSystemEntityType expectedType,
+) =>
+    before.type == expectedType &&
+    after.type == expectedType &&
+    before.size == after.size &&
+    before.mode == after.mode &&
+    before.modified == after.modified &&
+    before.changed == after.changed;
+
+enum _NormalizedGenerationEntryKind { regularFile, directory }
+
+final class _NormalizedGenerationEntry {
+  const _NormalizedGenerationEntry({
+    required this.kind,
+    required this.sha256,
+    required this.posixMode,
+  });
+
+  final _NormalizedGenerationEntryKind kind;
+  final String? sha256;
+  final int? posixMode;
+
+  @override
+  bool operator ==(Object other) =>
+      other is _NormalizedGenerationEntry &&
+      other.kind == kind &&
+      other.sha256 == sha256 &&
+      other.posixMode == posixMode;
+
+  @override
+  int get hashCode => Object.hash(kind, sha256, posixMode);
+}
+
+bool _sameStringSets(Set<String> left, Set<String> right) =>
+    left.length == right.length && left.containsAll(right);
 
 Future<void> _replaceExisting({
   required Directory repositoryRoot,
@@ -2505,31 +3057,71 @@ bool _argumentEscapesRepository(String argument) {
   return false;
 }
 
-ImmutableBytes _removeDeclaredSpans(
+ImmutableBytes _applyDeclaredByteTransforms(
   ImmutableBytes original,
-  List<L10nRemovedByteSpan> spans,
+  List<L10nCopiedByteSpan> copiedSpans,
+  List<L10nRemovedByteSpan> removedSpans,
 ) {
-  if (spans.isEmpty) throw const _CorpusGateException();
+  if (copiedSpans.isEmpty && removedSpans.isEmpty) {
+    throw const _CorpusGateException();
+  }
+  final source = original.copy();
+  final transforms =
+      <
+          ({
+            int start,
+            int endExclusive,
+            int? sourceStart,
+            int? sourceEndExclusive,
+          })
+        >[
+          for (final span in copiedSpans)
+            (
+              start: span.start,
+              endExclusive: span.endExclusive,
+              sourceStart: span.sourceStart,
+              sourceEndExclusive: span.sourceEndExclusive,
+            ),
+          for (final span in removedSpans)
+            (
+              start: span.start,
+              endExclusive: span.endExclusive,
+              sourceStart: null,
+              sourceEndExclusive: null,
+            ),
+        ]
+        ..sort((left, right) => left.start.compareTo(right.start));
   final output = BytesBuilder(copy: false);
   var cursor = 0;
-  for (final span in spans) {
-    if (span.start < cursor ||
-        span.endExclusive <= span.start ||
-        span.endExclusive > original.length) {
+  for (final transform in transforms) {
+    final sourceStart = transform.sourceStart;
+    final sourceEnd = transform.sourceEndExclusive;
+    if (transform.start < cursor ||
+        transform.endExclusive <= transform.start ||
+        transform.endExclusive > source.length ||
+        (sourceStart == null) != (sourceEnd == null) ||
+        (sourceStart != null &&
+            (sourceStart < 0 ||
+                sourceEnd! <= sourceStart ||
+                sourceEnd > source.length))) {
       throw const _CorpusGateException();
     }
-    output.add(original.copy().sublist(cursor, span.start));
-    cursor = span.endExclusive;
+    output.add(source.sublist(cursor, transform.start));
+    if (sourceStart != null) {
+      output.add(source.sublist(sourceStart, sourceEnd));
+    }
+    cursor = transform.endExclusive;
   }
-  output.add(original.copy().sublist(cursor));
+  output.add(source.sublist(cursor));
   return ImmutableBytes.copyOf(output.takeBytes());
 }
 
 bool _normalizationSemanticsMatch(
   ImmutableBytes original,
   ImmutableBytes replacement,
-  String expectedCanonicalHash,
-) {
+  String expectedCanonicalHash, {
+  required bool decodedObjectEquivalent,
+}) {
   try {
     if (_hasDuplicateTopLevelKeys(replacement.copy())) return false;
     final originalObject = jsonDecode(utf8.decode(original.copy()));
@@ -2538,8 +3130,12 @@ bool _normalizationSemanticsMatch(
     final replacementCanonical = jsonEncode(
       _canonicalizeJson(replacementObject),
     );
-    return originalCanonical == replacementCanonical &&
-        _sha256(utf8.encode(originalCanonical)) == expectedCanonicalHash;
+    final canonical = decodedObjectEquivalent
+        ? originalCanonical
+        : replacementCanonical;
+    return (!decodedObjectEquivalent ||
+            originalCanonical == replacementCanonical) &&
+        _sha256(utf8.encode(canonical)) == expectedCanonicalHash;
   } catch (_) {
     return false;
   }
@@ -2660,17 +3256,35 @@ L10nNormalizationManifest _parseNormalizationManifest(
   final decoded = jsonDecode(utf8.decode(source.copy()));
   if (decoded is! Map) throw const _CorpusGateException();
   final root = decoded.cast<String, Object?>();
-  _requireExactKeys(root, const {
+  const baseKeys = <String>{
     'schemaVersion',
     'normalizationVersion',
     'repositorySha',
     'policy',
     'changedArbs',
-  });
-  if (root['schemaVersion'] != 1 ||
-      root['normalizationVersion'] != 'gsy-normalized-family-v1' ||
+  };
+  final schemaVersion = root['schemaVersion'];
+  _requireExactKeys(
+    root,
+    schemaVersion == 3 ? {...baseKeys, 'generatedBaseline'} : baseKeys,
+  );
+  final expectedVersion = switch (project.id) {
+    'gsy' => 'gsy-normalized-family-v2',
+    'gitjournal' => 'gitjournal-normalized-family-v1',
+    'smooth' => 'smooth-normalized-family-v2',
+    _ => null,
+  };
+  final expectedPolicy = switch (project.id) {
+    'gsy' => 'retain-last-effective-decoded-top-level-member-at-first-position',
+    'gitjournal' => 'remove-generator-ignored-extraneous-members',
+    'smooth' => 'remove-generator-ignored-or-inconsistent-locale-members',
+    _ => null,
+  };
+  final expectedSchema = project.id == 'smooth' ? 3 : 2;
+  if (schemaVersion != expectedSchema ||
+      root['normalizationVersion'] != expectedVersion ||
       root['repositorySha'] != project.repositoryRevision ||
-      root['policy'] != 'retain-last-effective-decoded-top-level-member' ||
+      root['policy'] != expectedPolicy ||
       root['changedArbs'] is! List) {
     throw const _CorpusGateException();
   }
@@ -2681,12 +3295,40 @@ L10nNormalizationManifest _parseNormalizationManifest(
     _requireExactKeys(entry, const {
       'relativePath',
       'originalSha256',
+      'copiedByteSpans',
       'removedByteSpans',
       'replacementSha256',
       'canonicalDecodedObjectSha256',
       'decodedObjectEquivalent',
       'replacementHasDuplicateDecodedKeys',
     });
+    final copies = <L10nCopiedByteSpan>[];
+    final rawCopies = entry['copiedByteSpans'];
+    if (rawCopies is! List) throw const _CorpusGateException();
+    for (final rawCopy in rawCopies) {
+      if (rawCopy is! Map) throw const _CorpusGateException();
+      final copy = rawCopy.cast<String, Object?>();
+      _requireExactKeys(copy, const {
+        'start',
+        'endExclusive',
+        'sourceStart',
+        'sourceEndExclusive',
+      });
+      if (copy['start'] is! int ||
+          copy['endExclusive'] is! int ||
+          copy['sourceStart'] is! int ||
+          copy['sourceEndExclusive'] is! int) {
+        throw const _CorpusGateException();
+      }
+      copies.add(
+        L10nCopiedByteSpan(
+          start: copy['start']! as int,
+          endExclusive: copy['endExclusive']! as int,
+          sourceStart: copy['sourceStart']! as int,
+          sourceEndExclusive: copy['sourceEndExclusive']! as int,
+        ),
+      );
+    }
     final spans = <L10nRemovedByteSpan>[];
     final rawSpans = entry['removedByteSpans'];
     if (rawSpans is! List) throw const _CorpusGateException();
@@ -2726,6 +3368,7 @@ L10nNormalizationManifest _parseNormalizationManifest(
         originalSha256: originalHash,
         replacementSha256: replacementHash,
         canonicalDecodedObjectSha256: canonicalHash,
+        copiedByteSpans: copies,
         removedByteSpans: spans,
         decodedObjectEquivalent: entry['decodedObjectEquivalent']! as bool,
         replacementHasDuplicateDecodedKeys:
@@ -2737,14 +3380,71 @@ L10nNormalizationManifest _parseNormalizationManifest(
       arbs.map((arb) => arb.relativePath).toSet().length != arbs.length) {
     throw const _CorpusGateException();
   }
+  final generatedBaseline = schemaVersion == 3
+      ? _parseCorpusGeneratedBaseline(root['generatedBaseline'], project)
+      : null;
   return L10nNormalizationManifest(
-    schemaVersion: 1,
-    normalizationVersion: 'gsy-normalized-family-v1',
+    schemaVersion: schemaVersion! as int,
+    normalizationVersion: expectedVersion!,
     repositoryRevision: project.repositoryRevision,
-    policy: 'retain-last-effective-decoded-top-level-member',
+    policy: expectedPolicy!,
     sourceSha256: source.sha256Hex,
     changedArbs: arbs,
+    generatedBaseline: generatedBaseline,
   );
+}
+
+L10nNormalizedGeneratedBaseline _parseCorpusGeneratedBaseline(
+  Object? raw,
+  L10nMutationProjectManifest project,
+) {
+  if (raw is! Map) throw const _CorpusGateException();
+  final json = raw.cast<String, Object?>();
+  _requireExactKeys(json, const {'policy', 'changedOutputs'});
+  if (json['policy'] !=
+          'regenerate-after-normalization-with-pinned-toolchain' ||
+      json['changedOutputs'] is! List) {
+    throw const _CorpusGateException();
+  }
+  final outputs = <L10nNormalizedGeneratedOutput>[];
+  for (final rawOutput in json['changedOutputs']! as List<Object?>) {
+    if (rawOutput is! Map) throw const _CorpusGateException();
+    final output = rawOutput.cast<String, Object?>();
+    _requireExactKeys(output, const {
+      'relativePath',
+      'originalSha256',
+      'replacementSha256',
+      'posixMode',
+    });
+    final relativePath = output['relativePath'];
+    final originalHash = output['originalSha256'];
+    final replacementHash = output['replacementSha256'];
+    final posixMode = output['posixMode'];
+    if (relativePath is! String ||
+        !_isSafeRelativePath(relativePath) ||
+        !relativePath.startsWith('${project.arbDirectoryRelative}/') ||
+        !relativePath.endsWith('.dart') ||
+        project.arbPathsRelative.contains(relativePath) ||
+        originalHash is! String ||
+        !_isSha256(originalHash) ||
+        replacementHash is! String ||
+        !_isSha256(replacementHash) ||
+        originalHash == replacementHash ||
+        posixMode is! int ||
+        posixMode < 0 ||
+        posixMode > 0xfff) {
+      throw const _CorpusGateException();
+    }
+    outputs.add(
+      L10nNormalizedGeneratedOutput(
+        relativePath: relativePath,
+        originalSha256: originalHash,
+        replacementSha256: replacementHash,
+        posixMode: posixMode,
+      ),
+    );
+  }
+  return L10nNormalizedGeneratedBaseline(changedOutputs: outputs);
 }
 
 void _requireExactKeys(Map<String, Object?> value, Set<String> expected) {
@@ -2868,6 +3568,20 @@ String _protectedAuthorityFingerprint({
     fields
       ..add(path)
       ..add(_entityFingerprint(repository, path, includePhysical: true));
+  }
+  for (final relative in _flutterPubEphemeralPaths) {
+    final path = p
+        .relative(p.join(packageRoot.path, relative), from: repository.path)
+        .replaceAll('\\', '/');
+    fields
+      ..add(path)
+      ..add(
+        _optionalRegularFileFingerprint(
+          repository,
+          path,
+          includePhysical: true,
+        ),
+      );
   }
   return _hashFields(fields);
 }
@@ -3163,6 +3877,33 @@ String _entityFingerprint(
     _rejectLinkedAncestors(root, relativePath);
     return 'absent';
   }
+  if (type != FileSystemEntityType.file) throw const _CorpusGateException();
+  return _fileFingerprint(
+    _regularFileWithin(root, relativePath),
+    includePhysical: includePhysical,
+  );
+}
+
+String _optionalRegularFileFingerprint(
+  Directory root,
+  String relativePath, {
+  bool includePhysical = false,
+}) {
+  var cursor = _canonicalDirectoryEntry(root).path;
+  final segments = relativePath.split('/');
+  for (var index = 0; index < segments.length - 1; index++) {
+    cursor = p.join(cursor, segments[index]);
+    final type = FileSystemEntity.typeSync(cursor, followLinks: false);
+    if (type == FileSystemEntityType.notFound) return 'absent';
+    if (type != FileSystemEntityType.directory) {
+      throw const _CorpusGateException();
+    }
+  }
+  final type = FileSystemEntity.typeSync(
+    _joinWithin(root, relativePath),
+    followLinks: false,
+  );
+  if (type == FileSystemEntityType.notFound) return 'absent';
   if (type != FileSystemEntityType.file) throw const _CorpusGateException();
   return _fileFingerprint(
     _regularFileWithin(root, relativePath),

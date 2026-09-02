@@ -1,3 +1,4 @@
+import 'dart:collection';
 import 'dart:io';
 
 import 'package:analyzer/dart/analysis/results.dart';
@@ -290,6 +291,7 @@ class DartAdapter extends AnalyzerAdapter {
       ownership,
       externalClosureSeeds,
       selectedNodeIdsByLibraryId,
+      profile: profile,
     );
 
     void emitExecutionReachability() =>
@@ -627,8 +629,9 @@ class DartAdapter extends AnalyzerAdapter {
     DartAnalysisWorkspace workspace,
     DartPackageOwnership ownership,
     _ExternalClosureSeeds seeds,
-    Map<String, Set<String>> selectedNodeIdsByLibraryId,
-  ) async {
+    Map<String, Set<String>> selectedNodeIdsByLibraryId, {
+    DartAdapterProfile? profile,
+  }) async {
     final elements = Map<String, LibraryElement>.of(seeds.elements);
     final affectedLibraryIds = {
       for (final entry in seeds.affectedSelectedLibraryIds.entries)
@@ -639,13 +642,14 @@ class DartAdapter extends AnalyzerAdapter {
     final boundedIssues = <String, List<_ExternalClosureIssue>>{};
     final graphIssues = <String, List<_ExternalGraphIssue>>{};
     final inspected = <String>{};
-    final pending = <String>{...elements.keys};
+    final pending = Queue<String>()
+      ..addAll(elements.keys.toList(growable: false)..sort());
+    final scheduled = <String>{...elements.keys};
 
     while (pending.isNotEmpty) {
-      final identity = pending.reduce(
-        (left, right) => left.compareTo(right) <= 0 ? left : right,
-      );
-      pending.remove(identity);
+      final identity = pending.removeFirst();
+      scheduled.remove(identity);
+      profile?.addCount('externalClosureWorklistDequeues', 1);
       final element = elements[identity]!;
       final propagated = propagatedLibraryIds.putIfAbsent(
         identity,
@@ -786,11 +790,13 @@ class DartAdapter extends AnalyzerAdapter {
         );
         final previousLength = dependencyScopes.length;
         dependencyScopes.addAll(delta);
-        if (dependencyScopes.length != previousLength) {
-          pending.add(dependencyIdentity);
+        if (dependencyScopes.length != previousLength &&
+            scheduled.add(dependencyIdentity)) {
+          pending.addLast(dependencyIdentity);
         }
       }
     }
+    profile?.addCount('externalClosureLibrariesInspected', inspected.length);
 
     final identities = affectedLibraryIds.keys.toList()..sort();
     for (final identity in identities) {

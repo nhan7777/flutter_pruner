@@ -8,6 +8,7 @@ import '../../core/graph/node.dart';
 import '../../core/project/project_context.dart';
 import '../adapter_report_definition.dart';
 import '../analyzer_adapter.dart';
+import '../dart/dart_adapter_profile.dart';
 import '../dart/dart_analysis_workspace.dart';
 import '../dart/dart_application_reachability.dart';
 import '../dart/dart_execution_context_service.dart';
@@ -104,6 +105,7 @@ class L10nAdapter extends AnalyzerAdapter {
         workspace: workspace,
         contexts: contexts,
       ),
+      profile: null,
     );
   }
 
@@ -123,15 +125,22 @@ class L10nAdapter extends AnalyzerAdapter {
                       DefaultDartExecutionContextService(workspace: workspace))
                   .resolve(project),
         );
-    await _analyze(project, graph, workspace, reachabilityService);
+    await _analyze(
+      project,
+      graph,
+      workspace,
+      reachabilityService,
+      profile: services.dartProfile,
+    );
   }
 
   Future<void> _analyze(
     ProjectContext project,
     GraphBuilder graph,
     DartAnalysisWorkspace workspace,
-    DartExecutionReachabilityService reachabilityService,
-  ) async {
+    DartExecutionReachabilityService reachabilityService, {
+    DartAdapterProfile? profile,
+  }) async {
     final configResult = L10nConfig.load(project);
     switch (configResult) {
       case L10nConfigAbsent():
@@ -154,7 +163,12 @@ class L10nAdapter extends AnalyzerAdapter {
         final reachability = await reachabilityService.resolve(project);
         final applicationReachability =
             DartApplicationReachability.fromSnapshot(reachability);
-        final resolver = L10nUsageResolver(project, config, inventory);
+        final resolver = L10nUsageResolver(
+          project,
+          config,
+          inventory,
+          profile: profile,
+        );
         await resolver.analyzeProject(
           workspace: workspace,
           includedUnitPaths: applicationReachability.globalUsageUnitPaths,
