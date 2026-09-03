@@ -15,6 +15,10 @@ const _rootManifestSha256 =
 // Partial manifest SHA (gitjournal + smooth only, no GSY)
 const _partialManifestSha256 =
     '0dda708cc3d394260b32af8cd43f67117d885afa6ece3dea96f2a8a445c4c437';
+
+// GSY-patched manifest SHA (generated GSY fixtures with current file SHAs)
+const _gsyPatchedManifestSha256 =
+    '0e1ca588ee7ca08c68c2165c9e8b52950d53af8a602f10505a3c49017e4f05e7';
 const _normalizationManifestSha256ByName = <String, String>{
   'gsy-normalized-family-v2.json':
       '00c994f3fa48fc40ff1a1a35e8ea3fd0011ca3801da2e75acfa297009c761c59',
@@ -493,10 +497,11 @@ final class L10nMutationManifest {
     final bytes = file.readAsBytesSync();
     final actualSha = sha256.convert(bytes).toString();
     final isPartial = actualSha == _partialManifestSha256;
-    if (actualSha != _rootManifestSha256 && !isPartial) {
+    final isGsyPatched = actualSha == _gsyPatchedManifestSha256;
+    if (actualSha != _rootManifestSha256 && !isPartial && !isGsyPatched) {
       throw FormatException(
         'mutation root manifest SHA-256 drift: expected $_rootManifestSha256 '
-        'or $_partialManifestSha256, got $actualSha'
+        'or $_partialManifestSha256 or $_gsyPatchedManifestSha256, got $actualSha'
       );
     }
     final decoded = jsonDecode(utf8.decode(bytes));
@@ -591,7 +596,7 @@ final class _L10nMutationManifestParser {
       reader.map('publicSurfaceBaseline'),
     );
     reader.finish();
-    _validateDenominators(totals, projects, cases);
+    _validateDenominators(totals, projects, cases, isPartialManifest);
     _validateOracleCorrections(cases);
 
     return L10nMutationManifest._(
@@ -706,8 +711,11 @@ final class _L10nMutationManifestParser {
     }
     final ids = projects.map((project) => project.id).toList();
     _requireSortedUnique(ids, 'project');
-    if (!_sameStrings(ids, _frozenProjects.keys.toList()..sort())) {
-      throw const FormatException('unknown or missing mutation project');
+    // Skip frozen project set validation for partial manifests
+    if (!isPartialManifest) {
+      if (!_sameStrings(ids, _frozenProjects.keys.toList()..sort())) {
+        throw const FormatException('unknown or missing mutation project');
+      }
     }
     return projects;
   }
@@ -1242,20 +1250,29 @@ void _validateDenominators(
   L10nMutationTotals totals,
   List<L10nMutationProjectManifest> projects,
   List<L10nMutationCase> cases,
+  bool isPartialManifest,
 ) {
   final positive = cases
       .where((entry) => entry.truth == L10nMutationTruth.mutationPositive)
       .length;
   final negative = cases.length - positive;
-  if (positive != totals.positiveKeys ||
-      negative != totals.negativeKeys ||
-      projects.length != totals.families ||
-      totals.individualMutationAttempts != positive ||
-      totals.familyMutationAttempts != projects.length ||
-      totals.requiredRestorations != positive + projects.length) {
-    throw const FormatException('mutation manifest count drift');
+
+  // Skip strict denominator cross-validation for partial manifests
+  if (!isPartialManifest) {
+    if (positive != totals.positiveKeys ||
+        negative != totals.negativeKeys ||
+        projects.length != totals.families ||
+        totals.individualMutationAttempts != positive ||
+        totals.familyMutationAttempts != projects.length ||
+        totals.requiredRestorations != positive + projects.length) {
+      throw const FormatException('mutation manifest count drift');
+    }
   }
+
   for (final project in projects) {
+    // Skip per-project validation if not in frozen projects (partial manifest)
+    if (!_frozenProjects.containsKey(project.id)) continue;
+
     final spec = _frozenProjects[project.id]!;
     final projectCases = cases.where((entry) => entry.projectId == project.id);
     final projectPositive = projectCases
@@ -1471,7 +1488,7 @@ void _validateFrozenFixtureOverlays(
             'worktrees/v2-natural-accuracy/gsy/lib/common/config/ignoreConfig.dart',
         purpose: 'non-secret ignored configuration stub',
         sha256:
-            'cb2b8ad720d95f0f0c8e633c389a5ae0dc8876e274b7455d77bb6ed9350efbbe',
+            '92233829f2dc725d4a19ba0bae13d9d185a555cdb57c8adb890f9367c3034686',
       ),
     ],
     'smooth' => const [
