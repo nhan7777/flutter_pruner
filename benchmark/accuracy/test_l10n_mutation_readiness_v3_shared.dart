@@ -13,6 +13,7 @@ import 'dart:io';
 
 import 'package:path/path.dart' as p;
 
+import 'l10n_mutation_readiness.dart';
 import 'src/l10n_readiness_production.dart';
 
 Future<void> main(List<String> arguments) async {
