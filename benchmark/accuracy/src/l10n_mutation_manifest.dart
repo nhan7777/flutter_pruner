@@ -23,6 +23,10 @@ const _partialManifestSha256 =
 // GSY-patched manifest SHA (generated GSY fixtures with current file SHAs)
 const _gsyPatchedManifestSha256 =
     '0e1ca588ee7ca08c68c2165c9e8b52950d53af8a602f10505a3c49017e4f05e7';
+
+// V2 manifest SHA (l10n-mutation-readiness-v2.json with oracleCorrections)
+const _v2ManifestSha256 =
+    '6c64080eb30fd59ad55db439ddaf17cc8340785828df31a53d0433669032387a';
 const _normalizationManifestSha256ByName = <String, String>{
   'gsy-normalized-family-v2.json':
       '00c994f3fa48fc40ff1a1a35e8ea3fd0011ca3801da2e75acfa297009c761c59',
@@ -501,12 +505,13 @@ final class L10nMutationManifest {
     final bytes = file.readAsBytesSync();
     final actualSha = sha256.convert(bytes).toString();
     final isV1 = actualSha == _v1ManifestSha256;
+    final isV2 = actualSha == _v2ManifestSha256;
     final isPartial = actualSha == _partialManifestSha256;
     final isGsyPatched = actualSha == _gsyPatchedManifestSha256;
-    if (actualSha != _rootManifestSha256 && !isV1 && !isPartial && !isGsyPatched) {
+    if (actualSha != _rootManifestSha256 && !isV1 && !isV2 && !isPartial && !isGsyPatched) {
       throw FormatException(
         'mutation root manifest SHA-256 drift: expected $_rootManifestSha256 '
-        'or $_v1ManifestSha256 or $_partialManifestSha256 or $_gsyPatchedManifestSha256, got $actualSha'
+        'or $_v1ManifestSha256 or $_v2ManifestSha256 or $_partialManifestSha256 or $_gsyPatchedManifestSha256, got $actualSha'
       );
     }
     final decoded = jsonDecode(utf8.decode(bytes));
