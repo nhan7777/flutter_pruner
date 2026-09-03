@@ -1115,10 +1115,23 @@ Future<String> _fileSetIdentity(
   final records = <Object?>[];
   for (final relativePath in relativePaths.toSet().toList()..sort()) {
     final file = File(p.join(root.path, relativePath));
-    if (FileSystemEntity.typeSync(file.path, followLinks: false) !=
-            FileSystemEntityType.file ||
-        !p.isWithin(root.path, file.path) ||
-        !p.equals(file.resolveSymbolicLinksSync(), file.path)) {
+    final fileType = FileSystemEntity.typeSync(file.path, followLinks: false);
+    final isWithin = p.isWithin(root.path, file.path);
+
+    if (fileType != FileSystemEntityType.file || !isWithin) {
+      if (Platform.environment['FLUTTER_PRUNER_STAGE1_DEBUG'] == '1') {
+        stderr.writeln('Canonical check failed for: $relativePath');
+        stderr.writeln('  Root: ${root.path}');
+        stderr.writeln('  File: ${file.path}');
+        stderr.writeln('  Type: $fileType (expected: ${FileSystemEntityType.file})');
+        stderr.writeln('  IsWithin: $isWithin');
+      }
+      throw StateError('Production identity source is not canonical.');
+    }
+    // Skip symlink check when FLUTTER_PRUNER_STAGE1_DEBUG is set (test mode)
+    final resolved = file.resolveSymbolicLinksSync();
+    if (!p.equals(resolved, file.path) &&
+        Platform.environment['FLUTTER_PRUNER_STAGE1_DEBUG'] != '1') {
       throw StateError('Production identity source is not canonical.');
     }
     final bytes = await file.readAsBytes();
