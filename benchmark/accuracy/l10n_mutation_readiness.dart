@@ -8,6 +8,9 @@ import 'dart:math';
 
 import 'package:crypto/crypto.dart';
 import 'package:flutter_pruner/src/reporting/io_report_object_backend.dart';
+import 'package:synchronized/synchronized.dart';
+
+import 'src/shared_view_manager.dart';
 import 'package:flutter_pruner/src/reporting/recoverable_report_writer.dart';
 import 'package:flutter_pruner/src/reporting/report_object_backend.dart';
 import 'package:path/path.dart' as p;
@@ -898,6 +901,7 @@ final class L10nMutationReadinessDependencies {
     required this.negativeFixtureRunner,
     required this.checkpointStore,
     required this.monotonicMicros,
+    this.sharedViewManager,
     this.onStaticGate,
     this.enableProjectEligibilityPreflight = false,
   });
@@ -910,6 +914,7 @@ final class L10nMutationReadinessDependencies {
   final L10nMutationNegativeFixtureRunner negativeFixtureRunner;
   final L10nReadinessCheckpointStore checkpointStore;
   final MonotonicMicros monotonicMicros;
+  final SharedViewManager? sharedViewManager;
   final void Function(String projectId)? onStaticGate;
   final bool enableProjectEligibilityPreflight;
 }
@@ -1346,14 +1351,31 @@ Future<int> runL10nMutationReadiness(
           await _writeCheckpoint(lease, artifact);
           continue;
         }
-        final attempt = await _runIndividualAttempt(
-          plan: plan,
-          oracleCase: oracleCase,
-          dependencies: dependencies,
-        );
+
+        final attempt = dependencies.sharedViewManager != null
+            ? await _runIndividualAttemptWithSharedView(
+                plan: plan,
+                oracleCase: oracleCase,
+                dependencies: dependencies,
+                sharedEntry: await dependencies.sharedViewManager!
+                    .getSharedView(oracleCase.projectId),
+              )
+            : await _runIndividualAttempt(
+                plan: plan,
+                oracleCase: oracleCase,
+                dependencies: dependencies,
+              );
         artifact.recordProject(attempt.project);
         artifact.cases[caseId] = attempt.record;
         await _writeCheckpoint(lease, artifact);
+      }
+
+      if (dependencies.sharedViewManager != null) {
+        try {
+          await dependencies.sharedViewManager!.disposeAll();
+        } catch (error) {
+          print('Warning: SharedViewManager cleanup failed: $error');
+        }
       }
 
       if (!dependencies.enableProjectEligibilityPreflight) {
@@ -1415,6 +1437,103 @@ Future<void> _writeCheckpoint(
 }) => lease.write(
   canonicalL10nReadinessJson(artifact.toJson(finalArtifact: finalArtifact)),
 );
+
+Future<_AttemptRecord> _runIndividualAttemptWithSharedView({
+  required L10nReadinessPlan plan,
+  required L10nReadinessOracleCase oracleCase,
+  required L10nMutationReadinessDependencies dependencies,
+  required SharedViewEntry sharedEntry,
+}) async {
+  final start = dependencies.monotonicMicros.now();
+  final view = sharedEntry.view;
+  _StaticProjectRecord? project;
+  L10nEvidenceResult? evidence;
+  String? actualNodeId;
+  var failureReason = 'staticOracleMismatch';
+  Object? attemptError;
+  StackTrace? attemptStackTrace;
+  try {
+    if (view.projectId != oracleCase.projectId) {
+      throw const FormatException('provisioned project identity drift');
+    }
+    final projectCases = _projectCases(plan, oracleCase.projectId);
+    final scan = await _scanWithOptionalLock(
+      dependencies,
+      view,
+      projectCases,
+      sharedEntry.scanLock,
+    );
+    dependencies.onStaticGate?.call(oracleCase.projectId);
+    project = _evaluateStaticGate(oracleCase.projectId, projectCases, scan);
+    if (!project.passed) {
+      failureReason = 'staticOracleMismatch';
+    } else {
+      actualNodeId = scan.actualNodeIdByOracleCaseId[oracleCase.caseId];
+      final evaluator = dependencies.evaluatorFactory();
+      final internal = await evaluator.evaluateIndividual(
+        view,
+        oracleCase,
+        scan,
+      );
+      if (internal.selectionIdentity != oracleCase.caseId) {
+        throw const FormatException('internal evidence selection drift');
+      }
+      final corpus = internal.accepted
+          ? await dependencies.corpusEvidenceRunner.run(
+              view,
+              oracleCase.caseId,
+              internal,
+            )
+          : null;
+      evidence = L10nEvidenceResult.fromInternal(
+        oracleCase.caseId,
+        internal,
+        corpus,
+      );
+      failureReason = !internal.accepted
+          ? 'internalVerdictRejected'
+          : evidence.passed
+          ? ''
+          : 'corpusEvidenceRejected';
+    }
+  } catch (error, stackTrace) {
+    attemptError = error;
+    attemptStackTrace = stackTrace;
+  }
+  if (attemptError != null) {
+    Error.throwWithStackTrace(attemptError, attemptStackTrace!);
+  }
+  if (project == null) {
+    throw StateError('individual attempt produced no static project record');
+  }
+  final passed = project.passed && evidence?.passed == true;
+  final record = <String, Object?>{
+    'actualNodeId': actualNodeId,
+    'attemptMicros': _elapsed(start, dependencies.monotonicMicros.now()),
+    'caseId': oracleCase.caseId,
+    'decodedKey': oracleCase.decodedKey,
+    'evidence': evidence?.toJson(),
+    'expectedScannerPresence': oracleCase.expectedScannerPresence,
+    'failureReason': passed ? null : failureReason,
+    'projectId': oracleCase.projectId,
+    'status': passed ? 'passed' : 'failed',
+  };
+  _validateProjectRecord(project.json, plan);
+  _validateCaseRecord(record, {oracleCase.caseId: oracleCase});
+  return _AttemptRecord(project: project, record: record);
+}
+
+Future<L10nStaticScanResult> _scanWithOptionalLock(
+  L10nMutationReadinessDependencies dependencies,
+  L10nReadinessProjectView view,
+  List<L10nReadinessOracleCase> projectCases,
+  Lock? scanLock,
+) async {
+  if (scanLock != null) {
+    return scanLock.synchronized(() => dependencies.scanner.scan(view, projectCases));
+  }
+  return dependencies.scanner.scan(view, projectCases);
+}
 
 Future<_AttemptRecord> _runIndividualAttempt({
   required L10nReadinessPlan plan,

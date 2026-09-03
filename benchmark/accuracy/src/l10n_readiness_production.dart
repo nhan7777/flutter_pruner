@@ -31,6 +31,7 @@ import 'corpus_mutation_evidence.dart' as corpus;
 import 'l10n_mutation_manifest.dart';
 import 'l10n_readiness_change_set_rebaser.dart';
 import 'l10n_readiness_negative_fixtures.dart';
+import 'shared_view_manager.dart';
 
 typedef ProductionL10nAnalysisRunner =
     Future<AnalysisSnapshot> Function(ProjectContext project);
@@ -161,6 +162,7 @@ final class ProductionL10nReadinessProjectViewFactory {
   final corpus.CorpusProjectViewFactory _viewFactory;
 
   Future<ProductionL10nReadinessProjectView> provision(String projectId) async {
+    print('[DEBUG] provision($projectId) starting');
     final project = manifest.projectsById[projectId];
     final retained = retainedRepositoriesByProject[projectId];
     if (project == null || retained == null) {
@@ -170,11 +172,13 @@ final class ProductionL10nReadinessProjectViewFactory {
     if (flutter == null) {
       throw StateError('Production SDK authority is unavailable.');
     }
+    print('[DEBUG] provision($projectId) calling _viewFactory.create()');
     final created = await _viewFactory.create(
       project: project,
       retainedRepositoryPath: retained.path,
       canonicalFlutterExecutable: flutter.path,
     );
+    print('[DEBUG] provision($projectId) _viewFactory.create() completed');
     final corpusView = switch (created) {
       corpus.CorpusProjectViewReady(:final view) => view,
       corpus.CorpusProjectViewRejected(:final outcome) => throw StateError(
@@ -184,10 +188,12 @@ final class ProductionL10nReadinessProjectViewFactory {
       ),
     };
     try {
+      print('[DEBUG] provision($projectId) calling ProjectContext.load()');
       final context = await ProjectContext.load(
         corpusView.packageRoot,
         configFile: _scannerCoverageConfigFile(project, corpusView),
       );
+      print('[DEBUG] provision($projectId) ProjectContext.load() completed');
       return ProductionL10nReadinessProjectView(
         projectId: projectId,
         manifest: project,
@@ -593,25 +599,30 @@ final class ProductionL10nAuthorityLoader
         processRunner: const ManagedProcessRunner(),
         gitExecutable: Platform.isWindows ? 'git.exe' : '/usr/bin/git',
         enforceRetainedProbeHash: true,
+        enforceManifestHash: true,
       );
 
   ProductionL10nAuthorityLoader.testing({
     required ProcessExecutionRunner processRunner,
     required String gitExecutable,
     bool enforceRetainedProbeHash = false,
+    bool enforceManifestHash = true,
   }) : this._(
          processRunner: processRunner,
          gitExecutable: gitExecutable,
          enforceRetainedProbeHash: enforceRetainedProbeHash,
+         enforceManifestHash: enforceManifestHash,
        );
 
   ProductionL10nAuthorityLoader._({
     required ProcessExecutionRunner processRunner,
     required String gitExecutable,
     required bool enforceRetainedProbeHash,
+    required bool enforceManifestHash,
   }) : _processRunner = processRunner,
        _gitExecutable = gitExecutable,
-       _enforceRetainedProbeHash = enforceRetainedProbeHash;
+       _enforceRetainedProbeHash = enforceRetainedProbeHash,
+       _enforceManifestHash = enforceManifestHash;
 
   static const _timeout = Duration(minutes: 2);
   static const _outputLimit = 1024 * 1024;
@@ -619,6 +630,7 @@ final class ProductionL10nAuthorityLoader
   final ProcessExecutionRunner _processRunner;
   final String _gitExecutable;
   final bool _enforceRetainedProbeHash;
+  final bool _enforceManifestHash;
 
   @override
   Future<ProductionL10nAuthoritySnapshot> load(
@@ -626,7 +638,9 @@ final class ProductionL10nAuthorityLoader
   ) async {
     final manifestBefore = await options.manifestFile.readAsBytes();
     final manifestSha = sha256.convert(manifestBefore).toString();
-    final manifest = L10nMutationManifest.read(options.manifestFile);
+    final manifest = _enforceManifestHash
+        ? L10nMutationManifest.read(options.manifestFile)
+        : L10nMutationManifest.readWithoutValidation(options.manifestFile);
     final retained = _retainedRepositories(options.corpusRoot);
     final repositoryRecords = <String, Object?>{};
     final sdkRecords = <String, Object?>{};
@@ -880,6 +894,7 @@ final class ProductionL10nReadinessComposition {
   static Future<ProductionL10nReadinessComposition> create(
     L10nMutationReadinessOptions options, {
     ProductionL10nAuthorityLoaderBase? authorityLoader,
+    bool enableSharedViews = false,
   }) async {
     final loader = authorityLoader ?? ProductionL10nAuthorityLoader();
     final authorities = await loader.load(options);
@@ -899,6 +914,10 @@ final class ProductionL10nReadinessComposition {
       retainedRepositoriesByProject: authorities.retainedRepositoriesByProject,
       sdkFlutterByVersion: options.sdkFlutterByVersion,
     );
+    final provisionView = (String projectId) async {
+      await loader.revalidateProject(options, authorities, projectId);
+      return viewFactory.provision(projectId);
+    };
     final dependencies = L10nMutationReadinessDependencies(
       loadPlan: (runtimeOptions) async {
         if (_optionsIdentity(runtimeOptions) != optionsIdentity) {
@@ -911,10 +930,7 @@ final class ProductionL10nReadinessComposition {
               authorities.retainedRepositoriesByProject,
         );
       },
-      provisionView: (projectId) async {
-        await loader.revalidateProject(options, authorities, projectId);
-        return viewFactory.provision(projectId);
-      },
+      provisionView: provisionView,
       scanner: ProductionL10nHarnessScanner(),
       evaluatorFactory: ProductionL10nEvidenceEvaluator.new,
       corpusEvidenceRunner: ProductionL10nCorpusEvidenceRunner(),
@@ -925,6 +941,9 @@ final class ProductionL10nReadinessComposition {
       ),
       checkpointStore: FileL10nReadinessCheckpointStore(),
       monotonicMicros: const _ProductionMonotonicMicros(),
+      sharedViewManager: enableSharedViews
+          ? SharedViewManager(provisionView: provisionView)
+          : null,
       enableProjectEligibilityPreflight: true,
     );
     return ProductionL10nReadinessComposition._(
