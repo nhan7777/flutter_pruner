@@ -12,6 +12,10 @@ const _supportedOracleVersion = 'l10n-mutation-readiness-v2';
 const _rootManifestSha256 =
     '30be93d927bb1153ad7482fe5c20904a21489419a558b449bb43d8e9e3e9fbb9';
 
+// V1 manifest SHA (current l10n-mutation-readiness-v1.json)
+const _v1ManifestSha256 =
+    '58fb9adb4c5d4e1056c3485f482402eb29de59d9088bb9a9d582fcb4a0694fed';
+
 // Partial manifest SHA (gitjournal + smooth only, no GSY)
 const _partialManifestSha256 =
     '0dda708cc3d394260b32af8cd43f67117d885afa6ece3dea96f2a8a445c4c437';
@@ -496,14 +500,30 @@ final class L10nMutationManifest {
   factory L10nMutationManifest.read(File file) {
     final bytes = file.readAsBytesSync();
     final actualSha = sha256.convert(bytes).toString();
+    final isV1 = actualSha == _v1ManifestSha256;
     final isPartial = actualSha == _partialManifestSha256;
     final isGsyPatched = actualSha == _gsyPatchedManifestSha256;
-    if (actualSha != _rootManifestSha256 && !isPartial && !isGsyPatched) {
+    if (actualSha != _rootManifestSha256 && !isV1 && !isPartial && !isGsyPatched) {
       throw FormatException(
         'mutation root manifest SHA-256 drift: expected $_rootManifestSha256 '
-        'or $_partialManifestSha256 or $_gsyPatchedManifestSha256, got $actualSha'
+        'or $_v1ManifestSha256 or $_partialManifestSha256 or $_gsyPatchedManifestSha256, got $actualSha'
       );
     }
+    final decoded = jsonDecode(utf8.decode(bytes));
+    final json = _asStringMap(decoded, 'manifest');
+    return _L10nMutationManifestParser(
+      json,
+      normalizationLoader: (name, project) =>
+          _readNormalizationManifest(file.parent, name, project),
+      isPartialManifest: isPartial,
+    ).parse();
+  }
+
+  /// Testing factory that bypasses SHA validation (for modified manifests).
+  factory L10nMutationManifest.readWithoutValidation(File file) {
+    final bytes = file.readAsBytesSync();
+    final actualSha = sha256.convert(bytes).toString();
+    final isPartial = actualSha == _partialManifestSha256;
     final decoded = jsonDecode(utf8.decode(bytes));
     final json = _asStringMap(decoded, 'manifest');
     return _L10nMutationManifestParser(
