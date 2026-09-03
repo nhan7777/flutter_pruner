@@ -2974,6 +2974,7 @@ void _rejectLinkedAncestors(Directory root, String relativePath) {
     cursor = p.join(cursor, segments[index]);
     final type = FileSystemEntity.typeSync(cursor, followLinks: false);
     if (type != FileSystemEntityType.directory) {
+      stderr.writeln('[DEBUG] _rejectLinkedAncestors failed: cursor=$cursor, type=$type, expectedSegment=${segments[index]}');
       throw const _CorpusGateException();
     }
   }
