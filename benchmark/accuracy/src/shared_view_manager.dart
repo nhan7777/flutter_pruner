@@ -34,19 +34,23 @@ class SharedViewManager {
       if (_cache.containsKey(projectId)) {
         final entry = _cache[projectId]!;
         entry.touch();
+        print('[SharedViewManager] Cache HIT for $projectId');
         return entry;
       }
 
       if (_pendingLoads.containsKey(projectId)) {
+        print('[SharedViewManager] Waiting for pending load of $projectId');
         return _pendingLoads[projectId]!;
       }
 
+      print('[SharedViewManager] Cache MISS for $projectId - loading view');
       final loadFuture = _loadView(projectId);
       _pendingLoads[projectId] = loadFuture;
 
       try {
         final entry = await loadFuture;
         _cache[projectId] = entry;
+        print('[SharedViewManager] Cached $projectId (total cached: ${_cache.length})');
         return entry;
       } finally {
         _pendingLoads.remove(projectId);
