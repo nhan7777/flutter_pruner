@@ -1,24 +1,27 @@
-/// Action risk scope classification for mutation operations.
+/// Classification of action risk boundary for confidence assessment.
 ///
-/// Splits the overloaded "scope" concept into explicit categories based on
-/// the provable mutation breadth and deterministic inverse properties.
+/// Distinguishes single-file operations, family-level bounded operations, and
+/// open-ended broad operations. Used to determine confidence levels and
+/// verification requirements.
 enum ActionRiskScope {
-  /// Single file or declaration with narrow, proven impact.
+  /// Single file or declaration.
   ///
-  /// Existing narrow actions (single file edits, single declaration removals)
-  /// map to this scope. No additional manual risk from breadth.
+  /// Examples: removing one Dart declaration, deleting one asset file.
+  /// Existing narrow actions fall into this category.
   boundedSingle,
 
-  /// Family-level proven actions with mechanically derived breadth.
+  /// Family-level proven actions with bounded scope.
   ///
-  /// Multiple files are touched, but the complete set is enumerated and proven
-  /// deterministic. L10n ARB family + generated outputs map to this scope.
-  /// Does not add `broadRemovalScope` manual risk.
+  /// Examples: l10n ARB family (template + locales + generated outputs).
+  /// All mutations are proven deterministic and reversible at family boundary.
   boundedFamily,
 
-  /// Open-ended broad actions with unpredictable impact.
+  /// Open-ended broad actions requiring manual intervention.
   ///
-  /// Existing broad actions where the complete mutation set cannot be
-  /// mechanically proven. Preserves current `broadRemovalScope` manual risk.
-  openEnded,
+  /// Examples: existing broadRemovalScope behavior where impact analysis
+  /// cannot prove bounded scope. Requires explicit user acknowledgement.
+  openEnded;
+
+  /// Whether this scope represents a family-level action.
+  bool get isFamily => this == ActionRiskScope.boundedFamily;
 }

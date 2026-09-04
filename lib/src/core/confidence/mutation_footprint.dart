@@ -2,26 +2,30 @@ import 'package:meta/meta.dart';
 
 import 'action_risk_scope.dart';
 
-/// Exact logical findings and physical paths owned by an atomic mutation unit.
+/// Complete mutation footprint for one atomic action unit.
 ///
-/// Separates the logical finding identity (what unused code was detected) from
-/// the physical mutation footprint (which files will be edited). A single
-/// logical finding may span multiple physical files when generated outputs are
-/// included (e.g., l10n ARB family + generated Dart files).
+/// Captures logical finding IDs, physical file paths, risk scope classification,
+/// and optional family identity for family-level actions. Used to assess
+/// confidence and coordinate reversible transactions.
 @immutable
 final class MutationFootprint {
+  /// Creates an immutable mutation footprint.
+  const MutationFootprint({
+    required this.findingIds,
+    required this.physicalPaths,
+    required this.riskScope,
+    this.familyId,
+  });
+
   /// Logical finding IDs owned by this atomic unit.
   ///
-  /// These are the canonical node IDs from the reachability graph that this
-  /// mutation operation addresses. For family-level actions, multiple findings
-  /// may be grouped into one atomic unit.
+  /// These are canonical node IDs from the reachability graph.
   final Set<String> findingIds;
 
-  /// Physical file paths (relative to project root) that will be mutated.
+  /// Physical file paths that will be mutated.
   ///
-  /// Includes both source files (ARB, Dart declarations) and any mechanically
-  /// derived outputs (generated Dart files). The complete set must be
-  /// enumerable at planning time.
+  /// Includes source files, generated outputs, and any companion files.
+  /// Paths are relative to project root.
   final Set<String> physicalPaths;
 
   /// Action risk scope classification.
@@ -30,24 +34,17 @@ final class MutationFootprint {
   /// Family identifier for family-level actions.
   ///
   /// Required when [riskScope] is [ActionRiskScope.boundedFamily].
-  /// Null for single-file or open-ended actions.
+  /// Null for single-file and open-ended actions.
   final String? familyId;
 
-  const MutationFootprint({
-    required this.findingIds,
-    required this.physicalPaths,
-    required this.riskScope,
-    this.familyId,
-  });
-
-  /// Validates the footprint constraints.
+  /// Validates footprint constraints.
   ///
   /// Throws [ArgumentError] if:
+  /// - [riskScope] is [ActionRiskScope.boundedFamily] but [familyId] is null
+  /// - [riskScope] is not [ActionRiskScope.boundedFamily] but [familyId] is non-null
+  /// - [riskScope] is [ActionRiskScope.boundedSingle] but [findingIds] has more than one entry
   /// - [findingIds] is empty
   /// - [physicalPaths] is empty
-  /// - [riskScope] is [ActionRiskScope.boundedFamily] but [familyId] is null
-  /// - [riskScope] is [ActionRiskScope.boundedSingle] but [findingIds] has
-  ///   more than one entry
   void validate() {
     if (findingIds.isEmpty) {
       throw ArgumentError('findingIds cannot be empty');
@@ -55,24 +52,21 @@ final class MutationFootprint {
     if (physicalPaths.isEmpty) {
       throw ArgumentError('physicalPaths cannot be empty');
     }
-
-    switch (riskScope) {
-      case ActionRiskScope.boundedFamily:
-        if (familyId == null) {
-          throw ArgumentError(
-            'familyId is required for boundedFamily risk scope',
-          );
-        }
-      case ActionRiskScope.boundedSingle:
-        if (findingIds.length > 1) {
-          throw ArgumentError(
-            'boundedSingle scope must have exactly one finding ID, '
-            'got ${findingIds.length}',
-          );
-        }
-      case ActionRiskScope.openEnded:
-        // No additional constraints for open-ended actions
-        break;
+    if (riskScope == ActionRiskScope.boundedFamily && familyId == null) {
+      throw ArgumentError(
+        'familyId is required when riskScope is boundedFamily',
+      );
+    }
+    if (riskScope != ActionRiskScope.boundedFamily && familyId != null) {
+      throw ArgumentError(
+        'familyId must be null when riskScope is not boundedFamily',
+      );
+    }
+    if (riskScope == ActionRiskScope.boundedSingle && findingIds.length > 1) {
+      throw ArgumentError(
+        'boundedSingle scope must have exactly one finding ID, '
+        'got ${findingIds.length}',
+      );
     }
   }
 
@@ -87,8 +81,7 @@ final class MutationFootprint {
           familyId == other.familyId;
 
   @override
-  int get hashCode =>
-      Object.hash(
+  int get hashCode => Object.hash(
         _setHashCode(findingIds),
         _setHashCode(physicalPaths),
         riskScope,
@@ -97,9 +90,9 @@ final class MutationFootprint {
 
   @override
   String toString() => 'MutationFootprint('
+      'scope: ${riskScope.name}, '
       'findings: ${findingIds.length}, '
-      'paths: ${physicalPaths.length}, '
-      'scope: $riskScope'
+      'paths: ${physicalPaths.length}'
       '${familyId != null ? ', family: $familyId' : ''}'
       ')';
 
