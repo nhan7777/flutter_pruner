@@ -1,116 +1,60 @@
 import 'package:meta/meta.dart';
 
-/// Policy for l10n mutation verification in Stage 2 Promotion.
-///
-/// Stage 2 enforces a no-resolution contract: l10n mutations do NOT resolve
-/// findings. Instead, they contribute verified evidence that l10n keys are
-/// safe to remove, and the actual finding resolution happens in a future stage
-/// when the full removal workflow is complete.
+/// Explicit no-resolution verification policy for l10n mutations.
 @immutable
 final class L10nVerificationPolicy {
-  const L10nVerificationPolicy._();
+  const L10nVerificationPolicy({
+    required this.flutterBinaryPath,
+  });
 
-  /// Singleton instance.
-  static const instance = L10nVerificationPolicy._();
+  final String flutterBinaryPath;
 
-  /// Whether l10n mutations are allowed to resolve findings.
-  ///
-  /// Always returns `false` in Stage 2 Promotion. L10n mutations contribute
-  /// verified evidence but do not resolve findings.
-  bool get allowsFindingResolution => false;
+  /// Default l10n verification: no dependency resolution
+  static const List<String> defaultAnalyzeCommand = [
+    'analyze',
+    '--no-pub',
+    '--fatal-infos',
+  ];
 
-  /// Whether l10n mutations require explicit verification before application.
-  ///
-  /// Always returns `true`. All l10n mutations must pass staging verification
-  /// before they can be applied to the project.
-  bool get requiresVerification => true;
+  static const List<String> defaultTestCommand = [
+    'test',
+    '--no-pub',
+  ];
 
-  /// Whether l10n mutations support quarantine workflow.
-  ///
-  /// Returns `true`. L10n mutations follow the standard quarantine workflow:
-  /// stage -> verify -> quarantine -> apply.
-  bool get supportsQuarantine => true;
-
-  /// Whether l10n mutations are atomic at the family level.
-  ///
-  /// Returns `true`. All ARB files and generated outputs for a family are
-  /// applied atomically. Partial family mutations are not supported.
-  bool get requiresFamilyAtomicity => true;
-
-  /// Whether l10n mutations require deterministic inverse proof.
-  ///
-  /// Returns `true`. L10n evidence must prove that removing keys and
-  /// regenerating outputs produces byte-exact inverse of the original state
-  /// when keys are restored.
-  bool get requiresDeterministicInverse => true;
-
-  /// Validates that a finding can be addressed by l10n mutation.
-  ///
-  /// Checks:
-  /// - Finding is from l10n adapter
-  /// - Finding node is a localization key
-  /// - Finding has no existing proposed action (Stage 1 contract)
-  ///
-  /// Returns validation error message if invalid, or null if valid.
-  String? validateFindingEligibility({
-    required String findingId,
-    required String adapterId,
-    required bool isLocalizationKey,
-    required bool hasProposedAction,
-  }) {
-    if (adapterId != 'l10n') {
-      return 'L10n mutations only apply to l10n adapter findings';
-    }
-
-    if (!isLocalizationKey) {
-      return 'L10n mutations only apply to localization key nodes';
-    }
-
-    if (hasProposedAction) {
-      return 'Finding already has proposed action (Stage 1 contract violation)';
-    }
-
-    return null;
+  /// Validate that project verification override has no-resolution contract
+  static bool hasNoResolutionContract(List<String> command) {
+    return command.contains('--no-pub') || command.contains('--no-deps');
   }
 
-  /// Validates that a batch can be applied under this policy.
-  ///
-  /// Checks:
-  /// - Batch has non-empty ARB mutations
-  /// - Batch has non-empty finding IDs
-  /// - Batch footprint is boundedFamily
-  /// - All paths are relative
-  ///
-  /// Returns validation error message if invalid, or null if valid.
-  String? validateBatch({
-    required int arbMutationCount,
-    required int findingCount,
-    required bool isBoundedFamily,
-    required bool hasOnlyRelativePaths,
+  /// Validates custom analyze and test commands for no-resolution contract.
+  static VerificationPolicyValidation validateOverride({
+    required List<String> analyzeCommand,
+    required List<String> testCommand,
   }) {
-    if (arbMutationCount == 0) {
-      return 'Batch must contain at least one ARB mutation';
+    final analyzeHasContract = hasNoResolutionContract(analyzeCommand);
+    final testHasContract = hasNoResolutionContract(testCommand);
+
+    if (!analyzeHasContract || !testHasContract) {
+      // Check if commands explicitly require resolution
+      final analyzeRequiresResolution = analyzeCommand.contains('pub') &&
+          !analyzeCommand.contains('--no-pub');
+      final testRequiresResolution =
+          testCommand.contains('pub') && !testCommand.contains('--no-pub');
+
+      if (analyzeRequiresResolution || testRequiresResolution) {
+        return VerificationPolicyValidation.rejectedResolutionRequired;
+      }
+
+      return VerificationPolicyValidation.rejectedNoContract;
     }
 
-    if (findingCount == 0) {
-      return 'Batch must address at least one finding';
-    }
-
-    if (!isBoundedFamily) {
-      return 'L10n batches must be boundedFamily scope';
-    }
-
-    if (!hasOnlyRelativePaths) {
-      return 'All batch paths must be relative to project root';
-    }
-
-    return null;
+    return VerificationPolicyValidation.accepted;
   }
+}
 
-  @override
-  String toString() => 'L10nVerificationPolicy('
-      'allowsResolution: $allowsFindingResolution, '
-      'requiresVerification: $requiresVerification, '
-      'requiresAtomicity: $requiresFamilyAtomicity'
-      ')';
+/// Result of verification policy validation.
+enum VerificationPolicyValidation {
+  accepted,
+  rejectedNoContract,
+  rejectedResolutionRequired,
 }
