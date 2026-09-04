@@ -1,0 +1,4 @@
+{
+  "cart": "{count, plural, =0 {Empty} one {1 item} other {{count} items}}",
+  "status": "{gender, select, male {His} female {Her} other {Their}}"
+}

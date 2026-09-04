@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter_pruner/src/core/graph/build_condition.dart';
 import 'package:flutter_pruner/src/core/project/analysis_mode.dart';
 import 'package:flutter_pruner/src/core/project/project_context.dart';
+import 'package:flutter_pruner/src/core/project/project_path_policy.dart';
 import 'package:flutter_pruner/src/core/project/target_matrix.dart';
 import 'package:flutter_pruner/src/verification/verification_policy.dart';
 import 'package:path/path.dart' as p;
@@ -48,6 +49,302 @@ environment:
     expect(context.rootCoverage.mode, RootCoverageMode.applicationEntrypoints);
     expect(context.analysisCoverageComplete, isTrue);
   });
+
+  test('loads immutable declared application entrypoint exclusions', () async {
+    File(
+      p.join(project.path, 'lib', 'guard.dart'),
+    ).writeAsStringSync('void main() {}\n');
+    _writeConfig(
+      project,
+      complete: true,
+      excludedEntrypoints: '''
+  excluded_entrypoints:
+    - path: lib/guard.dart
+      reason: tracked launcher guard is not supported
+''',
+    );
+
+    final context = await ProjectContext.load(project);
+
+    expect(context.targetMatrix.excludedEntrypoints, const [
+      ExcludedApplicationEntrypoint(
+        path: 'lib/guard.dart',
+        reason: 'tracked launcher guard is not supported',
+      ),
+    ]);
+    expect(
+      () => context.targetMatrix.excludedEntrypoints.clear(),
+      throwsUnsupportedError,
+    );
+  });
+
+  test(
+    'omitted and empty entrypoint exclusions stay immutable and empty',
+    () async {
+      for (final excludedEntrypoints in ['', '  excluded_entrypoints: []\n']) {
+        _writeConfig(
+          project,
+          complete: true,
+          excludedEntrypoints: excludedEntrypoints,
+        );
+
+        final context = await ProjectContext.load(project);
+
+        expect(context.targetMatrix.excludedEntrypoints, isEmpty);
+        expect(
+          () => context.targetMatrix.excludedEntrypoints.clear(),
+          throwsUnsupportedError,
+        );
+      }
+    },
+  );
+
+  test('configuration rejects unsafe entrypoint exclusions', () async {
+    File(
+      p.join(project.path, 'lib', 'guard.dart'),
+    ).writeAsStringSync('void main() {}\n');
+    File(p.join(project.path, 'build', 'guard.dart'))
+      ..createSync(recursive: true)
+      ..writeAsStringSync('void main() {}\n');
+    File(
+      p.join(project.path, 'lib', 'coverage_test.dart'),
+    ).writeAsStringSync('export \'main.dart\';\n');
+
+    for (final testCase in [
+      (
+        mode: 'package',
+        complete: true,
+        publicEntrypoints:
+            '  public_entrypoints:\n    - lib/coverage_test.dart\n',
+        exclusions:
+            '    - path: lib/guard.dart\n      reason: owner evidence\n',
+        message: 'only valid in application mode',
+      ),
+      (
+        mode: 'package-internal',
+        complete: true,
+        publicEntrypoints:
+            '  public_entrypoints:\n    - lib/coverage_test.dart\n',
+        exclusions:
+            '    - path: lib/guard.dart\n      reason: owner evidence\n',
+        message: 'only valid in application mode',
+      ),
+      (
+        mode: 'application',
+        complete: false,
+        publicEntrypoints: '',
+        exclusions:
+            '    - path: lib/guard.dart\n      reason: owner evidence\n',
+        message: 'requires target_matrix.complete: true',
+      ),
+      (
+        mode: 'application',
+        complete: true,
+        publicEntrypoints: '',
+        exclusions:
+            '    - path: lib/guard.dart\n      reason: first\n    - path: lib/guard.dart\n      reason: second\n',
+        message: 'duplicate paths',
+      ),
+      (
+        mode: 'application',
+        complete: true,
+        publicEntrypoints: '',
+        exclusions: '    - path: lib/main.dart\n      reason: overlap\n',
+        message: 'overlaps a configured target',
+      ),
+      (
+        mode: 'application',
+        complete: true,
+        publicEntrypoints: '',
+        exclusions:
+            '    - path: lib/missing.dart\n      reason: owner evidence\n',
+        message: 'does not exist',
+      ),
+      (
+        mode: 'application',
+        complete: true,
+        publicEntrypoints: '',
+        exclusions:
+            '    - path: build/guard.dart\n      reason: owner evidence\n',
+        message: 'generated Dart output',
+      ),
+      (
+        mode: 'application',
+        complete: true,
+        publicEntrypoints: '',
+        exclusions:
+            '    - path: lib/guard.dart\n      reason: owner evidence\n      owner: typo\n',
+        message: 'unknown key',
+      ),
+      (
+        mode: 'application',
+        complete: true,
+        publicEntrypoints: '',
+        exclusions: '    - path: lib/guard.dart\n      reason: \n',
+        message: 'reason must be a non-empty string',
+      ),
+      (
+        mode: 'application',
+        complete: true,
+        publicEntrypoints: '',
+        exclusions: '    - path: lib/guard.dart\n      reason: "   "\n',
+        message: 'reason must not be blank',
+      ),
+    ]) {
+      File(p.join(project.path, 'flutter_pruner.yaml')).writeAsStringSync('''
+version: 1
+analysis:
+  mode: ${testCase.mode}
+${testCase.publicEntrypoints}target_matrix:
+  complete: ${testCase.complete}
+  targets:
+    - name: android
+      platform: android
+      entrypoint: lib/main.dart
+  excluded_entrypoints:
+${testCase.exclusions}''');
+
+      await expectLater(
+        ProjectContext.load(project),
+        throwsA(
+          isA<ProjectLoadException>().having(
+            (error) => error.message,
+            'message',
+            contains(testCase.message),
+          ),
+        ),
+        reason: '${testCase.mode}: ${testCase.message}',
+      );
+    }
+  });
+
+  test('direct non-application contexts reject entrypoint exclusions', () {
+    final matrix = TargetMatrix(
+      targets: [
+        BuildTarget(
+          name: 'android',
+          platform: 'android',
+          entrypoint: 'lib/main.dart',
+        ),
+      ],
+      status: TargetMatrixStatus.declaredComplete,
+      source: 'api',
+      excludedEntrypoints: const [
+        ExcludedApplicationEntrypoint(
+          path: 'lib/guard.dart',
+          reason: 'owner evidence',
+        ),
+      ],
+    );
+
+    expect(
+      () => ProjectContext(
+        root: project,
+        pubspec: const {'name': 'coverage_test'},
+        packageName: 'coverage_test',
+        analysisMode: AnalysisMode.package,
+        targetMatrix: matrix,
+      ),
+      throwsArgumentError,
+    );
+  });
+
+  test(
+    'conditional downgrading rejects excluded entrypoints as configuration',
+    () async {
+      File(
+        p.join(project.path, 'lib', 'guard.dart'),
+      ).writeAsStringSync('void main() {}\n');
+      File(p.join(project.path, 'lib', 'main.dart')).writeAsStringSync(
+        "import 'io.dart' if (unknown.condition) 'web.dart';\n"
+        'void main() {}\n',
+      );
+      File(p.join(project.path, 'lib', 'io.dart')).writeAsStringSync('');
+      File(p.join(project.path, 'lib', 'web.dart')).writeAsStringSync('');
+      _writeConfig(
+        project,
+        complete: true,
+        excludedEntrypoints: '''
+  excluded_entrypoints:
+    - path: lib/guard.dart
+      reason: tracked launcher guard is not supported
+''',
+      );
+
+      await expectLater(
+        ProjectContext.load(project),
+        throwsA(
+          isA<ProjectLoadException>().having(
+            (error) => error.message,
+            'message',
+            contains('requires complete coverage after conditional analysis'),
+          ),
+        ),
+      );
+    },
+  );
+
+  test('direct application contexts reject noncanonical exclusion paths', () {
+    File(
+      p.join(project.path, 'lib', 'guard.dart'),
+    ).writeAsStringSync('void main() {}\n');
+
+    expect(
+      () => _applicationContextWithExclusion(
+        project,
+        path: 'lib/../lib/guard.dart',
+      ),
+      throwsA(
+        isA<ArgumentError>().having(
+          (error) => error.message,
+          'message',
+          contains('must be canonical'),
+        ),
+      ),
+    );
+  });
+
+  test(
+    'direct application contexts reject generated and path-policy exclusions',
+    () {
+      File(p.join(project.path, 'build', 'guard.dart'))
+        ..createSync(recursive: true)
+        ..writeAsStringSync('void main() {}\n');
+      File(
+        p.join(project.path, 'lib', 'guard.dart'),
+      ).writeAsStringSync('void main() {}\n');
+      final guard = File(p.join(project.path, 'lib', 'guard.dart'));
+
+      expect(
+        () =>
+            _applicationContextWithExclusion(project, path: 'build/guard.dart'),
+        throwsA(
+          isA<ArgumentError>().having(
+            (error) => error.message,
+            'message',
+            contains('generated Dart output'),
+          ),
+        ),
+      );
+      expect(
+        () => _applicationContextWithExclusion(
+          project,
+          path: 'lib/guard.dart',
+          pathPolicy: ProjectPathPolicy(
+            root: project,
+            additionalExcludedPaths: [guard.path],
+          ),
+        ),
+        throwsA(
+          isA<ArgumentError>().having(
+            (error) => error.message,
+            'message',
+            contains('excluded by project path policy'),
+          ),
+        ),
+      );
+    },
+  );
 
   test(
     'target parser narrowly admits a configured generated entrypoint',
@@ -787,6 +1084,7 @@ void _writeConfig(
   Directory project, {
   required bool complete,
   String verification = '',
+  String excludedEntrypoints = '',
   File? file,
 }) {
   (file ?? File(p.join(project.path, 'flutter_pruner.yaml'))).writeAsStringSync(
@@ -800,7 +1098,33 @@ target_matrix:
     - name: android
       platform: android
       entrypoint: lib/main.dart
+$excludedEntrypoints
 $verification
 ''',
   );
 }
+
+ProjectContext _applicationContextWithExclusion(
+  Directory project, {
+  required String path,
+  ProjectPathPolicy? pathPolicy,
+}) => ProjectContext(
+  root: project,
+  pubspec: const {'name': 'coverage_test'},
+  packageName: 'coverage_test',
+  targetMatrix: TargetMatrix(
+    targets: [
+      BuildTarget(
+        name: 'android',
+        platform: 'android',
+        entrypoint: 'lib/main.dart',
+      ),
+    ],
+    status: TargetMatrixStatus.declaredComplete,
+    source: 'api',
+    excludedEntrypoints: [
+      ExcludedApplicationEntrypoint(path: path, reason: 'owner evidence'),
+    ],
+  ),
+  pathPolicy: pathPolicy,
+);

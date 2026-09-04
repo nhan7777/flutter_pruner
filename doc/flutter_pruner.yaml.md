@@ -31,6 +31,8 @@ target_matrix:
       flavor: prod
       dart_defines:
         APP_ENV: prod
+  # Tracked main() files that are deliberately not supported launch targets.
+  excluded_entrypoints: []
 
 verification:
   steps:
@@ -93,6 +95,36 @@ Auxiliary execution targets are discovered evidence for tests, runtime
 callbacks, and external public surfaces; they are not YAML application targets.
 Their identity and completeness are preserved in reports. Duplicate or
 conflicting auxiliary identities are graph integrity issues.
+
+### Excluded application entrypoints
+
+An application matrix that is both owner-declared and complete may explicitly
+exclude a tracked project-relative Dart entrypoint that declares `main()` but
+is not a supported launch target:
+
+```yaml
+target_matrix:
+  complete: true
+  targets:
+    - name: android-prod
+      platform: android
+      entrypoint: lib/main.dart
+  excluded_entrypoints:
+    - path: lib/launcher_guard.dart
+      reason: tracked launcher guard is not a supported launch target
+```
+
+Each mapping contains exactly `path` and `reason`. `path` must be a canonical,
+existing, non-generated project-relative Dart application entrypoint and
+`reason` must be non-empty after trimming. The parser rejects unknown mapping
+keys, duplicate paths, paths that overlap configured targets, unsupported
+paths, and exclusions in package, package-internal, or partial matrices.
+
+This is owner-supplied coverage authority, never a filename, comment, import,
+or repository heuristic. It classifies the exact unsupported executable
+surface; it does not create a build target or execution root. If an excluded
+path drifts from an analyzer-resolved entrypoint, analysis emits a blocker
+instead of silently accepting incomplete coverage.
 
 ## Verification policy
 

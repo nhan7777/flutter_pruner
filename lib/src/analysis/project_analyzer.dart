@@ -1,7 +1,5 @@
 import '../adapters/adapter_report_definition.dart';
 import '../adapters/analyzer_adapter.dart';
-import '../adapters/dart/analyzer_diagnostic_collector.dart';
-import '../adapters/dart/dart_adapter.dart';
 import '../adapters/dart/dart_adapter_profile.dart';
 import '../adapters/dart/dart_analysis_workspace.dart';
 import '../adapters/dart/dart_execution_context_service.dart';
@@ -9,14 +7,9 @@ import '../adapters/dart/dart_execution_reachability_service.dart';
 import '../adapters/registry.dart';
 import '../core/confidence/finding_generator.dart';
 import '../core/graph/reachability_graph.dart';
-import '../core/process/managed_process_runner.dart';
 import '../core/project/project_context.dart';
 import '../reporting/run_report.dart';
 import 'analysis_snapshot.dart';
-
-/// Observes how one applicable adapter attempt finished.
-typedef AdapterFinishedCallback =
-    void Function(AnalyzerAdapter adapter, AdapterRunStatus status);
 
 /// Builds one graph and finding set for both scan and apply.
 class ProjectAnalyzer {
@@ -25,15 +18,10 @@ class ProjectAnalyzer {
     required this.project,
     Set<String>? only,
     this.dartProfile,
-    ProcessExecutionRunner? analyzerDiagnosticProcessRunner,
+    List<AnalyzerAdapter>? adapterCatalog,
   }) : _requestedAdapterIds = only,
-       _reportingNodeSchemes = _reportingSchemes(only),
-       adapters = AdapterRegistry.resolve(
-         only: only == null ? null : _withDependencies(only),
-         adapters: _adaptersWithDiagnosticRunner(
-           analyzerDiagnosticProcessRunner,
-         ),
-       ) {
+       _reportingNodeSchemes = _reportingSchemes(only, adapterCatalog),
+       adapters = _resolveAdapters(only, adapterCatalog) {
     adapterReportDefinitions = List.unmodifiable(
       adapters.map((adapter) => adapter.reportDefinition.snapshot()),
     );
@@ -59,7 +47,6 @@ class ProjectAnalyzer {
   /// Runs every applicable adapter and classifies the resulting graph.
   Future<AnalysisSnapshot> analyze({
     void Function(AnalyzerAdapter adapter)? onAdapter,
-    AdapterFinishedCallback? onAdapterFinished,
   }) async {
     project.pathPolicy.resetObservations();
     final analysisStopwatch = Stopwatch()..start();
@@ -149,7 +136,7 @@ class ProjectAnalyzer {
             blockersAdded: graph.blockers.length - blockerCount,
           ),
         );
-      } catch (error, stackTrace) {
+      } catch (_) {
         stopwatch.stop();
         adapterRuns.add(
           AdapterRunReport(
@@ -164,14 +151,8 @@ class ProjectAnalyzer {
             reason: 'adapter analysis failed',
           ),
         );
-        try {
-          onAdapterFinished?.call(adapter, AdapterRunStatus.failed);
-        } on Object {
-          // An observer cannot replace the adapter failure being reported.
-        }
-        Error.throwWithStackTrace(error, stackTrace);
+        rethrow;
       }
-      onAdapterFinished?.call(adapter, AdapterRunStatus.executed);
     }
     final graphIntegrity = graph.integrityFor(project.targets);
     final findingStopwatch = Stopwatch()..start();
@@ -200,10 +181,24 @@ class ProjectAnalyzer {
     );
   }
 
-  static Set<String> _withDependencies(Set<String> requested) {
-    final byId = {
-      for (final adapter in AdapterRegistry.builtIn) adapter.id: adapter,
-    };
+  static List<AnalyzerAdapter> _resolveAdapters(
+    Set<String>? requested,
+    List<AnalyzerAdapter>? adapterCatalog,
+  ) {
+    final available = adapterCatalog == null
+        ? AdapterRegistry.builtIn
+        : List<AnalyzerAdapter>.unmodifiable(adapterCatalog);
+    return AdapterRegistry.resolve(
+      only: requested == null ? null : _withDependencies(requested, available),
+      adapters: available,
+    );
+  }
+
+  static Set<String> _withDependencies(
+    Set<String> requested,
+    List<AnalyzerAdapter> available,
+  ) {
+    final byId = {for (final adapter in available) adapter.id: adapter};
     final expanded = <String>{};
 
     void add(String id) {
@@ -221,24 +216,14 @@ class ProjectAnalyzer {
     return expanded;
   }
 
-  static List<AnalyzerAdapter>? _adaptersWithDiagnosticRunner(
-    ProcessExecutionRunner? runner,
+  static Set<String>? _reportingSchemes(
+    Set<String>? requested,
+    List<AnalyzerAdapter>? adapterCatalog,
   ) {
-    if (runner == null) return null;
-    final collector = AnalyzerDiagnosticCollector(processRunner: runner);
-    return <AnalyzerAdapter>[
-      for (final adapter in AdapterRegistry.builtIn)
-        if (adapter is DartAdapter)
-          DartAdapter(collectAnalyzerDiagnostics: collector.collect)
-        else
-          adapter,
-    ];
-  }
-
-  static Set<String>? _reportingSchemes(Set<String>? requested) {
     if (requested == null) return null;
+    final available = adapterCatalog ?? AdapterRegistry.builtIn;
     return {
-      for (final adapter in AdapterRegistry.builtIn)
+      for (final adapter in available)
         if (requested.contains(adapter.id)) ...adapter.findingNodeSchemes,
     };
   }

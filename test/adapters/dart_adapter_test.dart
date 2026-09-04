@@ -3796,9 +3796,11 @@ void main() {
           rootCoverage: RootCoverage.applicationApi(),
         );
 
+        final profile = DartAdapterProfile();
         final snapshot = await ProjectAnalyzer(
           project: project,
           only: const {'dart'},
+          dartProfile: profile,
         ).analyze();
 
         final candidate = snapshot.findings.singleWhere(
@@ -3836,6 +3838,11 @@ void main() {
           snapshot.graph.blockersFor(auxiliaryCandidate.node.id),
           contains(blocker),
         );
+        final counters = profile.snapshot()['counters']! as Map;
+        final inspected = counters['externalClosureLibrariesInspected'] as int;
+        final dequeues = counters['externalClosureWorklistDequeues'] as int;
+        expect(inspected, greaterThan(0));
+        expect(dequeues, lessThanOrEqualTo(inspected * 2));
       },
     );
 

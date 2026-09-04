@@ -1071,6 +1071,12 @@ target_matrix:
         }
       }
     }
+    if (projectType == 'application') {
+      buffer.write('''
+  # Declare only tracked main() files that are not supported launch targets.
+  excluded_entrypoints: []
+''');
+    }
     buffer.write('''
 
 # Commands run before and after each mutation transaction.

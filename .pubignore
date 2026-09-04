@@ -23,6 +23,7 @@ flutter_pruner.yaml
 AGENTS.md
 .github/
 doc/superpowers/
+docs/superpowers/
 doc/plans/
 
 # Internal release/accuracy validation inputs are retained in the repository,

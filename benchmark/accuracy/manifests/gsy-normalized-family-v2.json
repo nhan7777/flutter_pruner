@@ -1,0 +1,376 @@
+{
+  "changedArbs": [
+    {
+      "canonicalDecodedObjectSha256": "86f7ba0d1f383fa8334c4be996e3aad73fc025fba6a26551af3b2c3387255143",
+      "copiedByteSpans": [
+        {
+          "endExclusive": 4071,
+          "sourceEndExclusive": 23832,
+          "sourceStart": 23793,
+          "start": 4032
+        },
+        {
+          "endExclusive": 4166,
+          "sourceEndExclusive": 23705,
+          "sourceStart": 23652,
+          "start": 4113
+        },
+        {
+          "endExclusive": 4216,
+          "sourceEndExclusive": 23756,
+          "sourceStart": 23710,
+          "start": 4170
+        },
+        {
+          "endExclusive": 4247,
+          "sourceEndExclusive": 23788,
+          "sourceStart": 23761,
+          "start": 4220
+        },
+        {
+          "endExclusive": 4302,
+          "sourceEndExclusive": 23891,
+          "sourceStart": 23837,
+          "start": 4251
+        },
+        {
+          "endExclusive": 4430,
+          "sourceEndExclusive": 24016,
+          "sourceStart": 23896,
+          "start": 4306
+        },
+        {
+          "endExclusive": 4541,
+          "sourceEndExclusive": 24068,
+          "sourceStart": 24021,
+          "start": 4434
+        },
+        {
+          "endExclusive": 4655,
+          "sourceEndExclusive": 24171,
+          "sourceStart": 24073,
+          "start": 4545
+        }
+      ],
+      "decodedObjectEquivalent": true,
+      "originalSha256": "fd0b1d918fcf4d824743f1ce2dac4ab94de1148f95528f4a43cee79204ea6552",
+      "relativePath": "lib/common/localization/l10n/app_en.arb",
+      "removedByteSpans": [
+        {
+          "endExclusive": 23706,
+          "start": 23652
+        },
+        {
+          "endExclusive": 23757,
+          "start": 23710
+        },
+        {
+          "endExclusive": 23789,
+          "start": 23761
+        },
+        {
+          "endExclusive": 23833,
+          "start": 23793
+        },
+        {
+          "endExclusive": 23892,
+          "start": 23837
+        },
+        {
+          "endExclusive": 24017,
+          "start": 23896
+        },
+        {
+          "endExclusive": 24069,
+          "start": 24021
+        },
+        {
+          "endExclusive": 24172,
+          "start": 24073
+        }
+      ],
+      "replacementHasDuplicateDecodedKeys": false,
+      "replacementSha256": "b0f1e02ae5ae6432557f73e7467444b215a8869e1c45dd374ae1341c2fb17d21"
+    },
+    {
+      "canonicalDecodedObjectSha256": "0803f1fcd9cb1a1f97122c1ba085285b78882c60b417f994b9d1668caecabf6c",
+      "copiedByteSpans": [
+        {
+          "endExclusive": 4752,
+          "sourceEndExclusive": 18616,
+          "sourceStart": 18573,
+          "start": 4709
+        },
+        {
+          "endExclusive": 4889,
+          "sourceEndExclusive": 18469,
+          "sourceStart": 18394,
+          "start": 4801
+        },
+        {
+          "endExclusive": 4967,
+          "sourceEndExclusive": 18534,
+          "sourceStart": 18473,
+          "start": 4893
+        },
+        {
+          "endExclusive": 5002,
+          "sourceEndExclusive": 18569,
+          "sourceStart": 18538,
+          "start": 4971
+        },
+        {
+          "endExclusive": 5060,
+          "sourceEndExclusive": 18692,
+          "sourceStart": 18620,
+          "start": 5006
+        },
+        {
+          "endExclusive": 5248,
+          "sourceEndExclusive": 18867,
+          "sourceStart": 18696,
+          "start": 5064
+        },
+        {
+          "endExclusive": 5387,
+          "sourceEndExclusive": 18928,
+          "sourceStart": 18871,
+          "start": 5252
+        },
+        {
+          "endExclusive": 5501,
+          "sourceEndExclusive": 19026,
+          "sourceStart": 18932,
+          "start": 5391
+        }
+      ],
+      "decodedObjectEquivalent": true,
+      "originalSha256": "36b9e8b1c4444f1fc33d5857bc23ec12517693aab240f8dd59482a6c90a7178f",
+      "relativePath": "lib/common/localization/l10n/app_ja.arb",
+      "removedByteSpans": [
+        {
+          "endExclusive": 18470,
+          "start": 18394
+        },
+        {
+          "endExclusive": 18535,
+          "start": 18473
+        },
+        {
+          "endExclusive": 18570,
+          "start": 18538
+        },
+        {
+          "endExclusive": 18617,
+          "start": 18573
+        },
+        {
+          "endExclusive": 18693,
+          "start": 18620
+        },
+        {
+          "endExclusive": 18868,
+          "start": 18696
+        },
+        {
+          "endExclusive": 18929,
+          "start": 18871
+        },
+        {
+          "endExclusive": 19027,
+          "start": 18932
+        }
+      ],
+      "replacementHasDuplicateDecodedKeys": false,
+      "replacementSha256": "4c80ba4442b4495771254ec543ea1f28eab64ec51238f5aa97e54842c07d98a8"
+    },
+    {
+      "canonicalDecodedObjectSha256": "75ff59a5fdfc48fa37bfdd8acc04c477029eb807f9b30b143312c5373fa7efee",
+      "copiedByteSpans": [
+        {
+          "endExclusive": 4309,
+          "sourceEndExclusive": 17629,
+          "sourceStart": 17585,
+          "start": 4269
+        },
+        {
+          "endExclusive": 4431,
+          "sourceEndExclusive": 17474,
+          "sourceStart": 17403,
+          "start": 4365
+        },
+        {
+          "endExclusive": 4494,
+          "sourceEndExclusive": 17542,
+          "sourceStart": 17478,
+          "start": 4435
+        },
+        {
+          "endExclusive": 4533,
+          "sourceEndExclusive": 17581,
+          "sourceStart": 17546,
+          "start": 4498
+        },
+        {
+          "endExclusive": 4603,
+          "sourceEndExclusive": 17704,
+          "sourceStart": 17633,
+          "start": 4537
+        },
+        {
+          "endExclusive": 4759,
+          "sourceEndExclusive": 17856,
+          "sourceStart": 17708,
+          "start": 4607
+        },
+        {
+          "endExclusive": 4875,
+          "sourceEndExclusive": 17909,
+          "sourceStart": 17860,
+          "start": 4763
+        },
+        {
+          "endExclusive": 4989,
+          "sourceEndExclusive": 18007,
+          "sourceStart": 17913,
+          "start": 4879
+        }
+      ],
+      "decodedObjectEquivalent": true,
+      "originalSha256": "182f3e85cd854424e7e020a02eda985bf1825288d9a0813b3cfae5081479c71f",
+      "relativePath": "lib/common/localization/l10n/app_ko.arb",
+      "removedByteSpans": [
+        {
+          "endExclusive": 17475,
+          "start": 17403
+        },
+        {
+          "endExclusive": 17543,
+          "start": 17478
+        },
+        {
+          "endExclusive": 17582,
+          "start": 17546
+        },
+        {
+          "endExclusive": 17630,
+          "start": 17585
+        },
+        {
+          "endExclusive": 17705,
+          "start": 17633
+        },
+        {
+          "endExclusive": 17857,
+          "start": 17708
+        },
+        {
+          "endExclusive": 17910,
+          "start": 17860
+        },
+        {
+          "endExclusive": 18008,
+          "start": 17913
+        }
+      ],
+      "replacementHasDuplicateDecodedKeys": false,
+      "replacementSha256": "cd641006c7eff25d64140c8b3503c86c53fa1deba65d65c7cd93f34596088a8f"
+    },
+    {
+      "canonicalDecodedObjectSha256": "bc2932cdb17cb74f4fec700d98edb87a57a37179a139aaa5616e1f093c54000d",
+      "copiedByteSpans": [
+        {
+          "endExclusive": 4163,
+          "sourceEndExclusive": 15493,
+          "sourceStart": 15453,
+          "start": 4123
+        },
+        {
+          "endExclusive": 4255,
+          "sourceEndExclusive": 15361,
+          "sourceStart": 15309,
+          "start": 4209
+        },
+        {
+          "endExclusive": 4300,
+          "sourceEndExclusive": 15415,
+          "sourceStart": 15366,
+          "start": 4259
+        },
+        {
+          "endExclusive": 4332,
+          "sourceEndExclusive": 15448,
+          "sourceStart": 15420,
+          "start": 4304
+        },
+        {
+          "endExclusive": 4384,
+          "sourceEndExclusive": 15552,
+          "sourceStart": 15498,
+          "start": 4336
+        },
+        {
+          "endExclusive": 4521,
+          "sourceEndExclusive": 15686,
+          "sourceStart": 15557,
+          "start": 4388
+        },
+        {
+          "endExclusive": 4636,
+          "sourceEndExclusive": 15739,
+          "sourceStart": 15691,
+          "start": 4525
+        },
+        {
+          "endExclusive": 4750,
+          "sourceEndExclusive": 15844,
+          "sourceStart": 15744,
+          "start": 4640
+        }
+      ],
+      "decodedObjectEquivalent": true,
+      "originalSha256": "f28af6646eca937a7ffa2045f0dd260cf5ba0f5ef10322814610f69cda9a4914",
+      "relativePath": "lib/common/localization/l10n/app_zh.arb",
+      "removedByteSpans": [
+        {
+          "endExclusive": 15362,
+          "start": 15309
+        },
+        {
+          "endExclusive": 15416,
+          "start": 15366
+        },
+        {
+          "endExclusive": 15449,
+          "start": 15420
+        },
+        {
+          "endExclusive": 15494,
+          "start": 15453
+        },
+        {
+          "endExclusive": 15553,
+          "start": 15498
+        },
+        {
+          "endExclusive": 15687,
+          "start": 15557
+        },
+        {
+          "endExclusive": 15740,
+          "start": 15691
+        },
+        {
+          "endExclusive": 15845,
+          "start": 15744
+        }
+      ],
+      "replacementHasDuplicateDecodedKeys": false,
+      "replacementSha256": "280863cea092e84cbf69c29894f57533eceac1bf9007aed331cec1e7f19c89e9"
+    }
+  ],
+  "normalizationVersion": "gsy-normalized-family-v2",
+  "policy": "retain-last-effective-decoded-top-level-member-at-first-position",
+  "repositorySha": "2b6c49008afc44b90fee869dedf8e59a86482953",
+  "schemaVersion": 2
+}

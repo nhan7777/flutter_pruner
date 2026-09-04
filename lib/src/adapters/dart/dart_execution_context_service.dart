@@ -213,6 +213,15 @@ final class DefaultDartExecutionContextService
     final issues = <DartExecutionContextIssue>{};
     final potentialUnclassifiedEntrypoints = <String>{};
     final spawnUriEntrypoints = <String>{};
+    final excludedEntrypointPaths = <String>{
+      for (final exclusion in project.targetMatrix.excludedEntrypoints)
+        p.normalize(p.absolute(project.resolve(exclusion.path))),
+    };
+    final matchedExcludedEntrypoints = <String>{};
+    final configuredEntrypointPaths = <String>{
+      for (final target in project.targets)
+        p.normalize(p.absolute(project.resolve(target.entrypoint))),
+    };
 
     void addIssue(AuxiliaryExecutionTargetDetectionIssue issue) {
       issues.add(
@@ -411,6 +420,9 @@ final class DefaultDartExecutionContextService
       final relativePath = project.relative(
         result.element.firstFragment.source.fullName,
       );
+      final canonicalLibraryPath = p.normalize(
+        p.absolute(result.element.firstFragment.source.fullName),
+      );
       final libraryId = DartIds.library(
         project,
         result.element,
@@ -423,27 +435,40 @@ final class DefaultDartExecutionContextService
             )
           : null;
 
-      final testRunnerSurface = _isTestRunnerSurface(relativePath);
+      final testRunnerSurface =
+          _isTestRunnerSurface(relativePath) &&
+          !configuredEntrypointPaths.contains(canonicalLibraryPath);
       if (testRunnerSurface) {
         final detection = detector.detectTest(
           relativePath: relativePath,
           library: result,
         );
-        final executionTarget = generatedPath
-            ? _forceIncompleteRuntimeTarget(detection.target)
-            : detection.target;
-        addTarget(executionTarget);
+        final executionTargets = [
+          for (final target in detection.targets)
+            if (generatedPath)
+              _forceIncompleteRuntimeTarget(target)
+            else
+              target,
+        ];
+        for (final target in executionTargets) {
+          addTarget(target);
+        }
         detection.issues.forEach(addIssue);
         if (generatedPath) {
           addIssue(_generatedExecutableMainIssue);
-          _addGeneratedArtifactRoot(
-            addRoot: addRoot,
-            artifactId: generatedArtifactId!,
-            owningLibraryId: libraryId,
-            targetId: executionTarget.id,
-            reason: 'generated test library invoked by the test runner',
-          );
-        } else {
+        }
+        final entryPoint = result.element.entryPoint;
+        for (final executionTarget in executionTargets) {
+          if (generatedPath) {
+            _addGeneratedArtifactRoot(
+              addRoot: addRoot,
+              artifactId: generatedArtifactId!,
+              owningLibraryId: libraryId,
+              targetId: executionTarget.id,
+              reason: 'generated test library invoked by the test runner',
+            );
+            continue;
+          }
           addRoot(
             DartExecutionRootFact(
               nodeId: libraryId,
@@ -454,9 +479,7 @@ final class DefaultDartExecutionContextService
               auxiliaryExecutionTargetId: executionTarget.id,
             ),
           );
-        }
-        final entryPoint = result.element.entryPoint;
-        if (entryPoint != null && !generatedPath) {
+          if (entryPoint == null) continue;
           final declarationId = DartIds.declaration(
             project,
             entryPoint.firstFragment,
@@ -519,6 +542,15 @@ final class DefaultDartExecutionContextService
             ),
           );
         }
+        final excludedEntrypoint =
+            configuredTargets.isEmpty &&
+            !generatedPath &&
+            excludedEntrypointPaths.contains(canonicalLibraryPath) &&
+            DartIds.isModeledProjectLibrary(
+              project,
+              result.element,
+              ownership: ownership,
+            );
         if (configuredTargets.isEmpty &&
             _isStandaloneExecutableSurface(relativePath)) {
           final detection = detector.detectExecutable(relativePath);
@@ -548,12 +580,10 @@ final class DefaultDartExecutionContextService
               targetId: executionTarget.id,
             );
           }
+        } else if (excludedEntrypoint) {
+          matchedExcludedEntrypoints.add(canonicalLibraryPath);
         } else if (configuredTargets.isEmpty && !generatedPath) {
-          potentialUnclassifiedEntrypoints.add(
-            p.normalize(
-              p.absolute(result.element.firstFragment.source.fullName),
-            ),
-          );
+          potentialUnclassifiedEntrypoints.add(canonicalLibraryPath);
         }
       }
 
@@ -752,9 +782,22 @@ final class DefaultDartExecutionContextService
       }
     }
 
-    if (potentialUnclassifiedEntrypoints.any(
-      (path) => !spawnUriEntrypoints.contains(path),
-    )) {
+    final unmatchedExcludedEntrypoints =
+        excludedEntrypointPaths.difference(matchedExcludedEntrypoints).toList()
+          ..sort();
+    if (unmatchedExcludedEntrypoints.isNotEmpty) {
+      addGlobalIssue(
+        'excluded-dart-entrypoint-unresolved',
+        'a declared excluded entrypoint did not resolve to a project-owned non-generated main()',
+      );
+    }
+
+    final unclassifiedEntrypoints =
+        potentialUnclassifiedEntrypoints
+            .where((path) => !spawnUriEntrypoints.contains(path))
+            .toList()
+          ..sort();
+    if (unclassifiedEntrypoints.isNotEmpty) {
       addGlobalIssue(
         'unclassified-dart-entrypoint',
         'a selected main() is outside configured and recognized execution surfaces',
@@ -952,7 +995,12 @@ bool _hasSymlinkComponent(String root, String path) {
   return false;
 }
 
-const _testRunnerDirectories = {'test', 'integration_test', 'test_driver'};
+const _testRunnerDirectories = {
+  'test',
+  'integration_test',
+  'patrol_test',
+  'test_driver',
+};
 const _standaloneExecutableDirectories = {'benchmark', 'tool', 'example'};
 
 bool _isTestRunnerSurface(String relativePath) =>

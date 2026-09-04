@@ -42,6 +42,52 @@ environment:
     expect(workspace.resolutionCount, 1);
   });
 
+  test('inventories an imported hidden selected-package library', () async {
+    final root = await Directory.systemTemp.createTemp(
+      'dart_workspace_hidden_',
+    );
+    addTearDown(() => root.deleteSync(recursive: true));
+    File(p.join(root.path, 'pubspec.yaml')).writeAsStringSync('''
+name: workspace_fixture
+publish_to: none
+environment:
+  sdk: ^3.9.0
+''');
+    File(p.join(root.path, '.dart_tool', 'package_config.json'))
+      ..createSync(recursive: true)
+      ..writeAsStringSync('''
+{"configVersion":2,"packages":[
+  {"name":"workspace_fixture","rootUri":"../","packageUri":"lib/","languageVersion":"3.9"}
+]}
+''');
+    File(p.join(root.path, 'lib', 'main.dart'))
+      ..createSync(recursive: true)
+      ..writeAsStringSync('''
+import 'package:workspace_fixture/.env.dart';
+
+void main() => Env.value;
+''');
+    final hidden = File(p.join(root.path, 'lib', '.env.dart'))
+      ..writeAsStringSync('class Env { static const value = 1; }\n');
+    final nestedHidden =
+        File(p.join(root.path, 'lib', '.private', 'ignored.dart'))
+          ..createSync(recursive: true)
+          ..writeAsStringSync('class Ignored {}\n');
+    final project = await ProjectContext.load(root);
+    final workspace = DartAnalysisWorkspace(project);
+    final graph = ReachabilityGraph();
+
+    await const DartAdapter().analyzeWithServices(
+      project,
+      GraphBuilder(graph, 'dart'),
+      AdapterServices(dartWorkspace: workspace),
+    );
+
+    expect(workspace.dartFiles, contains(hidden.absolute.path));
+    expect(workspace.dartFiles, isNot(contains(nestedHidden.absolute.path)));
+    expect(graph.danglingEdges(), isEmpty);
+  });
+
   test('Dart and asset adapters reuse resolved libraries', () async {
     final project = await ProjectContext.load(
       Directory('test/fixtures/asset_test').absolute,

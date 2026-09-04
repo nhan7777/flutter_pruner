@@ -229,6 +229,48 @@ export 'dart:collection';
         isFalse,
       );
     });
+
+    test('resolves an imported hidden selected-package library', () async {
+      _write(root, 'lib/main.dart', '''
+import 'package:directive_test/.env.dart';
+
+void main() => readEnvironment();
+''');
+      _write(root, 'lib/.env.dart', 'void readEnvironment() {}\n');
+      final hiddenWorkspace = DartAnalysisWorkspace(project);
+
+      final resolution = await DartDirectiveResolver(
+        project: project,
+        workspace: hiddenWorkspace,
+        ownership: DartPackageOwnership.discover(project),
+        contexts: DartExecutionContextSnapshot(
+          configuredTargets: [web],
+          auxiliaryExecutionTargets: const [],
+          roots: const [],
+          issues: const [],
+        ),
+        libraries: await _resolvedLibraries(hiddenWorkspace),
+      ).resolve();
+
+      final hiddenPath = File(
+        p.join(root.path, 'lib', '.env.dart'),
+      ).resolveSymbolicLinksSync();
+      expect(
+        hiddenWorkspace.dartFiles,
+        contains(File(p.join(root.path, 'lib', '.env.dart')).absolute.path),
+      );
+      expect(resolution.issues, isEmpty);
+      expect(
+        resolution.edges,
+        contains(
+          predicate<DartDirectiveEdge>(
+            (edge) =>
+                edge.kind == DartDirectiveKind.import &&
+                p.equals(edge.targetPath, hiddenPath),
+          ),
+        ),
+      );
+    });
   });
 }
 
