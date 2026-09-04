@@ -25,9 +25,6 @@ Future<void> main(List<String> arguments) async {
 
   try {
     final blockers = await _loadBlockers(manifest, options.root);
-    if (options.mode != _VerificationMode.evidenceOnly) {
-      await _validateHostedEvidence(blockers, options);
-    }
     final active = blockers.where((blocker) => blocker.status == 'active');
     if (options.mode != _VerificationMode.evidenceOnly && active.isNotEmpty) {
       stderr.writeln('Release blocked by ${active.length} active issue(s):');
@@ -38,6 +35,9 @@ Future<void> main(List<String> arguments) async {
       }
       exitCode = 1;
       return;
+    }
+    if (options.mode != _VerificationMode.evidenceOnly) {
+      await _validateHostedEvidence(blockers, options);
     }
 
     if (options.mode != _VerificationMode.manifestOnly) {
@@ -109,8 +109,8 @@ Future<List<_Blocker>> _loadBlockers(File manifest, Directory root) async {
         : const <_RequiredArtifact>[];
     final requiredHostedEvidence =
         rawBlocker.containsKey('requiredHostedEvidence')
-        ? _requiredHostedEvidence(rawBlocker, root, requiredTestRuns)
-        : null;
+        ? _requiredHostedEvidenceContracts(rawBlocker, root, requiredTestRuns)
+        : const <_RequiredHostedEvidence>[];
 
     blockers.add(
       _Blocker(
@@ -257,12 +257,35 @@ Future<List<_RequiredArtifact>> _requiredArtifacts(
   return List.unmodifiable(result);
 }
 
-_RequiredHostedEvidence _requiredHostedEvidence(
+List<_RequiredHostedEvidence> _requiredHostedEvidenceContracts(
   Map<String, Object?> source,
   Directory root,
   List<_RequiredTestRun> requiredTestRuns,
 ) {
   final raw = source['requiredHostedEvidence'];
+  final contracts = raw is List<Object?> ? raw : <Object?>[raw];
+  if (contracts.isEmpty) {
+    throw const FormatException('Invalid requiredHostedEvidence contract.');
+  }
+  final result = <_RequiredHostedEvidence>[];
+  final platforms = <String>{};
+  for (final contract in contracts) {
+    final parsed = _requiredHostedEvidence(contract, root, requiredTestRuns);
+    if (!platforms.add(parsed.platform)) {
+      throw FormatException(
+        'Duplicate hosted evidence platform: ${parsed.platform}.',
+      );
+    }
+    result.add(parsed);
+  }
+  return List.unmodifiable(result);
+}
+
+_RequiredHostedEvidence _requiredHostedEvidence(
+  Object? raw,
+  Directory root,
+  List<_RequiredTestRun> requiredTestRuns,
+) {
   if (raw is! Map<String, Object?> ||
       raw.keys.toSet().difference({
         'platform',
@@ -306,7 +329,8 @@ Future<void> _validateHostedEvidence(
 ) async {
   final hosted = blockers.where(
     (blocker) =>
-        blocker.status == 'resolved' && blocker.requiredHostedEvidence != null,
+        blocker.status == 'resolved' &&
+        blocker.requiredHostedEvidence.isNotEmpty,
   );
   if (hosted.isEmpty) return;
   final directory = options.hostedEvidenceDirectory;
@@ -320,63 +344,71 @@ Future<void> _validateHostedEvidence(
     throw const FormatException('Invalid expected hosted evidence commit.');
   }
   for (final blocker in hosted) {
-    final contract = blocker.requiredHostedEvidence!;
-    final file = File(p.join(directory.path, '${blocker.id}.json'));
-    if (!file.existsSync()) {
-      throw FormatException('Missing hosted evidence for ${blocker.id}.');
-    }
-    final decoded = jsonDecode(await file.readAsString());
-    if (decoded is! Map<String, Object?> || decoded['schemaVersion'] != 1) {
-      throw FormatException('Invalid hosted evidence for ${blocker.id}.');
-    }
-    if (decoded.keys.toSet().difference({
-          'schemaVersion',
-          'blockerId',
-          'commitSha',
-          'platform',
-          'filesystem',
-          'testRuns',
-        }).isNotEmpty ||
-        decoded.length != 6 ||
-        decoded['blockerId'] != blocker.id ||
-        decoded['commitSha'] != expectedCommit ||
-        decoded['platform'] != contract.platform ||
-        decoded['filesystem'] != contract.filesystem) {
-      throw FormatException(
-        'Hosted evidence identity mismatch for ${blocker.id}.',
-      );
-    }
-    final rawRuns = decoded['testRuns'];
-    if (rawRuns is! List<Object?>) {
-      throw FormatException('Invalid hosted test runs for ${blocker.id}.');
-    }
-    final observed = <String>{};
-    for (final rawRun in rawRuns) {
-      if (rawRun is! Map<String, Object?> ||
-          rawRun.keys.toSet().difference({
-            'platform',
-            'path',
-            'name',
-            'status',
-          }).isNotEmpty ||
-          rawRun.length != 4 ||
-          rawRun['status'] != 'passed') {
+    for (final contract in blocker.requiredHostedEvidence) {
+      final suffix = blocker.requiredHostedEvidence.length == 1
+          ? ''
+          : '-${contract.platform}';
+      final file = File(p.join(directory.path, '${blocker.id}$suffix.json'));
+      if (!file.existsSync()) {
         throw FormatException(
-          'Hosted test run did not pass for ${blocker.id}.',
+          'Missing hosted evidence for ${blocker.id} on '
+          '${contract.platform}.',
         );
       }
-      final run = _RequiredTestRun(
-        platform: _requiredText(rawRun, 'platform'),
-        path: _requiredText(rawRun, 'path'),
-        name: _requiredText(rawRun, 'name'),
-      );
-      if (!observed.add(run.identity)) {
-        throw FormatException('Duplicate hosted test run for ${blocker.id}.');
+      final decoded = jsonDecode(await file.readAsString());
+      if (decoded is! Map<String, Object?> || decoded['schemaVersion'] != 1) {
+        throw FormatException('Invalid hosted evidence for ${blocker.id}.');
       }
-    }
-    final expected = contract.testRuns.map((run) => run.identity).toSet();
-    if (observed.length != expected.length || !observed.containsAll(expected)) {
-      throw FormatException('Incomplete hosted test runs for ${blocker.id}.');
+      if (decoded.keys.toSet().difference({
+            'schemaVersion',
+            'blockerId',
+            'commitSha',
+            'platform',
+            'filesystem',
+            'testRuns',
+          }).isNotEmpty ||
+          decoded.length != 6 ||
+          decoded['blockerId'] != blocker.id ||
+          decoded['commitSha'] != expectedCommit ||
+          decoded['platform'] != contract.platform ||
+          decoded['filesystem'] != contract.filesystem) {
+        throw FormatException(
+          'Hosted evidence identity mismatch for ${blocker.id}.',
+        );
+      }
+      final rawRuns = decoded['testRuns'];
+      if (rawRuns is! List<Object?>) {
+        throw FormatException('Invalid hosted test runs for ${blocker.id}.');
+      }
+      final observed = <String>{};
+      for (final rawRun in rawRuns) {
+        if (rawRun is! Map<String, Object?> ||
+            rawRun.keys.toSet().difference({
+              'platform',
+              'path',
+              'name',
+              'status',
+            }).isNotEmpty ||
+            rawRun.length != 4 ||
+            rawRun['status'] != 'passed') {
+          throw FormatException(
+            'Hosted test run did not pass for ${blocker.id}.',
+          );
+        }
+        final run = _RequiredTestRun(
+          platform: _requiredText(rawRun, 'platform'),
+          path: _requiredText(rawRun, 'path'),
+          name: _requiredText(rawRun, 'name'),
+        );
+        if (!observed.add(run.identity)) {
+          throw FormatException('Duplicate hosted test run for ${blocker.id}.');
+        }
+      }
+      final expected = contract.testRuns.map((run) => run.identity).toSet();
+      if (observed.length != expected.length ||
+          !observed.containsAll(expected)) {
+        throw FormatException('Incomplete hosted test runs for ${blocker.id}.');
+      }
     }
   }
 }
@@ -552,7 +584,7 @@ final class _Blocker {
   final List<String> evidence;
   final List<_RequiredTestRun> requiredTestRuns;
   final List<_RequiredArtifact> requiredArtifacts;
-  final _RequiredHostedEvidence? requiredHostedEvidence;
+  final List<_RequiredHostedEvidence> requiredHostedEvidence;
 }
 
 final class _RequiredTestRun {

@@ -55,6 +55,22 @@ class VerificationRunner {
     );
   }
 
+  /// Runs verification for recovery workflows and preserves an unconfirmed
+  /// process-tree outcome as a distinct, non-retryable failure.
+  Future<VerificationResult> verifyForRecovery({
+    VerificationPolicy policy = VerificationPolicy.flutterDefault,
+    Duration timeout = defaultTimeout,
+  }) async {
+    try {
+      return await verify(policy: policy, timeout: timeout);
+    } on ProcessTerminationUnconfirmedException catch (error) {
+      throw VerificationTerminationUnconfirmedException(
+        processId: error.processId,
+        message: error.message,
+      );
+    }
+  }
+
   Future<String> _resolveToolchainIdentity(VerificationPolicy policy) async {
     final evidence = <String>[];
     for (final executable
@@ -67,6 +83,10 @@ class VerificationRunner {
           '$executable\u0000${result.exitCode}\u0000'
           '${result.stdout.text}\u0000${result.stderr.text}',
         );
+      } on ProcessCancellationBeforeLaunchException {
+        rethrow;
+      } on ProcessCancellationConfirmedException {
+        rethrow;
       } on ProcessTerminationUnconfirmedException {
         rethrow;
       } catch (error) {
@@ -110,6 +130,10 @@ class VerificationRunner {
             : result.stderr.text,
         duration: stopwatch.elapsed,
       );
+    } on ProcessCancellationBeforeLaunchException {
+      rethrow;
+    } on ProcessCancellationConfirmedException {
+      rethrow;
     } on ProcessTerminationUnconfirmedException {
       rethrow;
     } catch (e) {
@@ -134,6 +158,12 @@ class VerificationRunner {
       return !result.timedOut &&
           !result.outputTruncated &&
           result.exitCode == 0;
+    } on ProcessCancellationBeforeLaunchException {
+      rethrow;
+    } on ProcessCancellationConfirmedException {
+      rethrow;
+    } on ProcessTerminationUnconfirmedException {
+      rethrow;
     } catch (e) {
       return false;
     }
@@ -152,6 +182,24 @@ class VerificationRunner {
       maxOutputBytesPerStream: _maxOutputBytesPerStream,
     );
   }
+}
+
+/// Signals that a recovery verifier process tree may still be alive.
+final class VerificationTerminationUnconfirmedException implements Exception {
+  /// Creates an unconfirmed recovery-verifier outcome.
+  const VerificationTerminationUnconfirmedException({
+    required this.processId,
+    required this.message,
+  });
+
+  /// Root verifier process identifier.
+  final int processId;
+
+  /// Sanitized diagnostic supplied by the managed process runner.
+  final String message;
+
+  @override
+  String toString() => message;
 }
 
 /// Result of running verification steps.

@@ -51,6 +51,27 @@ class QuarantineSelectionEvidence {
     required FindingSelectionMode mode,
     required List<String> requestedFindingIds,
     required String planFingerprint,
+    int? previewFingerprintVersion,
+    String? previewFingerprint,
+    String? expectedPreviewFingerprint,
+  }) => QuarantineSelectionEvidence._validated(
+    evidenceVersion: 2,
+    mode: mode,
+    requestedFindingIds: requestedFindingIds,
+    planFingerprint: planFingerprint,
+    previewFingerprintVersion: previewFingerprintVersion,
+    previewFingerprint: previewFingerprint,
+    expectedPreviewFingerprint: expectedPreviewFingerprint,
+  );
+
+  factory QuarantineSelectionEvidence._validated({
+    required int evidenceVersion,
+    required FindingSelectionMode mode,
+    required List<String> requestedFindingIds,
+    required String planFingerprint,
+    required int? previewFingerprintVersion,
+    required String? previewFingerprint,
+    required String? expectedPreviewFingerprint,
   }) {
     final requested = List<String>.unmodifiable(requestedFindingIds);
     if (requested.any((value) => value.isEmpty) ||
@@ -76,18 +97,61 @@ class QuarantineSelectionEvidence {
     if (!RegExp(r'^[0-9a-f]{64}$').hasMatch(planFingerprint)) {
       throw const FormatException('selection planFingerprint must be SHA-256');
     }
+    final hasPreviewVersion = previewFingerprintVersion != null;
+    final hasActualPreview = previewFingerprint != null;
+    final hasExpectedPreview = expectedPreviewFingerprint != null;
+    if (hasPreviewVersion != hasActualPreview ||
+        hasActualPreview != hasExpectedPreview) {
+      throw const FormatException(
+        'selection preview evidence must be a complete triple',
+      );
+    }
+    if (hasActualPreview) {
+      if (mode != FindingSelectionMode.exact) {
+        throw const FormatException(
+          'selection preview evidence requires exact finding IDs',
+        );
+      }
+      if (previewFingerprintVersion != 1) {
+        throw const FormatException(
+          'selection preview fingerprint version must be 1',
+        );
+      }
+      final tokenPattern = RegExp(r'^v1:[0-9a-f]{64}$');
+      if (!tokenPattern.hasMatch(previewFingerprint) ||
+          !tokenPattern.hasMatch(expectedPreviewFingerprint!)) {
+        throw const FormatException(
+          'selection preview fingerprints must be full lowercase v1 tokens',
+        );
+      }
+      if (previewFingerprint != expectedPreviewFingerprint) {
+        throw const FormatException(
+          'selection preview fingerprints must match',
+        );
+      }
+    }
     return QuarantineSelectionEvidence._(
+      evidenceVersion: evidenceVersion,
       mode: mode,
       requestedFindingIds: requested,
       planFingerprint: planFingerprint,
+      previewFingerprintVersion: previewFingerprintVersion,
+      previewFingerprint: previewFingerprint,
+      expectedPreviewFingerprint: expectedPreviewFingerprint,
     );
   }
 
   const QuarantineSelectionEvidence._({
+    required int evidenceVersion,
     required this.mode,
     required this.requestedFindingIds,
     required this.planFingerprint,
-  });
+    required this.previewFingerprintVersion,
+    required this.previewFingerprint,
+    required this.expectedPreviewFingerprint,
+  }) : _evidenceVersion = evidenceVersion;
+
+  final int _evidenceVersion;
 
   /// Historical all-eligible behavior or an exact hard allowlist.
   final FindingSelectionMode mode;
@@ -98,17 +162,32 @@ class QuarantineSelectionEvidence {
   /// SHA-256 over the canonical initial plan.
   final String planFingerprint;
 
+  /// Canonical preview fingerprint version, when an exact apply was bound.
+  final int? previewFingerprintVersion;
+
+  /// Current preview token accepted by the exact apply.
+  final String? previewFingerprint;
+
+  /// User-supplied preview token equal to [previewFingerprint].
+  final String? expectedPreviewFingerprint;
+
   /// Converts to JSON.
   Map<String, dynamic> toJson() => {
-    'version': 1,
+    'version': _evidenceVersion,
     'mode': mode.name,
     'requestedFindingIds': List<String>.of(requestedFindingIds),
     'planFingerprint': planFingerprint,
+    if (previewFingerprintVersion != null)
+      'previewFingerprintVersion': previewFingerprintVersion,
+    if (previewFingerprint != null) 'previewFingerprint': previewFingerprint,
+    if (expectedPreviewFingerprint != null)
+      'expectedPreviewFingerprint': expectedPreviewFingerprint,
   };
 
   /// Restores and validates persisted evidence.
   factory QuarantineSelectionEvidence.fromJson(Map<String, dynamic> json) {
-    if (json['version'] != 1 ||
+    final evidenceVersion = json['version'];
+    if ((evidenceVersion != 1 && evidenceVersion != 2) ||
         json['mode'] is! String ||
         json['requestedFindingIds'] is! List<dynamic> ||
         (json['requestedFindingIds'] as List<dynamic>).any(
@@ -117,12 +196,43 @@ class QuarantineSelectionEvidence {
         json['planFingerprint'] is! String) {
       throw const FormatException('invalid quarantine selection evidence');
     }
+    const previewKeys = {
+      'previewFingerprintVersion',
+      'previewFingerprint',
+      'expectedPreviewFingerprint',
+    };
+    if (evidenceVersion == 1 && previewKeys.any(json.containsKey)) {
+      throw const FormatException(
+        'V1 quarantine selection cannot contain preview evidence',
+      );
+    }
+    final presentPreviewKeyCount = previewKeys.where(json.containsKey).length;
+    if (presentPreviewKeyCount != 0 &&
+        (presentPreviewKeyCount != previewKeys.length ||
+            previewKeys.any((key) => json[key] == null))) {
+      throw const FormatException(
+        'quarantine preview evidence cannot be partial or null',
+      );
+    }
+    if ((json['previewFingerprintVersion'] != null &&
+            json['previewFingerprintVersion'] is! int) ||
+        (json['previewFingerprint'] != null &&
+            json['previewFingerprint'] is! String) ||
+        (json['expectedPreviewFingerprint'] != null &&
+            json['expectedPreviewFingerprint'] is! String)) {
+      throw const FormatException('invalid quarantine preview evidence');
+    }
     try {
-      return QuarantineSelectionEvidence(
+      return QuarantineSelectionEvidence._validated(
+        evidenceVersion: evidenceVersion as int,
         mode: FindingSelectionMode.values.byName(json['mode'] as String),
         requestedFindingIds: (json['requestedFindingIds'] as List<dynamic>)
             .cast<String>(),
         planFingerprint: json['planFingerprint'] as String,
+        previewFingerprintVersion: json['previewFingerprintVersion'] as int?,
+        previewFingerprint: json['previewFingerprint'] as String?,
+        expectedPreviewFingerprint:
+            json['expectedPreviewFingerprint'] as String?,
       );
     } on ArgumentError {
       throw const FormatException('unknown quarantine selection mode');
@@ -223,37 +333,44 @@ class QuarantineManifest {
       transactionJournal || transactions.isNotEmpty;
 
   /// Converts to JSON.
-  Map<String, dynamic> toJson() => {
-    'version': usesTransactionJournal
-        ? '3.0.0'
-        : usesCaseJournal
-        ? '2.0.0'
-        : '1.0.0',
-    'runId': runId,
-    'timestamp': timestamp.toIso8601String(),
-    if (projectRoot != null) 'projectRoot': projectRoot,
-    'entries': entries.map((e) => e.toJson()).toList(),
-    if (usesCaseJournal) 'cases': cases.map((e) => e.toJson()).toList(),
-    if (usesTransactionJournal)
-      'transactions': transactions.map((e) => e.toJson()).toList(),
-    if (verificationWaves.isNotEmpty)
-      'verificationWaves': verificationWaves.map((e) => e.toJson()).toList(),
-    if (verificationPolicyHash != null)
-      'verificationPolicyHash': verificationPolicyHash,
-    if (baselineVerification != null)
-      'baselineVerification': baselineVerification!.toJson(),
-    if (analysisMode != null) 'analysisMode': analysisMode,
-    'acceptedRiskCodes': acceptedRiskCodes,
-    if (riskAcceptanceSource != null)
-      'riskAcceptanceSource': riskAcceptanceSource,
-    if (selection != null) 'selection': selection!.toJson(),
-    if (fullRollbackAtUtc != null)
-      'fullRollback': {
-        'status': 'restored',
-        'verified': fullRollbackVerified,
-        'restoredAtUtc': fullRollbackAtUtc!.toUtc().toIso8601String(),
-      },
-  };
+  Map<String, dynamic> toJson() {
+    if (selection != null && !usesTransactionJournal) {
+      throw const FormatException(
+        'quarantine selection requires a V3 manifest',
+      );
+    }
+    return {
+      'version': usesTransactionJournal
+          ? '3.0.0'
+          : usesCaseJournal
+          ? '2.0.0'
+          : '1.0.0',
+      'runId': runId,
+      'timestamp': timestamp.toIso8601String(),
+      if (projectRoot != null) 'projectRoot': projectRoot,
+      'entries': entries.map((e) => e.toJson()).toList(),
+      if (usesCaseJournal) 'cases': cases.map((e) => e.toJson()).toList(),
+      if (usesTransactionJournal)
+        'transactions': transactions.map((e) => e.toJson()).toList(),
+      if (verificationWaves.isNotEmpty)
+        'verificationWaves': verificationWaves.map((e) => e.toJson()).toList(),
+      if (verificationPolicyHash != null)
+        'verificationPolicyHash': verificationPolicyHash,
+      if (baselineVerification != null)
+        'baselineVerification': baselineVerification!.toJson(),
+      if (analysisMode != null) 'analysisMode': analysisMode,
+      'acceptedRiskCodes': acceptedRiskCodes,
+      if (riskAcceptanceSource != null)
+        'riskAcceptanceSource': riskAcceptanceSource,
+      if (selection != null) 'selection': selection!.toJson(),
+      if (fullRollbackAtUtc != null)
+        'fullRollback': {
+          'status': 'restored',
+          'verified': fullRollbackVerified,
+          'restoredAtUtc': fullRollbackAtUtc!.toUtc().toIso8601String(),
+        },
+    };
+  }
 
   /// Creates from JSON.
   factory QuarantineManifest.fromJson(Map<String, dynamic> json) {

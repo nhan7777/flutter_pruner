@@ -1,3 +1,6 @@
+import 'formatters/quarantine_formatter.dart';
+import 'terminal_text_metrics.dart';
+
 /// Writes a compact, semantic rail for long-running terminal workflows.
 ///
 /// Icons and labels always accompany color so redirected logs retain meaning.
@@ -11,11 +14,21 @@ class TerminalWorkflow {
   /// Visible terminal width used when wrapping detail text.
   final int lineWidth;
 
+  static const _metrics = TerminalTextMetrics();
+
   /// Starts a visually distinct workflow section.
   void section(String label, {String? detail}) {
+    final displayLabel = QuarantineFormatter.terminalSafe(label);
+    final displayDetail = detail == null
+        ? null
+        : QuarantineFormatter.terminalSafe(detail);
     _sink.writeln();
-    _sink.writeln(_style('◆ $label', '$_bold$_cyan'));
-    if (detail != null) _writeWrapped(detail, indent: '  ', style: _dim);
+    for (final line in _metrics.wrap('◆ $displayLabel', width: _width)) {
+      _sink.writeln(_style(line, '$_bold$_cyan'));
+    }
+    if (displayDetail != null) {
+      _writeWrapped(displayDetail, indent: '  ', style: _dim);
+    }
   }
 
   /// Writes neutral workflow information.
@@ -75,7 +88,11 @@ class TerminalWorkflow {
 
   /// Writes secondary detail without introducing a new status.
   void detail(String value) {
-    _writeWrapped(value, indent: '    ', style: _dim);
+    _writeWrapped(
+      QuarantineFormatter.terminalSafe(value),
+      indent: '    ',
+      style: _dim,
+    );
   }
 
   void _writeStatus({
@@ -85,19 +102,33 @@ class TerminalWorkflow {
     required String color,
     String? detail,
   }) {
+    final displayLabel = QuarantineFormatter.terminalSafe(label);
+    final displayValue = QuarantineFormatter.terminalSafe(value);
+    final displayDetail = detail == null
+        ? null
+        : QuarantineFormatter.terminalSafe(detail);
     const labelWidth = 12;
-    final paddedLabel = label.padRight(labelWidth);
+    final paddedLabel = _padRight(displayLabel, labelWidth);
     final visiblePrefix = '  $icon $paddedLabel ';
     final styledPrefix =
         '  ${_style(icon, color)} '
         '${_style(paddedLabel, '$_bold$color')} ';
-    if (_length(visiblePrefix) + _length(value) <= _width) {
-      _sink.writeln('$styledPrefix$value');
+    if (_metrics.visibleWidth(visiblePrefix) +
+            _metrics.visibleWidth(displayValue) <=
+        _width) {
+      _sink.writeln('$styledPrefix$displayValue');
     } else {
-      _sink.writeln(styledPrefix.trimRight());
-      _writeWrapped(value, indent: '    ');
+      for (final line in _metrics.wrap(
+        styledPrefix.trimRight(),
+        width: _width,
+      )) {
+        _sink.writeln(line);
+      }
+      _writeWrapped(displayValue, indent: '    ');
     }
-    if (detail != null) _writeWrapped(detail, indent: '    ', style: _dim);
+    if (displayDetail != null) {
+      _writeWrapped(displayDetail, indent: '    ', style: _dim);
+    }
   }
 
   void _writeWrapped(
@@ -105,29 +136,14 @@ class TerminalWorkflow {
     required String indent,
     String style = '',
   }) {
-    final remainingWidth = _width - _length(indent);
-    final available = remainingWidth > 0 ? remainingWidth : 1;
-    final words = value.split(RegExp(r'\s+'));
-    var line = '';
-    for (final word in words) {
-      final candidate = line.isEmpty ? word : '$line $word';
-      if (_length(candidate) <= available) {
-        line = candidate;
-        continue;
-      }
-      if (line.isNotEmpty) {
-        _sink.writeln(_style('$indent$line', style));
-        line = '';
-      }
-      var remainder = word;
-      while (_length(remainder) > available) {
-        final chunk = _takeStart(remainder, available);
-        _sink.writeln(_style('$indent$chunk', style));
-        remainder = _takeEnd(remainder, _length(remainder) - available);
-      }
-      line = remainder;
+    for (final line in _metrics.wrap(
+      value,
+      width: _width,
+      firstIndent: indent,
+      continuationIndent: indent,
+    )) {
+      _sink.writeln(_style(line, style));
     }
-    if (line.isNotEmpty) _sink.writeln(_style('$indent$line', style));
   }
 
   int get _width => lineWidth < 12 ? 12 : lineWidth;
@@ -135,15 +151,9 @@ class TerminalWorkflow {
   String _style(String value, String style) =>
       style.isEmpty ? value : '$style$value$_reset';
 
-  int _length(String value) => value.runes.length;
-
-  String _takeStart(String value, int count) =>
-      String.fromCharCodes(value.runes.take(count));
-
-  String _takeEnd(String value, int count) {
-    if (count <= 0) return '';
-    final runes = value.runes.toList();
-    return String.fromCharCodes(runes.skip(runes.length - count));
+  String _padRight(String value, int width) {
+    final spaces = width - _metrics.visibleWidth(value);
+    return spaces > 0 ? '$value${List.filled(spaces, ' ').join()}' : value;
   }
 }
 

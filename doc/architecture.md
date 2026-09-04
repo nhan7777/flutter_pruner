@@ -218,6 +218,15 @@ boundary. If a path is recreated or its hash changes at an observed boundary,
 both copies are retained and the ledger becomes `recoveryRequired`; the tool
 does not overwrite the recreated path.
 
+Quarantine clean uses a separate recoverable logical-move protocol. It anchors
+the quarantine base, writes immutable intent revisions, and moves each exact
+run into `.clean-retained/v1` through native no-replace operations. Restart
+reconciliation distinguishes an exact not-moved intent, an exact retained
+tree, and ambiguous drift; only the first two can terminalize automatically.
+Restore revalidates the complete retained tree digest before the same native
+boundary moves it back. Release admission binds these production artifacts to
+exact-SHA hosted `renameat2`, `renameatx_np`, and NTFS conformance evidence.
+
 These are path-race protections, not a claim of crash-durable filesystem
 atomicity. The current implementation does not `fsync` directories, use
 `renameat2` durability semantics, or eliminate a microscopic concurrent

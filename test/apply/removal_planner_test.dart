@@ -113,6 +113,42 @@ void main() {
       );
     });
 
+    test(
+      'retained consumer under an applicable conditioned target blocks removal',
+      () {
+        final target = _project.targets.single;
+        final graph = ReachabilityGraph()
+          ..addNode(_node('retained'))
+          ..addNode(_node('candidate'))
+          ..addEdge(
+            GraphEdge(
+              from: 'retained',
+              to: 'candidate',
+              kind: EdgeKind.references,
+              condition: BuildCondition.forTarget(target),
+              evidence: const Evidence(
+                kind: EvidenceKind.semanticReference,
+                producer: 'dart',
+                description: 'conditioned retained reference',
+                exact: true,
+              ),
+            ),
+          );
+
+        final plan = const RemovalPlanner().build(
+          findings: [_finding('candidate')],
+          graph: graph,
+          project: _project,
+        );
+
+        expect(plan.units, isEmpty);
+        expect(plan.blocked, hasLength(1));
+        expect(plan.blocked.single.finding.node.id, 'candidate');
+        expect(plan.blocked.single.reason, PlanBlockReason.retainedConsumer);
+        expect(plan.blocked.single.blockedBy, 'retained');
+      },
+    );
+
     test('exact stale import cleanup closes an empty-library boundary', () {
       final empty = _emptyLibraryFinding('empty');
       final graph = ReachabilityGraph()

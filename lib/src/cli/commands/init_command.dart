@@ -10,9 +10,11 @@ import '../../core/graph/build_condition.dart';
 import '../../core/project/project_config.dart';
 import '../../core/project/project_source_path.dart';
 import '../../core/project/tool_workspace.dart';
+import '../cli_exit_code.dart';
 import '../init_prompt.dart';
 import '../init_target_discovery.dart';
 import '../project_command_support.dart';
+import '../usage_error.dart';
 
 /// Creates a project-local Flutter Pruner configuration.
 class InitCommand extends Command<int> {
@@ -23,39 +25,39 @@ class InitCommand extends Command<int> {
       ..addOption(
         'type',
         allowed: ['application', 'package', 'package-internal'],
-        help: 'Project shape. Defaults to a conservative filesystem detection.',
+        help: 'Project shape; defaults to conservative filesystem detection',
       )
       ..addMultiOption(
         'entrypoint',
         help:
-            'Entrypoint relative to the project. May be passed more than once.',
+            'Entrypoint relative to the project; may be passed more than once',
       )
       ..addMultiOption(
         'platform',
         allowed: _supportedPlatforms,
-        help: 'Target platform. May be passed more than once.',
+        help: 'Target platform; may be passed more than once',
       )
       ..addFlag(
         'complete',
         negatable: false,
-        help: 'Assert that every supported build target is declared.',
+        help: 'Assert every supported build target is declared',
       )
       ..addFlag(
         'force',
         negatable: false,
-        help: 'Replace an existing Flutter Pruner configuration.',
+        help: 'Replace existing Flutter Pruner configuration',
       )
       ..addFlag(
         'interactive',
         defaultsTo: true,
-        help: 'Ask questions when attached to a terminal.',
+        help: 'Ask questions when attached to a terminal',
       )
       ..addFlag(
         'yes',
         negatable: false,
         help:
-            'Accept conservative detected defaults without prompting. Does '
-            'not assert complete coverage.',
+            'Accept conservative detected defaults without prompting; does '
+            'not assert complete coverage',
       );
     addProjectOption(argParser);
   }
@@ -79,14 +81,55 @@ class InitCommand extends Command<int> {
 
   @override
   String get description =>
-      'Create a conservative project-local Flutter Pruner configuration.';
+      'Create a conservative project-local Flutter Pruner configuration';
+
+  @override
+  String get usageFooter => '''Examples:
+  flutter_pruner init
+  flutter_pruner init --project ./example
+
+Writes configuration and .gitignore''';
 
   @override
   Future<int> run() async {
     final args = argResults!;
     if (args.rest.length > 1) {
-      stderr.writeln('Error: expected at most one project path.');
-      return 64;
+      throw commandUsageError(this, 'Expected at most one project path.');
+    }
+    if (args.option('project') != null && args.rest.isNotEmpty) {
+      throw commandUsageError(
+        this,
+        'Pass the project once, using either --project or [project-path].',
+      );
+    }
+    final shapingFlags =
+        args.wasParsed('type') ||
+        args.wasParsed('entrypoint') ||
+        args.wasParsed('platform') ||
+        args.flag('complete');
+    if (args.wasParsed('interactive') &&
+        args.flag('interactive') &&
+        shapingFlags) {
+      throw commandUsageError(
+        this,
+        '--interactive cannot be combined with --type, --entrypoint, --platform, or --complete. Use the wizard or explicit flags.',
+      );
+    }
+    if (args.wasParsed('interactive') &&
+        args.flag('interactive') &&
+        args.flag('yes')) {
+      throw commandUsageError(
+        this,
+        '--interactive cannot be combined with --yes. Choose the wizard or conservative automatic defaults.',
+      );
+    }
+    if (args.wasParsed('interactive') &&
+        args.flag('interactive') &&
+        !_prompt.isInteractive) {
+      throw commandUsageError(
+        this,
+        '--interactive requires an attached terminal. Use --no-interactive for scripts and CI.',
+      );
     }
 
     late final ToolWorkspace workspace;
@@ -97,7 +140,7 @@ class InitCommand extends Command<int> {
       );
     } on ProjectSelectionException catch (error) {
       stderr.writeln('Error: $error');
-      return 64;
+      return CliExitCode.operationalFailure;
     }
 
     final pubspecFile = File(
@@ -112,38 +155,6 @@ class InitCommand extends Command<int> {
     );
     final explicitType = args.option('type');
     final detectedType = _detectType(workspace.projectRoot, packageName);
-    final shapingFlags =
-        args.wasParsed('type') ||
-        args.wasParsed('entrypoint') ||
-        args.wasParsed('platform') ||
-        args.flag('complete');
-    if (args.wasParsed('interactive') &&
-        args.flag('interactive') &&
-        shapingFlags) {
-      stderr.writeln(
-        'Error: --interactive cannot be combined with --type, --entrypoint, '
-        '--platform, or --complete. Use the wizard or explicit flags.',
-      );
-      return 64;
-    }
-    if (args.wasParsed('interactive') &&
-        args.flag('interactive') &&
-        args.flag('yes')) {
-      stderr.writeln(
-        'Error: --interactive cannot be combined with --yes. Choose the '
-        'wizard or conservative automatic defaults.',
-      );
-      return 64;
-    }
-    if (args.wasParsed('interactive') &&
-        args.flag('interactive') &&
-        !_prompt.isInteractive) {
-      stderr.writeln(
-        'Error: --interactive requires an attached terminal. Use '
-        '--no-interactive for scripts and CI.',
-      );
-      return 64;
-    }
     final useWizard =
         args.flag('interactive') &&
         _prompt.isInteractive &&
@@ -170,17 +181,13 @@ class InitCommand extends Command<int> {
           defaultValue: false,
         );
         if (!replace) {
-          _InitWizardPresentation(
-            _prompt,
-          ).warning('Cancelled; no files were written.');
-          return 0;
+          _InitWizardPresentation(_prompt).warning('Cancelled.');
+          return CliExitCode.success;
         }
         force = true;
       } on InitCancelledException {
-        _InitWizardPresentation(
-          _prompt,
-        ).warning('Cancelled; no files were written.');
-        return 0;
+        _InitWizardPresentation(_prompt).warning('Cancelled.');
+        return CliExitCode.success;
       }
     }
 
@@ -213,27 +220,21 @@ class InitCommand extends Command<int> {
         );
       }
     } on InitCancelledException {
-      _InitWizardPresentation(
-        _prompt,
-      ).warning('Cancelled; no files were written.');
-      return 0;
+      _InitWizardPresentation(_prompt).warning('Cancelled.');
+      return CliExitCode.success;
     } on ProjectSourcePathException catch (error) {
-      stderr.writeln('Error: ${error.message}');
-      return 64;
+      throw commandUsageError(this, error.message);
     } on FormatException catch (error) {
-      stderr.writeln('Error: ${error.message}');
-      return 64;
+      throw commandUsageError(this, error.message);
     }
 
     if (isHybridProject &&
         draft.projectType == 'application' &&
         draft.complete) {
-      stderr.writeln(
-        'Error: application mode cannot assert complete coverage for a hybrid '
-        'project with a public package surface. Use package or '
-        'package-internal.',
+      throw commandUsageError(
+        this,
+        'Application mode cannot assert complete coverage for a hybrid project with a public package surface. Use package or package-internal.',
       );
-      return 64;
     }
 
     final config = _renderConfig(

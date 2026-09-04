@@ -26,11 +26,18 @@ jq -e '
 ```
 
 The local `--run-tests` mode validates retained artifacts and runs the required
-tests for the current platform, but it is not release admission. Hosted CI must
-download the Windows evidence artifact and invoke the verifier with both
-`--hosted-evidence-dir` and `--expected-commit`; the default admission mode
-fails closed when that exact-SHA evidence is absent. Skipped regression tests
-cannot satisfy the gate.
+tests for the current platform, but it is not release admission. Hosted CI
+collects clean-path evidence independently from Linux, macOS, and Windows plus
+the Windows report-capability artifact, then invokes the verifier with both
+`--hosted-evidence-dir` and `--expected-commit`. The default admission mode
+fails closed when any required exact-SHA artifact is absent, stale, duplicated,
+skipped, or platform/filesystem mismatched.
+
+For `CLEAN-TOCTOU-1`, the Linux artifact exercises the production `renameat2`
+boundary, macOS exercises `renameatx_np`, and Windows exercises NTFS
+no-replace behavior. Every platform also replays all durable-journal hard-exit
+points and the retained restore collision contract. Passing the ordinary full
+suite without these separately generated artifacts cannot admit a release.
 
 The Windows evidence must prove object identity, not that NTFS always rejects a
 directory rename. A retained handle may remain usable after its pathname moves;

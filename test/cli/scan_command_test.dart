@@ -3,10 +3,15 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:crypto/crypto.dart';
+import 'package:flutter_pruner/src/adapters/adapter_report_definition.dart';
+import 'package:flutter_pruner/src/adapters/analyzer_adapter.dart';
 import 'package:flutter_pruner/src/adapters/dart/dart_package_ownership.dart';
+import 'package:flutter_pruner/src/analysis/analysis_snapshot.dart';
+import 'package:flutter_pruner/src/analysis/project_analyzer.dart';
 import 'package:flutter_pruner/src/cli/command_runner.dart';
 import 'package:flutter_pruner/src/cli/commands/scan_command.dart';
 import 'package:flutter_pruner/src/cli/formatters/json_formatter.dart';
+import 'package:flutter_pruner/src/core/process/managed_process_runner.dart';
 import 'package:flutter_pruner/src/core/project/project_context.dart';
 import 'package:flutter_pruner/src/reporting/io_report_object_backend.dart';
 import 'package:flutter_pruner/src/reporting/report_object_backend.dart';
@@ -105,7 +110,7 @@ target_matrix:
 
       expect(result.exitCode, 1);
       expect(result.stdout, isEmpty);
-      expect(result.stderr, contains('Run: flutter_pruner init'));
+      expect(result.stderr, contains("Run: flutter_pruner 'init'"));
       expect(result.stderr, isNot(contains('--project')));
       expect(
         Directory(p.join(project.path, '.flutter_pruner')).existsSync(),
@@ -1100,6 +1105,13 @@ target_matrix:
 
     expect(exitCode, 0);
     final report = jsonDecode(output.readAsStringSync()) as Map;
+    expect(report.keys.toList(), [
+      'version',
+      'timestamp',
+      'analysisCoverage',
+      'summary',
+      'findings',
+    ]);
     expect(report['version'], 2);
     expect((report['summary'] as Map).containsKey('safe'), isTrue);
     expect((report['summary'] as Map).containsKey('high'), isTrue);
@@ -1114,6 +1126,528 @@ target_matrix:
     expect(formatter.preflightCalls, 2);
     expect(_transactionArtifacts(output), isEmpty);
   });
+
+  test(
+    'adapter failure after output preparation saves one sanitized failed report',
+    () async {
+      final output = File(p.join(project.path, 'failed-scan.json'));
+      const rawFailure = 'raw adapter exception with private details';
+      final runner = FlutterPrunerCommandRunner(
+        scanCommandFactory: () => ScanCommand(
+          analyzerFactory: (context, only) => _ThrowingAdapterProjectAnalyzer(
+            project: context,
+            only: only,
+            rawFailure: rawFailure,
+          ),
+        ),
+      );
+
+      final result = await _runCaptured(runner, [
+        'scan',
+        '--adapter',
+        'dart',
+        '--format',
+        'json',
+        '--output',
+        output.path,
+        project.path,
+      ]);
+
+      expect(result.exitCode, 70);
+      expect(result.stdout, isEmpty);
+      expect(
+        result.stderr,
+        contains(
+          'Error: Analysis failed after adapter Dart declaration analyzer '
+          '(dart) started.',
+        ),
+      );
+      expect(result.stderr, isNot(contains(rawFailure)));
+      expect(output.existsSync(), isTrue);
+      expect(
+        result.stderr,
+        contains('Failure report saved: ${output.resolveSymbolicLinksSync()}'),
+      );
+      expect(_transactionArtifacts(output), isEmpty);
+
+      final report =
+          jsonDecode(output.readAsStringSync()) as Map<String, Object?>;
+      final run = report['run']! as Map<String, Object?>;
+      expect(run['command'], 'scan');
+      expect(run['status'], 'internalError');
+      expect(run['exitCode'], 70);
+      expect(run['projectRoot'], project.absolute.path);
+      expect(
+        (report['execution']! as Map<String, Object?>)['analysisPasses'],
+        isEmpty,
+      );
+      expect(report['findings'], isEmpty);
+      expect(report['diagnostics'], [
+        {
+          'code': 'adapter_analysis_failed',
+          'message':
+              'Analysis failed after adapter Dart declaration analyzer (dart) '
+              'started.',
+          'phase': 'analysis:adapter:dart',
+        },
+      ]);
+    },
+  );
+
+  for (final fixture in <({String name, Exception error, int exitCode})>[
+    (
+      name: 'before-launch cancellation',
+      error: const ProcessCancellationBeforeLaunchException(
+        ProcessSignal.sigint,
+      ),
+      exitCode: 130,
+    ),
+    (
+      name: 'confirmed tree cancellation',
+      error: const ProcessCancellationConfirmedException(
+        ProcessSignal.sigterm,
+        4242,
+      ),
+      exitCode: 143,
+    ),
+  ]) {
+    test('${fixture.name} saves an interrupted scan report', () async {
+      final output = File(
+        p.join(project.path, '${fixture.exitCode}-interrupted-scan.json'),
+      );
+      final result = await _runCaptured(
+        FlutterPrunerCommandRunner(
+          scanCommandFactory: () => ScanCommand(
+            analyzerFactory: (context, only) => _CancellationProjectAnalyzer(
+              project: context,
+              only: only,
+              error: fixture.error,
+            ),
+          ),
+        ),
+        _jsonScanArgs(project, output, version: 3),
+      );
+
+      expect(result.exitCode, fixture.exitCode);
+      expect(result.stdout, isEmpty);
+      expect(result.stderr, isNot(contains('Internal error:')));
+      expect(output.existsSync(), isTrue);
+      final report =
+          jsonDecode(output.readAsStringSync()) as Map<String, Object?>;
+      final run = report['run']! as Map<String, Object?>;
+      expect(run['status'], 'interrupted');
+      expect(run['exitCode'], fixture.exitCode);
+      expect(report['diagnostics'], [
+        {
+          'code': 'process_cancelled_before_mutation',
+          'message':
+              'Scan was interrupted while an owned process tree was active.',
+          'phase': 'analysis',
+        },
+      ]);
+    });
+  }
+
+  test(
+    'failure after a completed adapter uses generic analysis facts',
+    () async {
+      final output = File(p.join(project.path, 'failed-after-adapter.json'));
+      const rawFailure = 'raw post-adapter finding generation exception';
+      final result = await _runCaptured(
+        FlutterPrunerCommandRunner(
+          scanCommandFactory: () => ScanCommand(
+            analyzerFactory: (context, only) => _PostAdapterProjectAnalyzer(
+              project: context,
+              only: only,
+              rawFailure: rawFailure,
+            ),
+          ),
+        ),
+        _jsonScanArgs(project, output, version: 3),
+      );
+
+      expect(result.exitCode, 70);
+      expect(result.stdout, isEmpty);
+      expect(
+        result.stderr,
+        contains('Error: Project analysis did not complete.'),
+      );
+      expect(
+        result.stderr,
+        isNot(contains('adapter Dart declaration analyzer')),
+      );
+      expect(result.stderr, isNot(contains(rawFailure)));
+      final report =
+          jsonDecode(output.readAsStringSync()) as Map<String, dynamic>;
+      expect(report['findings'], isEmpty);
+      expect(
+        (report['diagnostics'] as List).cast<Map<String, dynamic>>().single,
+        {
+          'code': 'analysis_failed',
+          'message': 'Project analysis did not complete.',
+          'phase': 'analysis',
+        },
+      );
+    },
+  );
+
+  test(
+    'JSON v2 failure is not persisted as a false empty-success report',
+    () async {
+      final output = File(p.join(project.path, 'failed-scan-v2.json'));
+      const rawFailure = 'raw v2 adapter exception';
+      final result = await _runCaptured(
+        FlutterPrunerCommandRunner(
+          scanCommandFactory: () => ScanCommand(
+            analyzerFactory: (context, only) => _ThrowingAdapterProjectAnalyzer(
+              project: context,
+              only: only,
+              rawFailure: rawFailure,
+            ),
+          ),
+        ),
+        _jsonScanArgs(project, output, version: 2),
+      );
+
+      expect(result.exitCode, 70);
+      expect(result.stdout, isEmpty);
+      expect(
+        result.stderr,
+        contains(
+          'Error: Analysis failed after adapter Dart declaration analyzer '
+          '(dart) started.',
+        ),
+      );
+      expect(
+        result.stderr,
+        contains(
+          'report was not saved: JSON v2 cannot represent failed run reports',
+        ),
+      );
+      expect(result.stderr, contains('Use --json-version 3.'));
+      expect(result.stderr, isNot(contains('Failure report saved:')));
+      expect(result.stderr, isNot(contains(rawFailure)));
+      expect(output.existsSync(), isFalse);
+      expect(
+        File(
+          p.join(output.parent.path, '.${p.basename(output.path)}.commit.json'),
+        ).existsSync(),
+        isFalse,
+      );
+      expect(_transactionArtifacts(output), isEmpty);
+    },
+  );
+
+  test('human failure report never renders an empty scan success', () async {
+    final output = File(p.join(project.path, 'failed-scan.txt'));
+    const rawFailure = 'raw human adapter exception';
+    const hostileId = 'dart\nprivate\u202e';
+    const hostileName = 'Dart\rprivate\u2066 analyzer';
+    final result = await _runCaptured(
+      FlutterPrunerCommandRunner(
+        scanCommandFactory: () => ScanCommand(
+          analyzerFactory: (context, only) => _HostileMetadataProjectAnalyzer(
+            project: context,
+            only: only,
+            rawFailure: rawFailure,
+          ),
+        ),
+      ),
+      [
+        'scan',
+        '--adapter',
+        'dart',
+        '--format',
+        'human',
+        '--output',
+        output.path,
+        project.path,
+      ],
+    );
+
+    expect(result.exitCode, 70);
+    expect(result.stdout, isEmpty);
+    expect(output.existsSync(), isTrue);
+    final report = _stripAnsi(output.readAsStringSync());
+    expect(report, contains('✕ SCAN FAILED'));
+    expect(report, contains('status internalError'));
+    expect(report, contains('exit 70'));
+    expect(report, contains('analysis_failed'));
+    expect(report, contains('Project analysis did not complete.'));
+    expect(report, isNot(contains(rawFailure)));
+    expect(report, isNot(contains(hostileId)));
+    expect(report, isNot(contains(hostileName)));
+    expect(report, isNot(contains('✓')));
+    expect(report, isNot(contains('SCAN COMPLETED')));
+    expect(report, isNot(contains('No unused candidates')));
+    expect(_transactionArtifacts(output), isEmpty);
+  });
+
+  test(
+    'invalid report definitions after output authority save a sanitized failure',
+    () async {
+      final output = File(p.join(project.path, 'failed-definitions.json'));
+      const hostileDefinition = 'hostile\nreport\u202edefinition';
+      final result = await _runCaptured(
+        FlutterPrunerCommandRunner(
+          scanCommandFactory: () => ScanCommand(
+            analyzerFactory: (context, only) =>
+                _InvalidDefinitionProjectAnalyzer(
+                  project: context,
+                  only: only,
+                  hostileDefinition: hostileDefinition,
+                ),
+          ),
+        ),
+        _jsonScanArgs(project, output, version: 3),
+      );
+
+      expect(result.exitCode, 70);
+      expect(result.stdout, isEmpty);
+      expect(
+        result.stderr,
+        contains('Error: Project analysis did not complete.'),
+      );
+      expect(result.stderr, isNot(contains(hostileDefinition)));
+      expect(
+        result.stderr,
+        contains('Failure report saved: ${output.resolveSymbolicLinksSync()}'),
+      );
+      final report =
+          jsonDecode(output.readAsStringSync()) as Map<String, dynamic>;
+      expect(report['findings'], isEmpty);
+      expect(
+        (report['diagnostics'] as List).cast<Map<String, dynamic>>().single,
+        {
+          'code': 'analysis_failed',
+          'message': 'Project analysis did not complete.',
+          'phase': 'analysis',
+        },
+      );
+      expect(output.readAsStringSync(), isNot(contains(hostileDefinition)));
+    },
+  );
+
+  test(
+    'hostile adapter metadata is never emitted or retained in a failed report',
+    () async {
+      final output = File(p.join(project.path, 'failed-hostile-scan.json'));
+      const rawFailure = 'raw hostile adapter exception';
+      const hostileId = 'dart\nprivate\u202e';
+      const hostileName = 'Dart\rprivate\u2066 analyzer';
+      final result = await _runCaptured(
+        FlutterPrunerCommandRunner(
+          scanCommandFactory: () => ScanCommand(
+            analyzerFactory: (context, only) => _HostileMetadataProjectAnalyzer(
+              project: context,
+              only: only,
+              rawFailure: rawFailure,
+            ),
+          ),
+        ),
+        _jsonScanArgs(project, output, version: 3),
+      );
+
+      expect(result.exitCode, 70);
+      expect(result.stdout, isEmpty);
+      expect(
+        result.stderr,
+        contains('Error: Project analysis did not complete.'),
+      );
+      expect(result.stderr, isNot(contains(rawFailure)));
+      expect(result.stderr, isNot(contains(hostileId)));
+      expect(result.stderr, isNot(contains(hostileName)));
+      expect(output.existsSync(), isTrue);
+
+      final report =
+          jsonDecode(output.readAsStringSync()) as Map<String, Object?>;
+      expect(report['findings'], isEmpty);
+      expect(report['diagnostics'], [
+        {
+          'code': 'analysis_failed',
+          'message': 'Project analysis did not complete.',
+          'phase': 'analysis',
+        },
+      ]);
+      expect(output.readAsStringSync(), isNot(contains(hostileId)));
+      expect(output.readAsStringSync(), isNot(contains(hostileName)));
+      expect(output.readAsStringSync(), isNot(contains(rawFailure)));
+    },
+  );
+
+  test(
+    'failed-report formatter is attempted once and keeps analysis failure primary',
+    () async {
+      final output = File(p.join(project.path, 'failed-scan-format.json'));
+      final formatter = _ControlledJsonFormatter(
+        version: 3,
+        writeFailure: StateError('injected failed-report formatter failure'),
+      );
+      final result = await _runCaptured(
+        _runnerWith(
+          formatter: formatter,
+          analyzerFactory: (context, only) => _ThrowingAdapterProjectAnalyzer(
+            project: context,
+            only: only,
+            rawFailure: 'raw adapter exception',
+          ),
+        ),
+        _jsonScanArgs(project, output, version: 3),
+      );
+
+      expect(result.exitCode, 70);
+      expect(result.stdout, isEmpty);
+      expect(
+        result.stderr.indexOf(
+          'Error: Analysis failed after adapter Dart declaration analyzer '
+          '(dart) started.',
+        ),
+        lessThan(result.stderr.indexOf('report was not saved')),
+      );
+      expect(result.stderr, contains('report was not saved'));
+      expect(result.stderr, isNot(contains('Failure report saved:')));
+      expect(result.stderr, isNot(contains('raw adapter exception')));
+      expect(formatter.writeToCalls, 1);
+      expect(File('${output.path}.commit.json').existsSync(), isFalse);
+      expect(_transactionArtifacts(output), isEmpty);
+    },
+  );
+
+  for (final backendCase in <String, ReportObjectBackend Function()>{
+    'object write': () =>
+        _WriteFailingReportObjectBackend(createIoReportObjectBackend()),
+    'object close': () =>
+        _CloseFailingReportObjectBackend(createIoReportObjectBackend()),
+  }.entries) {
+    test(
+      '${backendCase.key} failure keeps domain exit and never claims a saved report',
+      () async {
+        final output = File(
+          p.join(
+            project.path,
+            'failed-scan-${backendCase.key.replaceAll(' ', '-')}.json',
+          ),
+        );
+        final formatter = _ControlledJsonFormatter(
+          version: 3,
+          payload: _completeReport,
+        );
+        final result = await _runCaptured(
+          _runnerWith(
+            formatter: formatter,
+            reportBackend: backendCase.value(),
+            analyzerFactory: (context, only) => _ThrowingAdapterProjectAnalyzer(
+              project: context,
+              only: only,
+              rawFailure: 'raw adapter exception',
+            ),
+          ),
+          _jsonScanArgs(project, output, version: 3),
+        );
+
+        expect(result.exitCode, 70);
+        expect(result.stdout, isEmpty);
+        expect(
+          result.stderr,
+          contains(
+            'Error: Analysis failed after adapter Dart declaration analyzer '
+            '(dart) started.',
+          ),
+        );
+        expect(result.stderr, contains('report was not saved'));
+        expect(result.stderr, isNot(contains('Failure report saved:')));
+        expect(result.stderr, isNot(contains('raw adapter exception')));
+        expect(formatter.writeToCalls, 1);
+        expect(File('${output.path}.commit.json').existsSync(), isFalse);
+        expect(_transactionArtifacts(output), isEmpty);
+      },
+    );
+  }
+
+  test(
+    'post-commit store close failure retains exact saved-report authority',
+    () async {
+      final output = File(p.join(project.path, 'failed-scan-close-store.json'));
+      final formatter = _WriteToOnlyJsonFormatter(version: 3, events: []);
+      final result = await _runCaptured(
+        _runnerWith(
+          formatter: formatter,
+          reportBackend: _StoreCloseFailingReportObjectBackend(
+            createIoReportObjectBackend(),
+          ),
+          analyzerFactory: (context, only) => _ThrowingAdapterProjectAnalyzer(
+            project: context,
+            only: only,
+            rawFailure: 'raw adapter exception',
+          ),
+        ),
+        _jsonScanArgs(project, output, version: 3),
+      );
+
+      expect(result.exitCode, 70);
+      expect(result.stdout, isEmpty);
+      expect(output.existsSync(), isTrue);
+      expect(
+        jsonDecode(output.readAsStringSync()),
+        isA<Map<String, dynamic>>(),
+      );
+      expect(
+        File(
+          p.join(output.parent.path, '.${p.basename(output.path)}.commit.json'),
+        ).existsSync(),
+        isTrue,
+      );
+      expect(
+        result.stderr,
+        contains('Failure report saved: ${output.resolveSymbolicLinksSync()}'),
+      );
+      expect(
+        result.stderr,
+        contains('report output close failed after commit'),
+      );
+      expect(result.stderr, isNot(contains('report was not saved')));
+      expect(formatter.writeToCalls, 1);
+      expect(_transactionArtifacts(output), isEmpty);
+    },
+  );
+
+  test(
+    'successful report commit remains authoritative when store close fails',
+    () async {
+      final output = File(p.join(project.path, 'scan-close-store.json'));
+      final formatter = _WriteToOnlyJsonFormatter(version: 3, events: []);
+      final result = await _runCaptured(
+        _runnerWith(
+          formatter: formatter,
+          reportBackend: _StoreCloseFailingReportObjectBackend(
+            createIoReportObjectBackend(),
+          ),
+        ),
+        _jsonScanArgs(project, output, version: 3),
+      );
+
+      expect(result.exitCode, 70);
+      expect(result.stdout, isEmpty);
+      expect(output.existsSync(), isTrue);
+      expect(
+        File(
+          p.join(output.parent.path, '.${p.basename(output.path)}.commit.json'),
+        ).existsSync(),
+        isTrue,
+      );
+      expect(
+        result.stderr,
+        contains('Report saved: ${output.resolveSymbolicLinksSync()}'),
+      );
+      expect(
+        result.stderr,
+        contains('report output close failed after commit'),
+      );
+      expect(result.stderr, isNot(contains('report was not saved')));
+      expect(formatter.writeToCalls, 1);
+      expect(_transactionArtifacts(output), isEmpty);
+    },
+  );
 
   test(
     'v2 preflight rejects before staging and preserves existing bytes',
@@ -1143,6 +1677,27 @@ target_matrix:
   );
 
   test(
+    'explicit --json-version requires --format json before workspace access',
+    () async {
+      final missingProject = Directory(
+        p.join(project.parent.path, 'missing-json-version-project'),
+      );
+      final result = await _runCaptured(FlutterPrunerCommandRunner(), [
+        'scan',
+        '--json-version',
+        '2',
+        '--project',
+        missingProject.path,
+      ]);
+
+      expect(result.exitCode, 64);
+      expect(result.stdout, isEmpty);
+      expect(result.stderr, contains('--json-version requires --format json.'));
+      expect(result.stderr, contains('Usage: flutter_pruner scan'));
+    },
+  );
+
+  test(
     'formatter writeTo programming error exits 70 after clean recovery',
     () async {
       final output = File(p.join(project.path, 'scan-v2.json'));
@@ -1163,7 +1718,7 @@ target_matrix:
       expect(formatter.preflightCalls, 1);
       expect(formatter.writeToCalls, 1);
       expect(result.stderr, contains('formatter callback failed'));
-      expect(result.stderr, isNot(contains('report was not saved')));
+      expect(result.stderr, contains('report was not saved'));
       expect(result.stdout, isNot(contains('REPORT READY')));
       expect(_transactionArtifacts(output), isEmpty);
     },
@@ -1198,6 +1753,45 @@ target_matrix:
     expect(File('${output.path}.commit.json').existsSync(), isFalse);
   });
 
+  test('report preparation programmer error reaches runner exit 70', () async {
+    final output = File(p.join(project.path, 'scan-state-error.json'));
+
+    final result = await _runCaptured(
+      _runnerWith(
+        formatter: _ControlledJsonFormatter(version: 2),
+        reportBackend: const _AnchorStateErrorReportObjectBackend(),
+      ),
+      _jsonScanArgs(project, output, version: 2),
+    );
+
+    expect(result.exitCode, 70);
+    expect(result.stdout, isEmpty);
+    expect(result.stderr, contains('Internal error:'));
+    expect(result.stderr, contains('injected report preparation state error'));
+    expect(output.existsSync(), isFalse);
+  });
+
+  test(
+    'report preparation backend failure remains operational exit 1',
+    () async {
+      final output = File(p.join(project.path, 'scan-backend-failure.json'));
+
+      final result = await _runCaptured(
+        _runnerWith(
+          formatter: _ControlledJsonFormatter(version: 2),
+          reportBackend: const _AnchorFailureReportObjectBackend(),
+        ),
+        _jsonScanArgs(project, output, version: 2),
+      );
+
+      expect(result.exitCode, 1);
+      expect(result.stdout, isEmpty);
+      expect(result.stderr, contains('report was not saved'));
+      expect(result.stderr, isNot(contains('Internal error:')));
+      expect(output.existsSync(), isFalse);
+    },
+  );
+
   test(
     'formatter error remains primary when object close also fails',
     () async {
@@ -1220,7 +1814,7 @@ target_matrix:
       expect(result.exitCode, 70);
       expect(result.stderr, contains('formatter callback failed'));
       expect(result.stderr, isNot(contains('close failure')));
-      expect(result.stderr, isNot(contains('report was not saved')));
+      expect(result.stderr, contains('report was not saved'));
       expect(result.stdout, isNot(contains('REPORT READY')));
       expect(File('${output.path}.commit.json').existsSync(), isFalse);
     },
@@ -1410,7 +2004,7 @@ target_matrix:
       project.path,
     ]);
 
-    expect(result.exitCode, 64);
+    expect(result.exitCode, 1);
     expect(result.stderr, contains('reports path contains a symlink'));
     expect(outside.listSync(), isEmpty);
     expect(result.stdout, isNot(contains('REPORT READY')));
@@ -1497,6 +2091,11 @@ target_matrix:
       expect(progress, contains('Scanning Duplicate file detector'));
       expect(progress, contains('\x1B[3m'));
       expect(progress, contains('◆ PROJECT'));
+      expect(
+        _stripAnsi(progress),
+        '◆ PROJECT  ${project.path}\n'
+        '• Scanning Duplicate file detector…\n',
+      );
 
       final terminal = result.stdout as String;
       final summaryIndex = terminal.indexOf('FLUTTER PRUNER');
@@ -1725,10 +2324,12 @@ Future<void> _waitForBarrierFile(
 FlutterPrunerCommandRunner _runnerWith({
   required JsonFormatter formatter,
   ReportObjectBackend? reportBackend,
+  ScanProjectAnalyzerFactory? analyzerFactory,
 }) => FlutterPrunerCommandRunner(
   scanCommandFactory: () => ScanCommand(
     reportBackend: reportBackend,
     jsonFormatterFactory: (_) => formatter,
+    analyzerFactory: analyzerFactory,
   ),
 );
 
@@ -1821,6 +2422,119 @@ final class _WriteToOnlyJsonFormatter extends JsonFormatter {
   }
 }
 
+final class _ThrowingAdapterProjectAnalyzer extends ProjectAnalyzer {
+  _ThrowingAdapterProjectAnalyzer({
+    required super.project,
+    required super.only,
+    required this.rawFailure,
+  });
+
+  final String rawFailure;
+
+  @override
+  Future<AnalysisSnapshot> analyze({
+    void Function(AnalyzerAdapter adapter)? onAdapter,
+    AdapterFinishedCallback? onAdapterFinished,
+  }) async {
+    final adapter = adapters.single;
+    onAdapter?.call(adapter);
+    onAdapterFinished?.call(adapter, AdapterRunStatus.failed);
+    throw StateError(rawFailure);
+  }
+}
+
+final class _PostAdapterProjectAnalyzer extends ProjectAnalyzer {
+  _PostAdapterProjectAnalyzer({
+    required super.project,
+    required super.only,
+    required this.rawFailure,
+  });
+
+  final String rawFailure;
+
+  @override
+  Future<AnalysisSnapshot> analyze({
+    void Function(AnalyzerAdapter adapter)? onAdapter,
+    AdapterFinishedCallback? onAdapterFinished,
+  }) async {
+    await super.analyze(
+      onAdapter: onAdapter,
+      onAdapterFinished: onAdapterFinished,
+    );
+    throw StateError(rawFailure);
+  }
+}
+
+final class _CancellationProjectAnalyzer extends ProjectAnalyzer {
+  _CancellationProjectAnalyzer({
+    required super.project,
+    required super.only,
+    required this.error,
+  });
+
+  final Exception error;
+
+  @override
+  Future<AnalysisSnapshot> analyze({
+    void Function(AnalyzerAdapter adapter)? onAdapter,
+    AdapterFinishedCallback? onAdapterFinished,
+  }) async {
+    throw error;
+  }
+}
+
+final class _InvalidDefinitionProjectAnalyzer extends ProjectAnalyzer {
+  _InvalidDefinitionProjectAnalyzer({
+    required super.project,
+    required super.only,
+    required this.hostileDefinition,
+  });
+
+  final String hostileDefinition;
+
+  @override
+  List<AdapterReportDefinition> get adapterReportDefinitions => [
+    AdapterReportDefinition(
+      adapterId: hostileDefinition,
+      displayName: hostileDefinition,
+    ),
+  ];
+}
+
+final class _HostileMetadataProjectAnalyzer extends ProjectAnalyzer {
+  _HostileMetadataProjectAnalyzer({
+    required super.project,
+    required super.only,
+    required this.rawFailure,
+  });
+
+  final String rawFailure;
+
+  @override
+  Future<AnalysisSnapshot> analyze({
+    void Function(AnalyzerAdapter adapter)? onAdapter,
+    AdapterFinishedCallback? onAdapterFinished,
+  }) async {
+    const adapter = _HostileMetadataAnalyzerAdapter();
+    onAdapter?.call(adapter);
+    onAdapterFinished?.call(adapter, AdapterRunStatus.failed);
+    throw StateError(rawFailure);
+  }
+}
+
+final class _HostileMetadataAnalyzerAdapter extends AnalyzerAdapter {
+  const _HostileMetadataAnalyzerAdapter();
+
+  @override
+  String get id => 'dart\nprivate\u202e';
+
+  @override
+  String get name => 'Dart\rprivate\u2066 analyzer';
+
+  @override
+  Future<void> analyze(ProjectContext project, GraphBuilder graph) async {}
+}
+
 final class _ControlledJsonFormatter extends JsonFormatter {
   _ControlledJsonFormatter({
     required super.version,
@@ -1871,6 +2585,66 @@ final class _CloseFailingReportObjectBackend
     extends _WrappedReportObjectBackend {
   const _CloseFailingReportObjectBackend(super.delegate)
     : super(mode: _ObjectFailureMode.close);
+}
+
+final class _StoreCloseFailingReportObjectBackend
+    implements ReportObjectBackend {
+  const _StoreCloseFailingReportObjectBackend(this.delegate);
+
+  final ReportObjectBackend delegate;
+
+  @override
+  Future<AnchoredReportDirectory> anchor(Directory directory) async =>
+      _StoreCloseFailingAnchoredReportDirectory(
+        await delegate.anchor(directory),
+      );
+}
+
+final class _StoreCloseFailingAnchoredReportDirectory
+    implements AnchoredReportDirectory {
+  const _StoreCloseFailingAnchoredReportDirectory(this.delegate);
+
+  final AnchoredReportDirectory delegate;
+
+  @override
+  String get canonicalPath => delegate.canonicalPath;
+
+  @override
+  Future<void> close() async {
+    await delegate.close();
+    throw StateError('injected report store close failure');
+  }
+
+  @override
+  Future<ExclusiveReportObject> createExclusive(String leaf) =>
+      delegate.createExclusive(leaf);
+
+  @override
+  Future<ExistingReportObject> openExisting(String leaf) =>
+      delegate.openExisting(leaf);
+
+  @override
+  Future<void> verifyReachable() => delegate.verifyReachable();
+}
+
+final class _AnchorStateErrorReportObjectBackend
+    implements ReportObjectBackend {
+  const _AnchorStateErrorReportObjectBackend();
+
+  @override
+  Future<AnchoredReportDirectory> anchor(Directory directory) async =>
+      throw StateError('injected report preparation state error');
+}
+
+final class _AnchorFailureReportObjectBackend implements ReportObjectBackend {
+  const _AnchorFailureReportObjectBackend();
+
+  @override
+  Future<AnchoredReportDirectory> anchor(Directory directory) async =>
+      throw const ReportObjectBackendException(
+        category: ReportObjectBackendFailure.operationFailed,
+        operation: 'injected-anchor',
+      );
 }
 
 enum _ObjectFailureMode { write, close }
@@ -2010,3 +2784,6 @@ class _RecordingStdout implements Stdout {
       ..write(lineTerminator);
   }
 }
+
+String _stripAnsi(String value) =>
+    value.replaceAll(RegExp(r'\x1B\[[0-9;]*m'), '');

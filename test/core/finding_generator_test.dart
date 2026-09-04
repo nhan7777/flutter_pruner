@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter_pruner/src/adapters/adapter_report_definition.dart';
+import 'package:flutter_pruner/src/apply/removal_planner.dart';
 import 'package:flutter_pruner/src/core/confidence/classification_reason.dart';
 import 'package:flutter_pruner/src/core/confidence/confidence.dart';
 import 'package:flutter_pruner/src/core/confidence/finding_generator.dart';
@@ -671,45 +672,55 @@ void main() {
       );
     });
 
-    test('fails closed when the analysis graph contains a dangling edge', () {
-      const nodeId = 'dart:app/lib/src/unused.dart#unusedFunction';
-      final graph = ReachabilityGraph()
-        ..addNode(
-          GraphNode(
-            id: nodeId,
-            kind: NodeKind.declaration,
-            origin: Uri.file('/project/lib/src/unused.dart'),
-          ),
-        )
-        ..addEdge(
-          const GraphEdge(
-            from: 'dart:app/lib/src/missing.dart#caller',
-            to: nodeId,
-            kind: EdgeKind.references,
-            evidence: Evidence(
-              kind: EvidenceKind.semanticReference,
-              producer: 'dart',
-              description: 'reference from a missing graph node',
-              exact: true,
+    test(
+      'dangling graph facts fail closed before planning actionable units',
+      () {
+        const nodeId = 'dart:app/lib/src/unused.dart#unusedFunction';
+        final graph = ReachabilityGraph()
+          ..addNode(
+            GraphNode(
+              id: nodeId,
+              kind: NodeKind.declaration,
+              origin: Uri.file('/project/lib/src/unused.dart'),
             ),
-          ),
+          )
+          ..addEdge(
+            const GraphEdge(
+              from: 'dart:app/lib/src/missing.dart#caller',
+              to: nodeId,
+              kind: EdgeKind.references,
+              evidence: Evidence(
+                kind: EvidenceKind.semanticReference,
+                producer: 'dart',
+                description: 'reference from a missing graph node',
+                exact: true,
+              ),
+            ),
+          );
+
+        final project = _mockProject();
+        final findings = const FindingGenerator().generate(
+          graph: graph,
+          project: project,
+          graphIntegrity: _integrity(graph),
+        );
+        final finding = findings.single;
+        final plan = const RemovalPlanner().build(
+          findings: findings,
+          graph: graph,
+          project: project,
         );
 
-      final finding = const FindingGenerator()
-          .generate(
-            graph: graph,
-            project: _mockProject(),
-            graphIntegrity: _integrity(graph),
-          )
-          .single;
-
-      expect(finding.confidence, Confidence.review);
-      expect(finding.predicates.noDynamicBlockers, isFalse);
-      expect(
-        finding.classificationReasons,
-        contains(ClassificationReason.incompleteGraphIntegrity),
-      );
-    });
+        expect(finding.confidence, Confidence.review);
+        expect(finding.predicates.noDynamicBlockers, isFalse);
+        expect(
+          finding.classificationReasons,
+          contains(ClassificationReason.incompleteGraphIntegrity),
+        );
+        expect(plan.units, isEmpty);
+        expect(plan.blocked, isEmpty);
+      },
+    );
 
     test('an unrelated dangling target downgrades every candidate', () {
       const sourceId = 'dart:app/lib/main.dart#main';

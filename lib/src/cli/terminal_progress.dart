@@ -1,14 +1,19 @@
 import 'dart:async';
 
+import 'cli_signal_coordinator.dart';
+import 'formatters/quarantine_formatter.dart';
+
 /// Formats the package-internal analysis warning as a prominent terminal rail.
-String packageInternalWarning(String packageName) =>
-    '$_bold$_yellow⚠  WARNING · PACKAGE INTERNAL$_reset '
-    '$_bold$_magenta($packageName)$_reset\n'
-    '$_yellow┃$_reset $_bold'
-    'Only references inside this package are analysed.$_reset\n'
-    '$_yellow┃ External applications and packages may still use public '
-    'symbols,$_reset\n'
-    '$_yellow┃ deep imports, and package assets.$_reset';
+String packageInternalWarning(String packageName) {
+  final displayPackageName = QuarantineFormatter.terminalSafe(packageName);
+  return '$_bold$_yellow⚠  WARNING · PACKAGE INTERNAL$_reset '
+      '$_bold$_magenta($displayPackageName)$_reset\n'
+      '$_yellow┃$_reset $_bold'
+      'Only references inside this package are analysed.$_reset\n'
+      '$_yellow┃ External applications and packages may still use public '
+      'symbols,$_reset\n'
+      '$_yellow┃ deep imports, and package assets.$_reset';
+}
 
 /// Renders styled scan progress without polluting redirected output.
 class TerminalProgress {
@@ -19,90 +24,115 @@ class TerminalProgress {
   TerminalProgress({
     required StringSink sink,
     required bool animated,
+    CliSignalCoordinator? signalCoordinator,
     void Function() Function(void Function())? startTicker,
   }) : _sink = sink,
        _animated = animated,
+       _signalCoordinator = signalCoordinator,
        _startTicker = startTicker ?? _startTimer;
 
   final StringSink _sink;
   final bool _animated;
+  final CliSignalCoordinator? _signalCoordinator;
   final void Function() Function(void Function()) _startTicker;
 
-  String? _label;
-  String? _activity;
+  _ProgressActivity? _current;
   void Function()? _cancelTicker;
   var _frameIndex = 0;
 
   /// Writes the selected project as a compact colored context line.
   void writeProject(String path) {
-    _sink.writeln('$_bold$_magenta◆ PROJECT$_reset  $_cyan$path$_reset');
+    final displayPath = QuarantineFormatter.terminalSafe(path);
+    _sink.writeln('$_bold$_magenta◆ PROJECT$_reset  $_cyan$displayPath$_reset');
   }
 
   /// Starts one activity, completing the previous activity first.
   void start(String label, {String activity = 'Scanning'}) {
-    _completeCurrent();
-    _label = label;
-    _activity = activity;
+    _finishCurrent(succeeded: true);
+    final current = _ProgressActivity(
+      label: QuarantineFormatter.terminalSafe(label),
+      activity: QuarantineFormatter.terminalSafe(activity),
+    );
+    _current = current;
     _frameIndex = 0;
     if (!_animated) {
       _sink.writeln(
         '$_cyan•$_reset $_italic'
         '$_dim'
-        '$activity $label...$_reset',
+        '${current.activity} ${current.label}…$_reset',
       );
       return;
     }
-    _drawFrame();
-    _cancelTicker = _startTicker(_advanceFrame);
+    _drawFrame(current);
+    _signalCoordinator?.setActiveLineClearer(_clearActiveAnimatedLine);
+    _cancelTicker = _startTicker(() => _advanceFrame(current));
   }
 
-  /// Stops animation, restores a complete terminal line, and adds separation.
+  /// Stops the active activity and restores a complete terminal line.
   void finish({required bool succeeded}) {
-    if (_label != null) {
-      if (succeeded) {
-        _completeCurrent();
-      } else {
-        _cancelTicker?.call();
-        if (_animated) _sink.write('\r$_clearLine');
-        _sink.writeln(
-          '$_yellow!$_reset $_italic$_dim${_label!} stopped$_reset',
-        );
-        _label = null;
-        _activity = null;
-        _cancelTicker = null;
-      }
+    _finishCurrent(succeeded: succeeded);
+  }
+
+  void _advanceFrame(_ProgressActivity activity) {
+    if (!identical(_current, activity) ||
+        activity.state != _ProgressActivityState.active) {
+      return;
     }
-    _sink.writeln();
-  }
-
-  void _advanceFrame() {
-    if (_label == null) return;
     _frameIndex = (_frameIndex + 1) % _frames.length;
-    _drawFrame();
+    _drawFrame(activity);
   }
 
-  void _drawFrame() {
+  void _drawFrame(_ProgressActivity activity) {
     final color = _spinnerColors[_frameIndex % _spinnerColors.length];
     _sink.write(
       '\r$_clearLine$color${_frames[_frameIndex]}$_reset '
       '$_italic'
       '$_cyan'
-      '${_activity!} ${_label!}...$_reset',
+      '${activity.activity} ${activity.label}…$_reset',
     );
   }
 
-  void _completeCurrent() {
-    final label = _label;
-    if (label == null) return;
-    _cancelTicker?.call();
-    if (_animated) {
-      _sink
-        ..write('\r$_clearLine')
-        ..writeln('$_green✓$_reset $_italic$_dim$label$_reset');
+  void _finishCurrent({required bool succeeded}) {
+    final current = _current;
+    if (current == null || current.state != _ProgressActivityState.active) {
+      return;
     }
-    _label = null;
-    _activity = null;
+    current.state = _ProgressActivityState.finished;
+    _current = null;
+    final cancelTicker = _cancelTicker;
     _cancelTicker = null;
+    cancelTicker?.call();
+    if (_animated) {
+      _signalCoordinator?.setActiveLineClearer(null);
+      _sink.write('\r$_clearLine');
+      if (succeeded) {
+        _sink.writeln('$_green✓$_reset $_italic$_dim${current.label}$_reset');
+      } else {
+        _sink.writeln(
+          '$_yellow!$_reset $_italic$_dim${current.label} stopped$_reset',
+        );
+      }
+    } else if (!succeeded) {
+      _sink.writeln(
+        '$_yellow!$_reset $_italic$_dim${current.label} stopped$_reset',
+      );
+    }
+  }
+
+  void _clearActiveAnimatedLine() {
+    final current = _current;
+    if (!_animated ||
+        current == null ||
+        current.state != _ProgressActivityState.active) {
+      return;
+    }
+    current.state = _ProgressActivityState.finished;
+    _current = null;
+    final cancelTicker = _cancelTicker;
+    _cancelTicker = null;
+    cancelTicker?.call();
+    _signalCoordinator?.setActiveLineClearer(null);
+    _sink.write('\r$_clearLine\n');
   }
 
   static void Function() _startTimer(void Function() tick) {
@@ -120,6 +150,16 @@ class TerminalProgress {
   static const _italic = '\x1B[3m';
   static const _green = '\x1B[32m';
   static const _cyan = '\x1B[36m';
+}
+
+enum _ProgressActivityState { active, finished }
+
+final class _ProgressActivity {
+  _ProgressActivity({required this.label, required this.activity});
+
+  final String label;
+  final String activity;
+  var state = _ProgressActivityState.active;
 }
 
 const _reset = '\x1B[0m';

@@ -328,6 +328,7 @@ class JsonFormatter implements ReportFormatter {
             report.applyStatistics!,
             report.applyFindingOutcomes,
             report.applySelection,
+            report.applyInitialPlan,
             report.projectRoot,
             adapterDefinitions,
           ),
@@ -870,6 +871,7 @@ class JsonFormatter implements ReportFormatter {
     ApplyStatistics statistics,
     List<ApplyFindingOutcome> outcomes,
     ApplySelectionReport? selection,
+    ApplyInitialPlanReport? initialPlan,
     String projectRoot,
     Map<String, AdapterReportDefinition> adapterDefinitions,
   ) => {
@@ -879,7 +881,13 @@ class JsonFormatter implements ReportFormatter {
         'requestedFindingIds': selection.requestedFindingIds,
         'plannedFindingIds': selection.plannedFindingIds,
         'planFingerprint': selection.planFingerprint,
+        if (selection.actualPreviewFingerprint != null)
+          'actualPreviewFingerprint': selection.actualPreviewFingerprint,
+        if (selection.expectedPreviewFingerprint != null)
+          'expectedPreviewFingerprint': selection.expectedPreviewFingerprint,
+        'previewComparison': selection.previewComparison.name,
       },
+    if (initialPlan != null) 'initialPlan': _serializeInitialPlan(initialPlan),
     'rounds': statistics.rounds,
     'findings': {
       'committed': statistics.findingsCommitted,
@@ -912,6 +920,66 @@ class JsonFormatter implements ReportFormatter {
           ),
         )
         .toList(),
+  };
+
+  Map<String, Object?> _serializeInitialPlan(ApplyInitialPlanReport plan) => {
+    'canonicalVersion': plan.canonicalVersion,
+    'scope': switch (plan.scope) {
+      ApplyInitialPlanScope.initialRoundOnly => 'initial_round_only',
+      ApplyInitialPlanScope.completeExactSelection =>
+        'complete_exact_selection',
+    },
+    'planFingerprint': plan.planFingerprint,
+    'units': plan.units
+        .map(
+          (unit) => {
+            'order': unit.order,
+            'id': unit.id,
+            'findingIds': unit.findingIds,
+            'dependencyUnitIds': unit.dependencyUnitIds,
+            'actions': unit.actions
+                .map(
+                  (action) => {
+                    'order': action.order,
+                    'logicalFindingId': action.logicalFindingId,
+                    'journalFindingId': action.journalFindingId,
+                    'operation': action.operation.name,
+                    'projectRelativePath': action.projectRelativePath,
+                    if (action.label != null) 'label': action.label,
+                    'countsTowardSummary': action.countsTowardSummary,
+                    if (action.cleanupTargetPath != null)
+                      'cleanupTargetPath': action.cleanupTargetPath,
+                  },
+                )
+                .toList(),
+          },
+        )
+        .toList(),
+    'blocked': plan.blocked
+        .map(
+          (block) => {
+            'findingId': block.findingId,
+            'reason': block.reason.name,
+            'blockedBy': block.blockedBy,
+          },
+        )
+        .toList(),
+    if (plan.preview != null)
+      'preview': {
+        'version': plan.preview!.version,
+        'fingerprint': plan.preview!.fingerprint,
+        'sources': plan.preview!.sources
+            .map(
+              (source) => {
+                'projectRelativePath': source.projectRelativePath,
+                'canonicalPath': source.canonicalPath,
+                'sha256': source.sha256,
+                'sizeBytes': source.sizeBytes,
+                'posixMode': source.posixMode,
+              },
+            )
+            .toList(),
+      },
   };
 
   Map<String, Object?> _serializeApplyFindingOutcome(

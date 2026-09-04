@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_pruner/src/apply/import_cleanup_runner.dart';
@@ -172,6 +174,85 @@ Future<void> main(List<String> arguments) async {
     );
   });
 
+  test(
+    'signal cancellation stops cleanup root and descendant before unwinding',
+    () async {
+      final fixture = _startImportSignalFixture(tempDir);
+      try {
+        final processTree = await _waitForSignalTreeOrEarlyExit(
+          ready: fixture.ready,
+          childPidFile: fixture.childPid,
+          cleanup: fixture.cleanup,
+          timeout: const Duration(seconds: 45),
+        );
+
+        fixture.cancellation.requestCancellation(ProcessSignal.sigint);
+
+        await expectLater(
+          fixture.cleanup,
+          throwsA(
+            isA<ProcessCancellationConfirmedException>()
+                .having(
+                  (error) => error.originalSignal,
+                  'originalSignal',
+                  ProcessSignal.sigint,
+                )
+                .having(
+                  (error) => error.rootPid,
+                  'rootPid',
+                  processTree.rootPid,
+                ),
+          ),
+        );
+        await Future<void>.delayed(const Duration(seconds: 3));
+        expect(fixture.rootSurvived.existsSync(), isFalse);
+        expect(fixture.childSurvived.existsSync(), isFalse);
+      } finally {
+        await _settleImportSignalFixture(fixture);
+      }
+    },
+    skip: !(Platform.isLinux || Platform.isMacOS),
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
+
+  test(
+    'readiness failure cancels and settles cleanup root and descendant',
+    () async {
+      final fixture = _startImportSignalFixture(tempDir);
+      ({int rootPid, int childPid})? observedTree;
+      try {
+        await expectLater(
+          _waitForSignalTreeOrEarlyExit(
+            ready: fixture.ready,
+            childPidFile: fixture.childPid,
+            cleanup: fixture.cleanup,
+            timeout: const Duration(seconds: 45),
+            readBarrier: (processTree) {
+              observedTree = processTree;
+              throw StateError('forced readiness failure');
+            },
+          ),
+          throwsA(
+            isA<StateError>().having(
+              (error) => error.message,
+              'message',
+              'forced readiness failure',
+            ),
+          ),
+        );
+      } finally {
+        await _settleImportSignalFixture(fixture);
+      }
+
+      expect(observedTree, isNotNull);
+      await Future<void>.delayed(const Duration(seconds: 3));
+      expect(fixture.rootSurvived.existsSync(), isFalse);
+      expect(fixture.childSurvived.existsSync(), isFalse);
+    },
+    skip: !(Platform.isLinux || Platform.isMacOS),
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
+
   test('handles empty file list', () async {
     final runner = ImportCleanupRunner(projectRoot: tempDir.path);
     final result = await runner.run([]);
@@ -238,6 +319,198 @@ import 'src/empty.dart'
     expect(result.success, isFalse);
     expect(importer.readAsStringSync(), source);
   });
+}
+
+_ImportSignalFixture _startImportSignalFixture(Directory tempDir) {
+  final childScript = File(p.join(tempDir.path, 'signal_child.dart'));
+  final rootScript = File(p.join(tempDir.path, 'signal_root.dart'));
+  final childPid = File(p.join(tempDir.path, 'signal_child.pid'));
+  final ready = File(p.join(tempDir.path, 'signal_ready'));
+  final childSurvived = File(p.join(tempDir.path, 'child_survived'));
+  final rootSurvived = File(p.join(tempDir.path, 'root_survived'));
+  childScript.writeAsStringSync(r'''
+import 'dart:io';
+
+Future<void> main(List<String> arguments) async {
+  File(arguments[0]).writeAsStringSync('$pid');
+  await Future<void>.delayed(const Duration(seconds: 3));
+  File(arguments[1]).writeAsStringSync('survived');
+  await Future<void>.delayed(const Duration(minutes: 1));
+}
+''');
+  rootScript.writeAsStringSync(r'''
+import 'dart:convert';
+import 'dart:io';
+
+Future<void> main(List<String> arguments) async {
+  await Process.start(
+    Platform.resolvedExecutable,
+    [arguments[0], arguments[1], arguments[2]],
+  );
+  final childPidFile = File(arguments[1]);
+  int? childPid;
+  while (childPid == null) {
+    if (childPidFile.existsSync()) {
+      childPid = int.tryParse(childPidFile.readAsStringSync().trim());
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 10));
+  }
+  File(arguments[3]).writeAsStringSync(jsonEncode({
+    'rootPid': pid,
+    'childPid': childPid,
+  }));
+  await Future<void>.delayed(const Duration(seconds: 3));
+  File(arguments[4]).writeAsStringSync('survived');
+  await Future<void>.delayed(const Duration(minutes: 1));
+}
+''');
+  final cancellation = ManagedProcessCancellationController();
+  final cleanup = ImportCleanupRunner(
+    projectRoot: tempDir.path,
+    dartExecutable: Platform.resolvedExecutable,
+    dartArgumentPrefix: [
+      rootScript.path,
+      childScript.path,
+      childPid.path,
+      childSurvived.path,
+      ready.path,
+      rootSurvived.path,
+    ],
+    processRunner: ManagedProcessRunner(cancellationController: cancellation),
+  ).run([p.join(tempDir.path, 'lib', 'main.dart')]);
+  return _ImportSignalFixture(
+    cancellation: cancellation,
+    cleanup: cleanup,
+    ready: ready,
+    childPid: childPid,
+    rootSurvived: rootSurvived,
+    childSurvived: childSurvived,
+  );
+}
+
+Future<void> _settleImportSignalFixture(_ImportSignalFixture fixture) async {
+  if (!fixture.cancellation.isRequested) {
+    fixture.cancellation.requestCancellation(ProcessSignal.sigterm);
+  }
+  try {
+    await fixture.cleanup;
+  } on ProcessCancellationBeforeLaunchException {
+    // Expected if fixture setup fails before Process.start completes.
+  } on ProcessCancellationConfirmedException {
+    // Expected after either the asserted SIGINT or cleanup SIGTERM.
+  }
+}
+
+typedef _SignalTreeReadBarrier =
+    void Function(({int rootPid, int childPid}) processTree);
+
+Future<({int rootPid, int childPid})> _waitForSignalTreeOrEarlyExit({
+  required File ready,
+  required File childPidFile,
+  required Future<CleanupResult> cleanup,
+  required Duration timeout,
+  _SignalTreeReadBarrier? readBarrier,
+}) {
+  return Future.any<({int rootPid, int childPid})>([
+    _readSignalTreeEvidence(
+      ready: ready,
+      childPidFile: childPidFile,
+      timeout: timeout,
+      readBarrier: readBarrier,
+    ),
+    cleanup.then<({int rootPid, int childPid})>(
+      (result) {
+        throw StateError(
+          'Import cleanup exited before the managed process tree was ready: '
+          'success=${result.success}, exitCode=${result.exitCode}, '
+          'stderr=${result.stderr}',
+        );
+      },
+      onError: (Object error, StackTrace stackTrace) {
+        Error.throwWithStackTrace(
+          StateError(
+            'Import cleanup failed before the managed process tree was ready: '
+            '$error',
+          ),
+          stackTrace,
+        );
+      },
+    ),
+  ]);
+}
+
+Future<({int rootPid, int childPid})> _readSignalTreeEvidence({
+  required File ready,
+  required File childPidFile,
+  required Duration timeout,
+  _SignalTreeReadBarrier? readBarrier,
+}) async {
+  final deadline = DateTime.now().add(timeout);
+  Object? lastParseFailure;
+
+  while (DateTime.now().isBefore(deadline)) {
+    if (ready.existsSync() && childPidFile.existsSync()) {
+      ({int rootPid, int childPid})? processTree;
+      try {
+        final decoded = jsonDecode(ready.readAsStringSync());
+        final childPid = int.parse(childPidFile.readAsStringSync().trim());
+        if (decoded is Map &&
+            decoded['rootPid'] is int &&
+            decoded['childPid'] == childPid) {
+          processTree = (
+            rootPid: decoded['rootPid'] as int,
+            childPid: childPid,
+          );
+        } else {
+          lastParseFailure = StateError(
+            'ready evidence did not match descendant PID: $decoded, '
+            'childPid=$childPid',
+          );
+        }
+      } on Object catch (error) {
+        lastParseFailure = error;
+      }
+      if (processTree != null) {
+        readBarrier?.call(processTree);
+        return processTree;
+      }
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 10));
+  }
+
+  throw TimeoutException(
+    'Fixture did not publish parseable managed process-tree evidence within '
+    '${timeout.inSeconds}s. ready=${_describeFixtureFile(ready)}, '
+    'childPid=${_describeFixtureFile(childPidFile)}, '
+    'lastParseFailure=$lastParseFailure',
+  );
+}
+
+final class _ImportSignalFixture {
+  const _ImportSignalFixture({
+    required this.cancellation,
+    required this.cleanup,
+    required this.ready,
+    required this.childPid,
+    required this.rootSurvived,
+    required this.childSurvived,
+  });
+
+  final ManagedProcessCancellationController cancellation;
+  final Future<CleanupResult> cleanup;
+  final File ready;
+  final File childPid;
+  final File rootSurvived;
+  final File childSurvived;
+}
+
+String _describeFixtureFile(File file) {
+  if (!file.existsSync()) return '${file.path} (missing)';
+  try {
+    return '${file.path} (${file.readAsStringSync()})';
+  } on FileSystemException catch (error) {
+    return '${file.path} (unreadable: $error)';
+  }
 }
 
 class _UnconfirmedTerminationRunner implements ProcessExecutionRunner {

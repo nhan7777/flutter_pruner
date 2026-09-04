@@ -1,7 +1,12 @@
 // ignore_for_file: public_member_api_docs
 
+import 'package:path/path.dart' as p;
+
 import '../adapters/adapter_report_definition.dart';
+import '../apply/apply_preview_evidence.dart';
+import '../apply/finding_action_builder.dart';
 import '../apply/finding_selection.dart';
+import '../apply/removal_planner.dart';
 import '../core/confidence/confidence.dart';
 import '../core/confidence/finding.dart';
 import '../core/graph/evidence.dart';
@@ -550,6 +555,543 @@ class ApplyStatistics {
   }
 }
 
+/// How completely the initial physical plan represents the requested apply.
+enum ApplyInitialPlanScope { initialRoundOnly, completeExactSelection }
+
+/// Comparison between a captured preview and an optional expected token.
+enum ApplyPreviewComparison { notRequested, matched, mismatched }
+
+/// Immutable scalar projection of one planned physical operation.
+final class ApplyPlanActionReport {
+  /// Creates and validates one physical action projection.
+  ApplyPlanActionReport({
+    required this.order,
+    required this.logicalFindingId,
+    required this.journalFindingId,
+    required this.operation,
+    required String projectRelativePath,
+    this.label,
+    required this.countsTowardSummary,
+    String? cleanupTargetPath,
+  }) : projectRelativePath = ApplySourceSnapshot.normalizeProjectRelativePath(
+         projectRelativePath,
+       ),
+       cleanupTargetPath = cleanupTargetPath == null
+           ? null
+           : ApplySourceSnapshot.normalizeProjectRelativePath(
+               cleanupTargetPath,
+             ) {
+    if (order < 0) {
+      throw StateError('Physical action order cannot be negative.');
+    }
+    if (logicalFindingId.isEmpty || journalFindingId.isEmpty) {
+      throw StateError('Physical action finding identities cannot be empty.');
+    }
+    if (label != null && label!.isEmpty) {
+      throw StateError('Physical action labels cannot be empty.');
+    }
+    if (operation == FindingActionOperation.cleanupImports &&
+        this.cleanupTargetPath == null) {
+      throw StateError('Import cleanup requires its project-relative target.');
+    }
+    if (operation != FindingActionOperation.cleanupImports &&
+        this.cleanupTargetPath != null) {
+      throw StateError('Only import cleanup can have a cleanup target.');
+    }
+  }
+
+  /// Zero-based execution order within the owning atomic unit.
+  final int order;
+
+  /// Logical finding authorizing the physical operation.
+  final String logicalFindingId;
+
+  /// Effective unique identity written to transaction evidence.
+  final String journalFindingId;
+
+  /// Executor operation applied to [projectRelativePath].
+  final FindingActionOperation operation;
+
+  /// Canonical project-relative source path snapshotted for this action.
+  final String projectRelativePath;
+
+  /// Optional operation-specific human label.
+  final String? label;
+
+  /// Whether this action increments logical finding summary counters.
+  final bool countsTowardSummary;
+
+  /// Project-relative library removed from an importer, when applicable.
+  final String? cleanupTargetPath;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ApplyPlanActionReport &&
+          order == other.order &&
+          logicalFindingId == other.logicalFindingId &&
+          journalFindingId == other.journalFindingId &&
+          operation == other.operation &&
+          projectRelativePath == other.projectRelativePath &&
+          label == other.label &&
+          countsTowardSummary == other.countsTowardSummary &&
+          cleanupTargetPath == other.cleanupTargetPath;
+
+  @override
+  int get hashCode => Object.hash(
+    order,
+    logicalFindingId,
+    journalFindingId,
+    operation,
+    projectRelativePath,
+    label,
+    countsTowardSummary,
+    cleanupTargetPath,
+  );
+}
+
+/// Immutable scalar projection of one planner atomic unit.
+final class ApplyPlanUnitReport {
+  /// Creates and validates one ordered unit projection.
+  ApplyPlanUnitReport({
+    required this.order,
+    required this.id,
+    required List<String> findingIds,
+    required List<String> dependencyUnitIds,
+    required List<ApplyPlanActionReport> actions,
+  }) : findingIds = List<String>.unmodifiable(findingIds),
+       dependencyUnitIds = List<String>.unmodifiable(dependencyUnitIds),
+       actions = List<ApplyPlanActionReport>.unmodifiable(actions) {
+    if (order < 0 || id.isEmpty) {
+      throw StateError('Apply plan unit identity and order must be valid.');
+    }
+    _validateNonEmptyUniqueValues(this.findingIds, 'unit finding IDs');
+    _validateUniqueValues(this.dependencyUnitIds, 'unit dependency IDs');
+    if (this.actions.isEmpty) {
+      throw StateError('Apply plan units must contain physical actions.');
+    }
+    final projectedFindingIds = <String>{};
+    for (var index = 0; index < this.actions.length; index++) {
+      final action = this.actions[index];
+      if (action.order != index) {
+        throw StateError('Physical action order must be contiguous.');
+      }
+      if (!this.findingIds.contains(action.logicalFindingId)) {
+        throw StateError(
+          'Physical action does not belong to its unit finding IDs.',
+        );
+      }
+      projectedFindingIds.add(action.logicalFindingId);
+    }
+    if (projectedFindingIds.length != this.findingIds.length) {
+      throw StateError('Every unit finding must project physical work.');
+    }
+  }
+
+  /// Zero-based consumer-first unit order.
+  final int order;
+
+  /// Stable planner atomic-unit identity.
+  final String id;
+
+  /// Logical finding IDs in authoritative planner order.
+  final List<String> findingIds;
+
+  /// Dependency unit IDs in authoritative planner order.
+  final List<String> dependencyUnitIds;
+
+  /// Physical operations in exact execution order.
+  final List<ApplyPlanActionReport> actions;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ApplyPlanUnitReport &&
+          order == other.order &&
+          id == other.id &&
+          _listEquals(findingIds, other.findingIds) &&
+          _listEquals(dependencyUnitIds, other.dependencyUnitIds) &&
+          _listEquals(actions, other.actions);
+
+  @override
+  int get hashCode => Object.hash(
+    order,
+    id,
+    Object.hashAll(findingIds),
+    Object.hashAll(dependencyUnitIds),
+    Object.hashAll(actions),
+  );
+}
+
+/// Immutable scalar projection of one planner-owned block.
+final class ApplyPlanBlockReport {
+  /// Creates a blocked-finding projection.
+  ApplyPlanBlockReport({
+    required this.findingId,
+    required this.reason,
+    required this.blockedBy,
+  }) {
+    if (findingId.isEmpty || blockedBy.isEmpty) {
+      throw StateError('Apply plan block identities cannot be empty.');
+    }
+  }
+
+  /// Logical finding excluded from the physical plan.
+  final String findingId;
+
+  /// Planner-owned reason for the block.
+  final PlanBlockReason reason;
+
+  /// Retained graph identity that prevents removal.
+  final String blockedBy;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ApplyPlanBlockReport &&
+          findingId == other.findingId &&
+          reason == other.reason &&
+          blockedBy == other.blockedBy;
+
+  @override
+  int get hashCode => Object.hash(findingId, reason, blockedBy);
+}
+
+/// Immutable report projection of one preview source snapshot.
+final class ApplySourceSnapshotReport {
+  /// Creates and validates a source snapshot projection.
+  factory ApplySourceSnapshotReport({
+    required String projectRelativePath,
+    required String canonicalPath,
+    required String sha256,
+    required int sizeBytes,
+    required int? posixMode,
+  }) {
+    final snapshot = ApplySourceSnapshot(
+      projectRelativePath: projectRelativePath,
+      canonicalPath: canonicalPath,
+      sha256: sha256,
+      sizeBytes: sizeBytes,
+      posixMode: posixMode,
+    );
+    return ApplySourceSnapshotReport._(
+      projectRelativePath: snapshot.projectRelativePath,
+      canonicalPath: snapshot.canonicalPath,
+      sha256: snapshot.sha256,
+      sizeBytes: snapshot.sizeBytes,
+      posixMode: snapshot.posixMode,
+    );
+  }
+
+  /// Projects one validated domain snapshot without changing its facts.
+  factory ApplySourceSnapshotReport.fromSnapshot(
+    ApplySourceSnapshot snapshot,
+  ) => ApplySourceSnapshotReport(
+    projectRelativePath: snapshot.projectRelativePath,
+    canonicalPath: snapshot.canonicalPath,
+    sha256: snapshot.sha256,
+    sizeBytes: snapshot.sizeBytes,
+    posixMode: snapshot.posixMode,
+  );
+
+  const ApplySourceSnapshotReport._({
+    required this.projectRelativePath,
+    required this.canonicalPath,
+    required this.sha256,
+    required this.sizeBytes,
+    required this.posixMode,
+  });
+
+  /// Canonical project-relative source path.
+  final String projectRelativePath;
+
+  /// Canonical absolute source path.
+  final String canonicalPath;
+
+  /// Lowercase SHA-256 of the source bytes.
+  final String sha256;
+
+  /// Exact source byte length.
+  final int sizeBytes;
+
+  /// POSIX permission and special bits, or null when unavailable.
+  final int? posixMode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ApplySourceSnapshotReport &&
+          projectRelativePath == other.projectRelativePath &&
+          canonicalPath == other.canonicalPath &&
+          sha256 == other.sha256 &&
+          sizeBytes == other.sizeBytes &&
+          posixMode == other.posixMode;
+
+  @override
+  int get hashCode => Object.hash(
+    projectRelativePath,
+    canonicalPath,
+    sha256,
+    sizeBytes,
+    posixMode,
+  );
+}
+
+/// Immutable report projection of captured apply preview evidence.
+final class ApplyPreviewReport {
+  /// Creates and validates one versioned preview projection from complete
+  /// canonical evidence.
+  factory ApplyPreviewReport({
+    required int version,
+    required String canonicalProjectRoot,
+    required String? planFingerprint,
+    required List<ApplySourceSnapshotReport> sources,
+  }) {
+    if (version != ApplyPreviewEvidence.canonicalVersion) {
+      throw StateError('Unsupported apply preview version: $version.');
+    }
+    final sourceSnapshot = List<ApplySourceSnapshotReport>.unmodifiable(
+      sources,
+    );
+    final relativePaths = <String>{};
+    final canonicalPaths = <String>{};
+    for (var index = 0; index < sourceSnapshot.length; index++) {
+      final source = sourceSnapshot[index];
+      if (!relativePaths.add(source.projectRelativePath) ||
+          !canonicalPaths.add(
+            _canonicalSourcePathIdentity(source.canonicalPath),
+          )) {
+        throw StateError('Apply preview report sources must be unique.');
+      }
+      if (index > 0 &&
+          _compareSources(sourceSnapshot[index - 1], source) >= 0) {
+        throw StateError('Apply preview report sources must be sorted.');
+      }
+    }
+    final evidence = ApplyPreviewEvidence(
+      canonicalProjectRoot: canonicalProjectRoot,
+      planFingerprint: planFingerprint,
+      sources: sourceSnapshot
+          .map(
+            (source) => ApplySourceSnapshot(
+              projectRelativePath: source.projectRelativePath,
+              canonicalPath: source.canonicalPath,
+              sha256: source.sha256,
+              sizeBytes: source.sizeBytes,
+              posixMode: source.posixMode,
+            ),
+          )
+          .toList(growable: false),
+    );
+    return ApplyPreviewReport._(
+      version: version,
+      canonicalProjectRoot: evidence.canonicalProjectRoot,
+      planFingerprint: evidence.planFingerprint,
+      fingerprint: evidence.fingerprint,
+      sources: sourceSnapshot,
+    );
+  }
+
+  /// Projects validated domain evidence into report-only scalar values.
+  factory ApplyPreviewReport.fromEvidence(ApplyPreviewEvidence evidence) =>
+      ApplyPreviewReport(
+        version: ApplyPreviewEvidence.canonicalVersion,
+        canonicalProjectRoot: evidence.canonicalProjectRoot,
+        planFingerprint: evidence.planFingerprint,
+        sources: evidence.sources
+            .map(ApplySourceSnapshotReport.fromSnapshot)
+            .toList(growable: false),
+      );
+
+  const ApplyPreviewReport._({
+    required this.version,
+    required this.canonicalProjectRoot,
+    required this.planFingerprint,
+    required this.fingerprint,
+    required this.sources,
+  });
+
+  /// Canonical preview encoding version.
+  final int version;
+
+  /// Canonical project root included in the preview token payload.
+  ///
+  /// This binding fact remains report-internal in A2 and A3 serialization.
+  final String canonicalProjectRoot;
+
+  /// Action-plan fingerprint included in the preview token payload.
+  ///
+  /// This binding fact remains report-internal in A2 and A3 serialization.
+  final String? planFingerprint;
+
+  /// Full `v1:<lowercase SHA-256>` preview token.
+  final String fingerprint;
+
+  /// Unique source snapshots in canonical order.
+  final List<ApplySourceSnapshotReport> sources;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ApplyPreviewReport &&
+          version == other.version &&
+          canonicalProjectRoot == other.canonicalProjectRoot &&
+          planFingerprint == other.planFingerprint &&
+          fingerprint == other.fingerprint &&
+          _listEquals(sources, other.sources);
+
+  @override
+  int get hashCode => Object.hash(
+    version,
+    canonicalProjectRoot,
+    planFingerprint,
+    fingerprint,
+    Object.hashAll(sources),
+  );
+}
+
+/// Immutable initial physical plan exposed by apply reports.
+final class ApplyInitialPlanReport {
+  /// Creates and validates an initial physical plan projection.
+  ApplyInitialPlanReport({
+    required this.canonicalVersion,
+    required this.scope,
+    required this.planFingerprint,
+    required List<ApplyPlanUnitReport> units,
+    required List<ApplyPlanBlockReport> blocked,
+    this.preview,
+  }) : units = List<ApplyPlanUnitReport>.unmodifiable(units),
+       blocked = List<ApplyPlanBlockReport>.unmodifiable(blocked) {
+    if (canonicalVersion != 1) {
+      throw StateError(
+        'Unsupported initial apply plan version: $canonicalVersion.',
+      );
+    }
+    if (planFingerprint != null &&
+        !RegExp(r'^[0-9a-f]{64}$').hasMatch(planFingerprint!)) {
+      throw StateError('Apply plan fingerprint must be lowercase SHA-256.');
+    }
+    if (this.units.isEmpty != (planFingerprint == null)) {
+      throw StateError(
+        'Apply plan fingerprint must exist exactly when units are planned.',
+      );
+    }
+
+    final unitIds = <String>{};
+    final findingIds = <String>{};
+    final journalIdentities = <String>{};
+    final actionIdentities =
+        <(String, String, FindingActionOperation, String, String?)>{};
+    for (var index = 0; index < this.units.length; index++) {
+      final unit = this.units[index];
+      if (unit.order != index) {
+        throw StateError('Apply plan unit order must be contiguous.');
+      }
+      if (!unitIds.add(unit.id)) {
+        throw StateError('Apply plan unit IDs must be unique.');
+      }
+      for (final findingId in unit.findingIds) {
+        if (!findingIds.add(findingId)) {
+          throw StateError('A logical finding cannot belong to several units.');
+        }
+      }
+      for (final action in unit.actions) {
+        if (!journalIdentities.add(action.journalFindingId)) {
+          throw StateError(
+            'Effective journal action identities must be unique.',
+          );
+        }
+        if (!actionIdentities.add((
+          unit.id,
+          action.logicalFindingId,
+          action.operation,
+          action.projectRelativePath,
+          action.cleanupTargetPath,
+        ))) {
+          throw StateError(
+            'Composite physical action identities must be unique.',
+          );
+        }
+      }
+    }
+    for (final unit in this.units) {
+      for (final dependencyId in unit.dependencyUnitIds) {
+        if (dependencyId == unit.id || !unitIds.contains(dependencyId)) {
+          throw StateError('Apply plan dependencies must name another unit.');
+        }
+      }
+    }
+
+    final blockedFindingIds = <String>{};
+    for (final item in this.blocked) {
+      if (!blockedFindingIds.add(item.findingId) ||
+          findingIds.contains(item.findingId)) {
+        throw StateError('Apply plan blocks must be unique and unplanned.');
+      }
+    }
+    final preview = this.preview;
+    if (preview != null) {
+      if (preview.planFingerprint != planFingerprint) {
+        throw StateError(
+          'Apply preview evidence belongs to a different action plan.',
+        );
+      }
+      final actionPaths = this.units
+          .expand((unit) => unit.actions)
+          .map((action) => action.projectRelativePath)
+          .toSet();
+      final sourcePaths = preview.sources
+          .map((source) => source.projectRelativePath)
+          .toSet();
+      if (actionPaths.length != sourcePaths.length ||
+          !actionPaths.containsAll(sourcePaths)) {
+        throw StateError(
+          'Apply preview sources must match planned action sources.',
+        );
+      }
+    }
+  }
+
+  /// Canonical initial-plan projection version.
+  final int canonicalVersion;
+
+  /// Whether later all-eligible rounds may discover additional work.
+  final ApplyInitialPlanScope scope;
+
+  /// SHA-256 over canonical initial plan topology, or null when empty.
+  final String? planFingerprint;
+
+  /// Planner units in exact physical execution order.
+  final List<ApplyPlanUnitReport> units;
+
+  /// Planner-owned blocks in their reported order.
+  final List<ApplyPlanBlockReport> blocked;
+
+  /// Captured source evidence, when snapshotting completed.
+  final ApplyPreviewReport? preview;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ApplyInitialPlanReport &&
+          canonicalVersion == other.canonicalVersion &&
+          scope == other.scope &&
+          planFingerprint == other.planFingerprint &&
+          _listEquals(units, other.units) &&
+          _listEquals(blocked, other.blocked) &&
+          preview == other.preview;
+
+  @override
+  int get hashCode => Object.hash(
+    canonicalVersion,
+    scope,
+    planFingerprint,
+    Object.hashAll(units),
+    Object.hashAll(blocked),
+    preview,
+  );
+}
+
 /// Immutable authorization boundary and initial logical plan for apply.
 class ApplySelectionReport {
   /// Creates validated selection evidence.
@@ -558,8 +1100,17 @@ class ApplySelectionReport {
     required List<String> requestedFindingIds,
     required List<String> plannedFindingIds,
     this.planFingerprint,
+    this.actualPreviewFingerprint,
+    this.expectedPreviewFingerprint,
+    ApplyPreviewComparison? previewComparison,
   }) : requestedFindingIds = List.unmodifiable(requestedFindingIds),
-       plannedFindingIds = List.unmodifiable(plannedFindingIds) {
+       plannedFindingIds = List.unmodifiable(plannedFindingIds),
+       previewComparison = _validatedPreviewComparison(
+         actualPreviewFingerprint,
+         expectedPreviewFingerprint,
+         plannedFindingIds.isNotEmpty,
+         previewComparison,
+       ) {
     _validateSortedUnique(this.requestedFindingIds, 'requested finding IDs');
     _validateSortedUnique(this.plannedFindingIds, 'planned finding IDs');
     if (mode == FindingSelectionMode.exact &&
@@ -587,6 +1138,10 @@ class ApplySelectionReport {
         'Apply plan fingerprint must exist exactly when findings are planned.',
       );
     }
+    if (expectedPreviewFingerprint != null &&
+        mode != FindingSelectionMode.exact) {
+      throw StateError('Preview expectations require exact selection.');
+    }
   }
 
   /// Historical all-eligible behavior or an exact hard allowlist.
@@ -600,6 +1155,15 @@ class ApplySelectionReport {
 
   /// SHA-256 over the canonical initial logical and physical plan.
   final String? planFingerprint;
+
+  /// Preview token captured for the current physical plan and source state.
+  final String? actualPreviewFingerprint;
+
+  /// Full token supplied to bind an exact-selection apply, when requested.
+  final String? expectedPreviewFingerprint;
+
+  /// Validated comparison derived from actual and expected preview tokens.
+  final ApplyPreviewComparison previewComparison;
 
   static void _validateSortedUnique(List<String> values, String label) {
     if (values.any((value) => value.isEmpty) ||
@@ -624,6 +1188,7 @@ class RunReport {
     required this.exitCode,
     required this.partialApplied,
     required this.projectRoot,
+    String? canonicalProjectRoot,
     required this.packageName,
     this.analysisMode = AnalysisMode.application,
     required List<String> requestedAdapters,
@@ -636,11 +1201,18 @@ class RunReport {
     List<VerificationAttemptReport> verificationAttempts = const [],
     List<ApplyFindingOutcome> applyFindingOutcomes = const [],
     this.applySelection,
+    this.applyInitialPlan,
     this.applyStatistics,
     this.quarantinePath,
     List<String> acceptedRiskCodes = const [],
     this.riskAcceptanceSource = RiskAcceptanceSource.notRequired,
-  }) : requestedAdapters = List.unmodifiable(requestedAdapters),
+  }) : canonicalProjectRoot = canonicalProjectRoot == null
+           ? null
+           : ApplySourceSnapshot.validateCanonicalAbsolutePath(
+               canonicalProjectRoot,
+               label: 'Canonical report project root',
+             ),
+       requestedAdapters = List.unmodifiable(requestedAdapters),
        adapterReportDefinitions = List.unmodifiable(
          adapterReportDefinitions.map((definition) => definition.snapshot()),
        ),
@@ -672,6 +1244,25 @@ class RunReport {
     if (applySelection != null && identity.command != RunCommand.apply) {
       throw StateError('Finding selection evidence belongs only to apply.');
     }
+    if (applyInitialPlan != null && identity.command != RunCommand.apply) {
+      throw StateError('Initial physical plans belong only to apply.');
+    }
+    if (this.canonicalProjectRoot != null &&
+        identity.command != RunCommand.apply) {
+      throw StateError('Canonical apply roots belong only to apply reports.');
+    }
+    _validateInitialPlanSelection(applySelection, applyInitialPlan);
+    final previewRoot = applyInitialPlan?.preview?.canonicalProjectRoot;
+    if (previewRoot != null) {
+      final reportRoot = this.canonicalProjectRoot;
+      if (reportRoot == null ||
+          _canonicalSourcePathIdentity(reportRoot) !=
+              _canonicalSourcePathIdentity(previewRoot)) {
+        throw StateError(
+          'Apply preview evidence belongs to a different project root.',
+        );
+      }
+    }
   }
 
   /// Public JSON schema version.
@@ -682,6 +1273,12 @@ class RunReport {
   final int exitCode;
   final bool partialApplied;
   final String projectRoot;
+
+  /// Canonical root used only to validate apply preview binding.
+  ///
+  /// This binding fact remains report-internal in A2 and A3 serialization.
+  final String? canonicalProjectRoot;
+
   final String packageName;
   final AnalysisMode analysisMode;
   final List<String> requestedAdapters;
@@ -694,6 +1291,7 @@ class RunReport {
   final List<VerificationAttemptReport> verificationAttempts;
   final List<ApplyFindingOutcome> applyFindingOutcomes;
   final ApplySelectionReport? applySelection;
+  final ApplyInitialPlanReport? applyInitialPlan;
   final ApplyStatistics? applyStatistics;
   final String? quarantinePath;
   final List<String> acceptedRiskCodes;
@@ -715,4 +1313,104 @@ class RunReport {
   get auxiliaryExecutionTargetIssues => analysisPasses.isEmpty
       ? const []
       : analysisPasses.last.auxiliaryExecutionTargetIssues;
+}
+
+ApplyPreviewComparison _validatedPreviewComparison(
+  String? actual,
+  String? expected,
+  bool hasPlannedFindings,
+  ApplyPreviewComparison? supplied,
+) {
+  if (actual != null && !isValidApplyPreviewFingerprint(actual)) {
+    throw StateError('Actual preview fingerprint must be a full v1 token.');
+  }
+  if (expected != null && !isValidApplyPreviewFingerprint(expected)) {
+    throw StateError('Expected preview fingerprint must be a full v1 token.');
+  }
+  if (expected != null && actual == null) {
+    throw StateError('Preview expectation requires captured preview evidence.');
+  }
+  final derived = expected == null
+      ? ApplyPreviewComparison.notRequested
+      : hasPlannedFindings && actual == expected
+      ? ApplyPreviewComparison.matched
+      : ApplyPreviewComparison.mismatched;
+  if (supplied != null && supplied != derived) {
+    throw StateError('Preview comparison contradicts the captured tokens.');
+  }
+  return derived;
+}
+
+void _validateInitialPlanSelection(
+  ApplySelectionReport? selection,
+  ApplyInitialPlanReport? initialPlan,
+) {
+  if (initialPlan == null) {
+    if (selection?.actualPreviewFingerprint != null) {
+      throw StateError('Captured preview evidence requires an initial plan.');
+    }
+    return;
+  }
+  if (selection == null) {
+    throw StateError('Initial physical plan requires selection evidence.');
+  }
+  if (initialPlan.planFingerprint != selection.planFingerprint) {
+    throw StateError('Initial plan fingerprint does not match selection.');
+  }
+  final plannedFindingIds =
+      initialPlan.units
+          .expand((unit) => unit.findingIds)
+          .toList(growable: false)
+        ..sort();
+  if (!_listEquals(plannedFindingIds, selection.plannedFindingIds)) {
+    throw StateError(
+      'Initial plan finding union does not match planned selection IDs.',
+    );
+  }
+  final requiredScope = selection.mode == FindingSelectionMode.exact
+      ? ApplyInitialPlanScope.completeExactSelection
+      : ApplyInitialPlanScope.initialRoundOnly;
+  if (initialPlan.scope != requiredScope) {
+    throw StateError('Initial plan scope does not match selection mode.');
+  }
+  if (initialPlan.preview?.fingerprint != selection.actualPreviewFingerprint) {
+    throw StateError('Initial plan preview does not match selection evidence.');
+  }
+}
+
+void _validateNonEmptyUniqueValues(List<String> values, String label) {
+  if (values.isEmpty) {
+    throw StateError('$label cannot be empty.');
+  }
+  _validateUniqueValues(values, label);
+}
+
+void _validateUniqueValues(List<String> values, String label) {
+  if (values.any((value) => value.isEmpty) ||
+      values.toSet().length != values.length) {
+    throw StateError('$label must contain non-empty unique values.');
+  }
+}
+
+int _compareSources(
+  ApplySourceSnapshotReport left,
+  ApplySourceSnapshotReport right,
+) {
+  final relative = left.projectRelativePath.compareTo(
+    right.projectRelativePath,
+  );
+  return relative != 0
+      ? relative
+      : left.canonicalPath.compareTo(right.canonicalPath);
+}
+
+String _canonicalSourcePathIdentity(String path) =>
+    p.posix.isAbsolute(path) ? path : path.toLowerCase();
+
+bool _listEquals<T>(List<T> left, List<T> right) {
+  if (left.length != right.length) return false;
+  for (var index = 0; index < left.length; index++) {
+    if (left[index] != right[index]) return false;
+  }
+  return true;
 }

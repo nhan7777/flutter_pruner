@@ -32,6 +32,12 @@ class ToolWorkspace {
   static const String legacyQuarantineRelativePath =
       '.flutter_pruner_quarantine';
 
+  /// Reserved logical-clean recovery store within each quarantine base.
+  static const String retainedCleanDirectoryName = '.clean-retained';
+
+  /// Current retained-clean on-disk schema directory.
+  static const String retainedCleanSchemaDirectoryName = 'v1';
+
   /// Default report directory relative to the project root.
   static const String reportsRelativePath = '$directoryName/reports';
 
@@ -77,6 +83,19 @@ class ToolWorkspace {
     ),
   );
 
+  /// Retained logical-clean storage below the preferred quarantine base.
+  Directory get retainedCleanDirectory =>
+      retainedCleanDirectoryFor(quarantineDirectory);
+
+  /// Retained logical-clean storage below an explicitly selected base.
+  Directory retainedCleanDirectoryFor(Directory quarantineBase) => Directory(
+    p.join(
+      quarantineBase.path,
+      retainedCleanDirectoryName,
+      retainedCleanSchemaDirectoryName,
+    ),
+  );
+
   /// Directory used for explicitly requested relative reports.
   Directory get reportsDirectory => Directory(
     _resolveManagedRelativePath(reportsRelativePath, kind: 'reports'),
@@ -115,6 +134,7 @@ class ToolWorkspace {
   void validateManagedLayout() {
     directory.path;
     quarantineDirectory.path;
+    retainedCleanDirectory.path;
     reportsDirectory.path;
     reportObjectsDirectory.path;
     reportCommitsDirectory.path;

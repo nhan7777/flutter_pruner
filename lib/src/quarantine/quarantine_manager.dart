@@ -9,7 +9,23 @@ import '../apply/finding_selection.dart';
 import '../core/process/managed_process_runner.dart';
 import '../core/project/tool_workspace.dart';
 import '../verification/verification_runner.dart';
+import 'clean_move_backend.dart';
 import 'manifest.dart';
+import 'manifest_authority.dart';
+import 'native/posix_clean_move_backend.dart';
+import 'native/windows_clean_move_backend.dart';
+import 'quarantine_clean_plan.dart';
+import 'quarantine_inspection.dart';
+import 'rollback_recovery.dart';
+
+export 'manifest_authority.dart'
+    show
+        ManifestAuthorityDecision,
+        ManifestCandidateName,
+        ManifestRepairAction,
+        QuarantineRunLifecycleState;
+export 'quarantine_clean_plan.dart';
+export 'quarantine_inspection.dart';
 
 /// Manages quarantine directories for reversible file operations.
 ///
@@ -22,7 +38,9 @@ class QuarantineManager {
     QuarantineDisplacementHook? displacementHook,
     QuarantineRestoreHook? restoreHook,
     QuarantineJournalHook? journalHook,
+    QuarantineCleanPlanSnapshotHook? cleanPlanSnapshotHook,
     QuarantineSourceRenamer? sourceRenamer,
+    RecoverableCleanMoveBackend Function()? cleanMoveBackendFactory,
     ProcessExecutionRunner atomicPublishProcessRunner =
         const ManagedProcessRunner(),
     ProcessExecutionRunner permissionProcessRunner =
@@ -30,7 +48,10 @@ class QuarantineManager {
   }) : _displacementHook = displacementHook,
        _restoreHook = restoreHook,
        _journalHook = journalHook,
+       _cleanPlanSnapshotHook = cleanPlanSnapshotHook,
        _sourceRenamer = sourceRenamer ?? _renameSource,
+       _cleanMoveBackendFactory =
+           cleanMoveBackendFactory ?? _defaultCleanMoveBackend,
        _atomicPublishProcessRunner = atomicPublishProcessRunner,
        _permissionProcessRunner = permissionProcessRunner;
 
@@ -40,7 +61,9 @@ class QuarantineManager {
   final QuarantineDisplacementHook? _displacementHook;
   final QuarantineRestoreHook? _restoreHook;
   final QuarantineJournalHook? _journalHook;
+  final QuarantineCleanPlanSnapshotHook? _cleanPlanSnapshotHook;
   final QuarantineSourceRenamer _sourceRenamer;
+  final RecoverableCleanMoveBackend Function() _cleanMoveBackendFactory;
   final ProcessExecutionRunner _atomicPublishProcessRunner;
   final ProcessExecutionRunner _permissionProcessRunner;
 
@@ -843,12 +866,20 @@ class QuarantineManager {
       quarantineDir,
       intent.withState(_CaseDisplacementState.promoted),
     );
-    await _copyFileFlushed(
-      promotedBackup,
-      candidate,
-      exclusive: true,
-      expectedPosixMode: applyCase.entry.posixMode,
-    );
+    try {
+      await _copyFileFlushed(
+        promotedBackup,
+        candidate,
+        exclusive: true,
+        expectedPosixMode: applyCase.entry.posixMode,
+      );
+    } catch (error, stackTrace) {
+      // The source inode has already been promoted out of the working tree.
+      // Any interrupted staging helper therefore leaves transaction authority
+      // non-terminal even when the promoted bytes remain intact.
+      await _markDisplacementRecoveryRequired(quarantineDir, caseId);
+      Error.throwWithStackTrace(error, stackTrace);
+    }
     if (await _computeSha256(candidate) != expectedSha256 ||
         _readPosixMode(candidate) != applyCase.entry.posixMode) {
       await _markDisplacementRecoveryRequired(quarantineDir, caseId);
@@ -953,7 +984,15 @@ class QuarantineManager {
       );
     }
     if (candidateType == FileSystemEntityType.file) {
-      await _setAndVerifyPosixMode(candidate, applyCase.entry.posixMode);
+      try {
+        await _setAndVerifyPosixMode(candidate, applyCase.entry.posixMode);
+      } catch (error, stackTrace) {
+        await _markDisplacementRecoveryRequired(
+          quarantineDir,
+          applyCase.caseId,
+        );
+        Error.throwWithStackTrace(error, stackTrace);
+      }
     }
     final candidateSha256 = candidateType == FileSystemEntityType.file
         ? await _computeSha256(candidate)
@@ -1294,8 +1333,30 @@ class QuarantineManager {
   }
 
   /// Reads a quarantine manifest for diagnostics and tests.
-  Future<QuarantineManifest> readManifest(Directory quarantineDir) {
-    return _readManifest(quarantineDir);
+  Future<QuarantineManifest> readManifest(Directory quarantineDir) async =>
+      (await inspectManifestAuthority(quarantineDir)).manifest;
+
+  /// Inspects manifest journal authority without repairing candidate paths.
+  Future<ManifestAuthorityDecision> inspectManifestAuthority(
+    Directory quarantineDir,
+  ) async {
+    final resolution = await _evaluateManifestAuthority(quarantineDir);
+    return _manifestAuthorityDecision(resolution);
+  }
+
+  ManifestAuthorityDecision _manifestAuthorityDecision(
+    _ManifestAuthorityResolution resolution,
+  ) {
+    final document = resolution.candidate;
+    return ManifestAuthorityDecision(
+      manifest: document.manifest,
+      revision: document.revision,
+      payloadSha256: document.payloadSha256,
+      lifecycle: document.runLifecycle?.state,
+      authority: document.candidateName,
+      repairAction: resolution.repairAction,
+      canonicalDocument: document.canonicalDocument,
+    );
   }
 
   /// Fails closed when an older quarantine could still own project bytes.
@@ -1322,6 +1383,10 @@ class QuarantineManager {
           await Directory(basePath).list(followLinks: false).toList()
             ..sort((left, right) => left.path.compareTo(right.path));
       for (final child in children) {
+        if (p.basename(child.path) ==
+            ToolWorkspace.retainedCleanDirectoryName) {
+          continue;
+        }
         final childType = FileSystemEntity.typeSync(
           child.path,
           followLinks: false,
@@ -1456,8 +1521,7 @@ class QuarantineManager {
   /// Reads the V3 run-level lifecycle marker for diagnostics and tests.
   Future<QuarantineRunLifecycleState?> readRunLifecycleState(
     Directory quarantineDir,
-  ) async =>
-      (await _resolveManifestDocument(quarantineDir)).runLifecycle?.state;
+  ) async => (await inspectManifestAuthority(quarantineDir)).lifecycle;
 
   /// Restores all paths to their first snapshot without claiming completion.
   Future<void> restoreRunBytes({required Directory quarantineDir}) async {
@@ -1503,29 +1567,150 @@ class QuarantineManager {
   }) async {
     final manifest = await _readManifest(quarantineDir);
     _requireV3PosixModeEvidence(manifest);
+    final observation = await _observeRunOriginalMismatch(
+      quarantineDir: quarantineDir,
+      manifest: manifest,
+    );
+    if (observation != null) {
+      throw QuarantineException(_rollbackObservationDetail(observation));
+    }
+  }
+
+  Future<RollbackWorkingCopyObservation?> _observeRunOriginalMismatch({
+    required Directory quarantineDir,
+    required QuarantineManifest manifest,
+  }) async {
     final firstByPath = <String, QuarantineCase>{};
     for (final applyCase in manifest.cases) {
       firstByPath.putIfAbsent(applyCase.entry.originalPath, () => applyCase);
     }
     for (final first in firstByPath.values) {
       final snapshot = _caseSnapshotFor(quarantineDir, first);
-      if (!snapshot.existsSync() ||
-          await _computeSha256(snapshot) != first.entry.sha256 ||
-          _readPosixMode(snapshot) != first.entry.posixMode) {
-        throw QuarantineException(
-          'Run-original snapshot bytes or permissions are missing or '
-          'corrupted: ${snapshot.path}',
+      final snapshotObservation = await _observeRollbackFile(
+        role: RollbackObservedPathRole.runOriginalSnapshot,
+        file: snapshot,
+        expectedSha256: first.entry.sha256,
+        expectedPosixMode: first.entry.posixMode,
+      );
+      if (snapshotObservation != null) return snapshotObservation;
+      final targetObservation = await _observeRollbackFile(
+        role: RollbackObservedPathRole.workingCopy,
+        file: File(first.entry.originalPath),
+        expectedSha256: first.entry.sha256,
+        expectedPosixMode: first.entry.posixMode,
+      );
+      if (targetObservation != null) return targetObservation;
+    }
+    return null;
+  }
+
+  Future<RollbackWorkingCopyObservation?> _observeRollbackFile({
+    required RollbackObservedPathRole role,
+    required File file,
+    required String expectedSha256,
+    required int? expectedPosixMode,
+  }) async {
+    final type = FileSystemEntity.typeSync(file.path, followLinks: false);
+    if (type == FileSystemEntityType.notFound) {
+      return RollbackWorkingCopyObservation(
+        role: role,
+        path: file.path,
+        state: RollbackObservedState.missing,
+        expectedSha256: expectedSha256,
+        observedSha256: null,
+        expectedPosixMode: expectedPosixMode,
+        observedPosixMode: null,
+        observedType: 'notFound',
+      );
+    }
+    if (type != FileSystemEntityType.file) {
+      return RollbackWorkingCopyObservation(
+        role: role,
+        path: file.path,
+        state: RollbackObservedState.nonRegularFile,
+        expectedSha256: expectedSha256,
+        observedSha256: null,
+        expectedPosixMode: expectedPosixMode,
+        observedPosixMode: null,
+        observedType: _rollbackFileTypeName(type),
+      );
+    }
+    final observedSha256 = await _computeSha256(file);
+    final observedPosixMode = _readPosixMode(file);
+    if (observedSha256 != expectedSha256) {
+      return RollbackWorkingCopyObservation(
+        role: role,
+        path: file.path,
+        state: RollbackObservedState.byteMismatch,
+        expectedSha256: expectedSha256,
+        observedSha256: observedSha256,
+        expectedPosixMode: expectedPosixMode,
+        observedPosixMode: observedPosixMode,
+        observedType: 'regularFile',
+      );
+    }
+    if (observedPosixMode != expectedPosixMode) {
+      return RollbackWorkingCopyObservation(
+        role: role,
+        path: file.path,
+        state: RollbackObservedState.posixModeMismatch,
+        expectedSha256: expectedSha256,
+        observedSha256: observedSha256,
+        expectedPosixMode: expectedPosixMode,
+        observedPosixMode: observedPosixMode,
+        observedType: 'regularFile',
+      );
+    }
+    return null;
+  }
+
+  String _rollbackFileTypeName(FileSystemEntityType type) {
+    if (type == FileSystemEntityType.directory) return 'directory';
+    if (type == FileSystemEntityType.link) return 'symbolicLink';
+    if (type == FileSystemEntityType.pipe) return 'pipe';
+    return 'other';
+  }
+
+  String _rollbackObservationDetail(
+    RollbackWorkingCopyObservation observation,
+  ) {
+    final subject =
+        observation.role == RollbackObservedPathRole.runOriginalSnapshot
+        ? 'Run-original snapshot bytes or permissions are missing or corrupted'
+        : 'Run-original bytes or permissions verification failed';
+    return '$subject: ${observation.path}';
+  }
+
+  Future<void> _revalidateRunOriginalForTerminalization(
+    Directory quarantineDir,
+  ) async {
+    try {
+      final manifest = await _readManifest(quarantineDir);
+      _requireV3PosixModeEvidence(manifest);
+      final observation = await _observeRunOriginalMismatch(
+        quarantineDir: quarantineDir,
+        manifest: manifest,
+      );
+      if (observation != null) {
+        throw RollbackTerminalizationException(
+          kind: switch (observation.role) {
+            RollbackObservedPathRole.runOriginalSnapshot =>
+              RollbackTerminalizationFailureKind
+                  .authoritySnapshotRevalidationFailed,
+            RollbackObservedPathRole.workingCopy =>
+              RollbackTerminalizationFailureKind.workingCopyRevalidationFailed,
+          },
+          observation: observation,
+          detail: _rollbackObservationDetail(observation),
         );
       }
-      final target = File(first.entry.originalPath);
-      if (!target.existsSync() ||
-          await _computeSha256(target) != first.entry.sha256 ||
-          _readPosixMode(target) != first.entry.posixMode) {
-        throw QuarantineException(
-          'Run-original bytes or permissions verification failed: '
-          '${target.path}',
-        );
-      }
+    } on RollbackTerminalizationException {
+      rethrow;
+    } catch (error) {
+      throw RollbackTerminalizationException(
+        kind: RollbackTerminalizationFailureKind.preconditionRejected,
+        detail: '$error',
+      );
     }
   }
 
@@ -1536,30 +1721,40 @@ class QuarantineManager {
     required QuarantineVerificationEvidence verificationEvidence,
     required bool baselineEquivalent,
   }) async {
-    await verifyRunOriginalBytes(quarantineDir: quarantineDir);
-    final document = await _resolveManifestDocument(quarantineDir);
-    final manifest = document.manifest;
-    final baseline = manifest.baselineVerification;
-    if (!manifest.usesTransactionJournal ||
-        baseline == null ||
-        !baselineEquivalent ||
-        !_isCompleteVerificationEvidence(baseline) ||
-        !_isCompleteVerificationEvidence(verificationEvidence) ||
-        verificationEvidence.policyHash != manifest.verificationPolicyHash ||
-        baseline.policyHash != manifest.verificationPolicyHash ||
-        verificationEvidence.policyHash != baseline.policyHash ||
-        verificationEvidence.workingDirectory != baseline.workingDirectory ||
-        verificationEvidence.toolchainIdentity != baseline.toolchainIdentity ||
-        !_sameStringSet(
-          verificationEvidence.requiredStepIds,
-          baseline.requiredStepIds,
-        )) {
-      throw QuarantineException(
-        'Whole-run rollback verification evidence is incomplete.',
+    await _revalidateRunOriginalForTerminalization(quarantineDir);
+    late final _ManifestDocument document;
+    late final QuarantineManifest manifest;
+    try {
+      document = await _resolveManifestDocument(quarantineDir);
+      manifest = document.manifest;
+      final baseline = manifest.baselineVerification;
+      if (!manifest.usesTransactionJournal ||
+          baseline == null ||
+          !baselineEquivalent ||
+          !_isCompleteVerificationEvidence(baseline) ||
+          !_isCompleteVerificationEvidence(verificationEvidence) ||
+          verificationEvidence.policyHash != manifest.verificationPolicyHash ||
+          baseline.policyHash != manifest.verificationPolicyHash ||
+          verificationEvidence.policyHash != baseline.policyHash ||
+          verificationEvidence.workingDirectory != baseline.workingDirectory ||
+          verificationEvidence.toolchainIdentity !=
+              baseline.toolchainIdentity ||
+          !_sameStringSet(
+            verificationEvidence.requiredStepIds,
+            baseline.requiredStepIds,
+          )) {
+        throw QuarantineException(
+          'Whole-run rollback verification evidence is incomplete.',
+        );
+      }
+      await _requireNoRecoveryArtifacts(quarantineDir, document);
+    } catch (error) {
+      throw RollbackTerminalizationException(
+        kind: RollbackTerminalizationFailureKind.preconditionRejected,
+        detail: '$error',
       );
     }
-    await _requireNoRecoveryArtifacts(quarantineDir, document);
-    await verifyRunOriginalBytes(quarantineDir: quarantineDir);
+    await _revalidateRunOriginalForTerminalization(quarantineDir);
     final policyHash = verificationEvidence.policyHash;
     final requiredStepIds = verificationEvidence.requiredStepIds;
     final observedStepIds = verificationEvidence.observedStepIds;
@@ -1583,17 +1778,24 @@ class QuarantineManager {
           ),
         )
         .toList();
-    await _writeManifest(
-      quarantineDir,
-      _copyManifest(
-        manifest,
-        cases: cases,
-        transactions: transactions,
-        fullRollbackAtUtc: DateTime.now().toUtc(),
-        fullRollbackVerified: true,
-      ),
-      runLifecycleState: QuarantineRunLifecycleState.rolledBackVerified,
-    );
+    try {
+      await _writeManifest(
+        quarantineDir,
+        _copyManifest(
+          manifest,
+          cases: cases,
+          transactions: transactions,
+          fullRollbackAtUtc: DateTime.now().toUtc(),
+          fullRollbackVerified: true,
+        ),
+        runLifecycleState: QuarantineRunLifecycleState.rolledBackVerified,
+      );
+    } catch (error) {
+      throw RollbackTerminalizationException(
+        kind: RollbackTerminalizationFailureKind.journalPersistenceFailed,
+        detail: '$error',
+      );
+    }
   }
 
   bool _isCompleteVerificationEvidence(
@@ -1996,43 +2198,1064 @@ class QuarantineManager {
     await _recordFullRollback(quarantineDir);
   }
 
+  /// Runs the legacy restore path with typed working-copy failure evidence.
+  Future<void> restoreForRollback({
+    required Directory quarantineDir,
+    required String runId,
+    required QuarantineManifest manifest,
+  }) => _runRestoreWithEvidence(
+    manifest: manifest,
+    restore: () => restore(quarantineDir: quarantineDir, runId: runId),
+  );
+
+  /// Runs V3 byte restoration with typed working-copy failure evidence.
+  Future<void> restoreRunBytesForRollback({
+    required Directory quarantineDir,
+    required QuarantineManifest manifest,
+  }) => _runRestoreWithEvidence(
+    manifest: manifest,
+    restore: () => restoreRunBytes(quarantineDir: quarantineDir),
+  );
+
+  Future<void> _runRestoreWithEvidence({
+    required QuarantineManifest manifest,
+    required Future<void> Function() restore,
+  }) async {
+    late final List<_RollbackWorkingCopyEvidence> before;
+    try {
+      before = await _captureRollbackWorkingCopy(manifest);
+    } catch (error) {
+      throw RollbackRestorePhaseException(
+        kind: RollbackRestoreFailureKind.failedBeforeMutation,
+        workingCopy: RollbackWorkingCopyState.unchanged,
+        detail: '$error',
+      );
+    }
+
+    try {
+      await restore();
+    } catch (error) {
+      final terminationUnconfirmed = switch (error) {
+        ProcessTerminationUnconfirmedException() => true,
+        _AtomicPublishException(:final processTerminationUnconfirmed) =>
+          processTerminationUnconfirmed != null,
+        _ => false,
+      };
+      if (terminationUnconfirmed) {
+        // The helper tree may still be writing. Do not inspect project paths
+        // after this boundary merely to refine the outcome classification.
+        throw RollbackRestorePhaseException(
+          kind: RollbackRestoreFailureKind.failedAfterMutation,
+          workingCopy: RollbackWorkingCopyState.outcomeUnknown,
+          detail: '$error',
+        );
+      }
+      late final RollbackWorkingCopyState workingCopy;
+      try {
+        final after = await _captureRollbackWorkingCopy(manifest);
+        if (_sameRollbackWorkingCopy(before, after)) {
+          workingCopy = RollbackWorkingCopyState.unchanged;
+        } else if (_rollbackWorkingCopyMatchesOriginal(manifest, after)) {
+          workingCopy = RollbackWorkingCopyState.originalBytesRestored;
+        } else {
+          workingCopy = RollbackWorkingCopyState.outcomeUnknown;
+        }
+      } catch (_) {
+        workingCopy = RollbackWorkingCopyState.outcomeUnknown;
+      }
+      final kind =
+          error is QuarantineDisplacementRecoveryRequiredException &&
+              workingCopy == RollbackWorkingCopyState.unchanged
+          ? RollbackRestoreFailureKind.workingCopyConflict
+          : workingCopy == RollbackWorkingCopyState.unchanged
+          ? RollbackRestoreFailureKind.failedBeforeMutation
+          : RollbackRestoreFailureKind.failedAfterMutation;
+      throw RollbackRestorePhaseException(
+        kind: kind,
+        workingCopy: workingCopy,
+        detail: '$error',
+      );
+    }
+  }
+
+  Future<List<_RollbackWorkingCopyEvidence>> _captureRollbackWorkingCopy(
+    QuarantineManifest manifest,
+  ) async {
+    final paths = <String>[];
+    final seen = <String>{};
+    final entries = manifest.usesCaseJournal
+        ? manifest.cases.map((item) => item.entry)
+        : manifest.entries;
+    for (final entry in entries) {
+      final path = p.normalize(p.absolute(entry.originalPath));
+      if (seen.add(path)) paths.add(path);
+    }
+    final evidence = <_RollbackWorkingCopyEvidence>[];
+    for (final path in paths) {
+      final type = FileSystemEntity.typeSync(path, followLinks: false);
+      if (type != FileSystemEntityType.file) {
+        evidence.add(
+          _RollbackWorkingCopyEvidence(
+            path: path,
+            type: type,
+            sha256: null,
+            posixMode: null,
+          ),
+        );
+        continue;
+      }
+      final file = File(path);
+      evidence.add(
+        _RollbackWorkingCopyEvidence(
+          path: path,
+          type: type,
+          sha256: await _computeSha256(file),
+          posixMode: _readPosixMode(file),
+        ),
+      );
+    }
+    return List.unmodifiable(evidence);
+  }
+
+  bool _sameRollbackWorkingCopy(
+    List<_RollbackWorkingCopyEvidence> left,
+    List<_RollbackWorkingCopyEvidence> right,
+  ) {
+    if (left.length != right.length) return false;
+    for (var index = 0; index < left.length; index++) {
+      if (left[index] != right[index]) return false;
+    }
+    return true;
+  }
+
+  bool _rollbackWorkingCopyMatchesOriginal(
+    QuarantineManifest manifest,
+    List<_RollbackWorkingCopyEvidence> evidence,
+  ) {
+    final originals = <String, QuarantineEntry>{};
+    final entries = manifest.usesCaseJournal
+        ? manifest.cases.map((item) => item.entry)
+        : manifest.entries;
+    for (final entry in entries) {
+      originals.putIfAbsent(
+        p.normalize(p.absolute(entry.originalPath)),
+        () => entry,
+      );
+    }
+    if (originals.length != evidence.length) return false;
+    for (final item in evidence) {
+      final original = originals[item.path];
+      if (original == null ||
+          item.type != FileSystemEntityType.file ||
+          item.sha256 != original.sha256 ||
+          (original.posixMode != null &&
+              item.posixMode != original.posixMode)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /// Inventories every raw child across current and legacy quarantine bases.
+  Future<List<QuarantineInspection>> inspectQuarantines({
+    Iterable<Directory>? quarantineBases,
+  }) async {
+    final inspections = <QuarantineInspection>[];
+    final claimedRunIdsByPath = <String, String>{};
+    final seenBases = <String>{};
+    final bases =
+        quarantineBases ??
+        [
+          Directory(_resolveQuarantineBase(defaultQuarantineDir)),
+          Directory(_resolveQuarantineBase(legacyQuarantineDir)),
+        ];
+    for (final requestedBase in bases) {
+      final basePath = p.normalize(p.absolute(requestedBase.path));
+      if (!seenBases.add(basePath)) continue;
+      final baseType = FileSystemEntity.typeSync(basePath, followLinks: false);
+      if (baseType == FileSystemEntityType.notFound) continue;
+      if (baseType == FileSystemEntityType.link) {
+        inspections.add(
+          _invalidQuarantineInspection(
+            basePath,
+            QuarantineInspectionErrorCodes.symlinkEntry,
+          ),
+        );
+        continue;
+      }
+      if (baseType != FileSystemEntityType.directory) {
+        inspections.add(
+          _invalidQuarantineInspection(
+            basePath,
+            QuarantineInspectionErrorCodes.unexpectedEntry,
+          ),
+        );
+        continue;
+      }
+      late final List<FileSystemEntity> children;
+      try {
+        children = await Directory(basePath).list(followLinks: false).toList();
+      } on FileSystemException {
+        inspections.add(
+          _invalidQuarantineInspection(
+            basePath,
+            QuarantineInspectionErrorCodes.unreadableBase,
+          ),
+        );
+        continue;
+      }
+      children.sort((left, right) => left.path.compareTo(right.path));
+      for (final child in children) {
+        final childPath = p.normalize(p.absolute(child.path));
+        final childType = FileSystemEntity.typeSync(
+          childPath,
+          followLinks: false,
+        );
+        switch (childType) {
+          case FileSystemEntityType.directory:
+            if (p.basename(childPath) ==
+                ToolWorkspace.retainedCleanDirectoryName) {
+              continue;
+            }
+            final candidate = await _inspectQuarantineDirectory(
+              Directory(childPath),
+            );
+            inspections.add(candidate.inspection);
+            final claimedRunId = candidate.claimedRunId;
+            if (claimedRunId != null) {
+              claimedRunIdsByPath[candidate.inspection.path] = claimedRunId;
+            }
+          case FileSystemEntityType.link:
+            inspections.add(
+              _invalidQuarantineInspection(
+                childPath,
+                QuarantineInspectionErrorCodes.symlinkEntry,
+              ),
+            );
+          case FileSystemEntityType.notFound:
+            inspections.add(
+              _invalidQuarantineInspection(
+                childPath,
+                QuarantineInspectionErrorCodes.entryChanged,
+              ),
+            );
+          case FileSystemEntityType.file:
+          case FileSystemEntityType.pipe:
+          case FileSystemEntityType.unixDomainSock:
+            inspections.add(
+              _invalidQuarantineInspection(
+                childPath,
+                QuarantineInspectionErrorCodes.unexpectedEntry,
+              ),
+            );
+        }
+      }
+    }
+    final inspectionsByClaimedRunId = <String, List<QuarantineInspection>>{};
+    for (final inspection in inspections) {
+      final claimedRunId = claimedRunIdsByPath[inspection.path];
+      if (claimedRunId == null) continue;
+      inspectionsByClaimedRunId
+          .putIfAbsent(claimedRunId, () => [])
+          .add(inspection);
+    }
+    final duplicateRunIds = inspectionsByClaimedRunId.entries
+        .where((entry) => entry.value.length > 1)
+        .map((entry) => entry.key)
+        .toSet();
+    final projected = inspections.map<QuarantineInspection>((inspection) {
+      if (duplicateRunIds.contains(claimedRunIdsByPath[inspection.path])) {
+        return _invalidQuarantineInspection(
+          inspection.path,
+          QuarantineInspectionErrorCodes.duplicateRunId,
+        );
+      }
+      return inspection;
+    }).toList();
+    projected.sort(_compareQuarantineInspections);
+    return List<QuarantineInspection>.unmodifiable(projected);
+  }
+
   /// Lists all quarantines in the project.
   Future<List<QuarantineInfo>> listQuarantines({
     String quarantineBase = defaultQuarantineDir,
   }) async {
-    final baseDir = Directory(_resolveQuarantineBase(quarantineBase));
+    final inspections = await inspectQuarantines(
+      quarantineBases: [Directory(_resolveQuarantineBase(quarantineBase))],
+    );
+    final quarantines = inspections
+        .whereType<ValidQuarantineInspection>()
+        .map(_legacyQuarantineInfo)
+        .toList();
+    quarantines.sort((left, right) {
+      final timestamp = right.timestamp.compareTo(left.timestamp);
+      if (timestamp != 0) return timestamp;
+      final runId = left.runId.compareTo(right.runId);
+      if (runId != 0) return runId;
+      return left.path.compareTo(right.path);
+    });
+    return List<QuarantineInfo>.unmodifiable(quarantines);
+  }
 
-    if (!baseDir.existsSync()) {
-      return [];
-    }
-
-    final quarantines = <QuarantineInfo>[];
-
-    await for (final entity in baseDir.list()) {
-      if (entity is! Directory) continue;
-
-      try {
-        final manifest = await _readManifest(entity);
-        quarantines.add(
-          QuarantineInfo(
-            runId: manifest.runId,
-            timestamp: manifest.timestamp,
-            entryCount: manifest.usesCaseJournal
-                ? manifest.cases.length
-                : manifest.entries.length,
-            path: entity.path,
-          ),
-        );
-      } catch (e) {
-        // Skip invalid quarantines
+  Future<({QuarantineInspection inspection, String? claimedRunId})>
+  _inspectQuarantineDirectory(Directory quarantineDir) async {
+    final path = p.normalize(p.absolute(quarantineDir.path));
+    final directoryRunId = p.basename(path);
+    ({QuarantineInspection inspection, String? claimedRunId}) invalid(
+      String errorCode, {
+      String? claimedRunId,
+    }) => (
+      inspection: _invalidQuarantineInspection(path, errorCode),
+      claimedRunId: claimedRunId,
+    );
+    final manifestPath = p.join(path, 'manifest.json');
+    for (final candidatePath in [
+      manifestPath,
+      '$manifestPath.tmp',
+      '$manifestPath.previous',
+    ]) {
+      if (FileSystemEntity.typeSync(candidatePath, followLinks: false) ==
+          FileSystemEntityType.link) {
+        return invalid(QuarantineInspectionErrorCodes.symlinkEntry);
       }
     }
 
-    // Sort by timestamp, newest first
-    quarantines.sort((a, b) => b.timestamp.compareTo(a.timestamp));
+    late final _ManifestAuthorityResolution resolution;
+    try {
+      resolution = await _evaluateManifestAuthority(quarantineDir);
+    } on QuarantineException catch (error) {
+      return invalid(_manifestInspectionErrorCode(error));
+    }
+    final document = resolution.candidate;
+    final manifest = document.manifest;
+    try {
+      validateRunId(manifest.runId);
+    } on QuarantineException {
+      return invalid(QuarantineInspectionErrorCodes.invalidManifest);
+    }
+    final claimedRunId = manifest.runId;
+    try {
+      validateRunId(directoryRunId);
+    } on QuarantineException {
+      return invalid(
+        QuarantineInspectionErrorCodes.invalidRunId,
+        claimedRunId: claimedRunId,
+      );
+    }
+    if (manifest.runId != directoryRunId) {
+      return invalid(
+        QuarantineInspectionErrorCodes.runIdMismatch,
+        claimedRunId: claimedRunId,
+      );
+    }
+    final recordedRoot = manifest.projectRoot;
+    final foreignProject =
+        recordedRoot != null && !_sameProjectRoot(recordedRoot);
+    try {
+      _validateManifestForInspectionAndClean(document);
+    } on QuarantineException {
+      return invalid(
+        foreignProject
+            ? QuarantineInspectionErrorCodes.foreignProject
+            : QuarantineInspectionErrorCodes.invalidManifest,
+        claimedRunId: claimedRunId,
+      );
+    }
 
-    return quarantines;
+    final lifecycle = document.runLifecycle?.state;
+    var hasRecoveryArtifacts = false;
+    try {
+      hasRecoveryArtifacts = await _hasRecoveryArtifacts(quarantineDir);
+    } on FileSystemException {
+      hasRecoveryArtifacts = true;
+    }
+    var cleanable = false;
+    if (!hasRecoveryArtifacts &&
+        isQuarantineManifestStateCleanable(
+          manifest: manifest,
+          lifecycle: lifecycle,
+        )) {
+      try {
+        await _requireCleanableFilesystemState(quarantineDir, document);
+        cleanable = true;
+      } on QuarantineException {
+        cleanable = false;
+      } on FileSystemException {
+        cleanable = false;
+      }
+    }
+    return (
+      inspection: ValidQuarantineInspection(
+        path: path,
+        runId: manifest.runId,
+        timestamp: manifest.timestamp,
+        entryCount: manifest.usesCaseJournal
+            ? manifest.cases.length
+            : manifest.entries.length,
+        authority: _manifestAuthorityDecision(resolution),
+        cleanable: cleanable,
+        recoveryRequired:
+            hasRecoveryArtifacts ||
+            quarantineManifestRequiresRecovery(
+              manifest: manifest,
+              lifecycle: lifecycle,
+            ),
+        transactions: QuarantineTransactionSummary.fromManifest(manifest),
+      ),
+      claimedRunId: claimedRunId,
+    );
   }
+
+  Future<bool> _hasRecoveryArtifacts(Directory quarantineDir) async {
+    final recoveryPath = p.join(quarantineDir.path, 'recovery');
+    final recoveryType = FileSystemEntity.typeSync(
+      recoveryPath,
+      followLinks: false,
+    );
+    if (recoveryType == FileSystemEntityType.notFound) return false;
+    if (recoveryType != FileSystemEntityType.directory) return true;
+    return !await Directory(recoveryPath).list(followLinks: false).isEmpty;
+  }
+
+  String _manifestInspectionErrorCode(QuarantineException error) {
+    final message = error.message.toLowerCase();
+    if (message.contains('ambiguous') ||
+        message.contains('no authoritative predecessor')) {
+      return QuarantineInspectionErrorCodes.ambiguousAuthority;
+    }
+    return QuarantineInspectionErrorCodes.invalidManifest;
+  }
+
+  InvalidQuarantineInspection _invalidQuarantineInspection(
+    String path,
+    String errorCode,
+  ) => InvalidQuarantineInspection(
+    path: p.normalize(p.absolute(path)),
+    errorCode: errorCode,
+    message: switch (errorCode) {
+      QuarantineInspectionErrorCodes.unexpectedEntry =>
+        'Unexpected non-directory entry in quarantine storage.',
+      QuarantineInspectionErrorCodes.invalidManifest =>
+        'Quarantine manifest is missing, unreadable, or invalid.',
+      QuarantineInspectionErrorCodes.ambiguousAuthority =>
+        'Manifest journal authority is ambiguous.',
+      QuarantineInspectionErrorCodes.runIdMismatch =>
+        'Manifest run ID does not match its directory.',
+      QuarantineInspectionErrorCodes.foreignProject =>
+        'Quarantine belongs to a different project.',
+      QuarantineInspectionErrorCodes.duplicateRunId =>
+        'Run ID appears in more than one quarantine directory.',
+      QuarantineInspectionErrorCodes.symlinkEntry =>
+        'Symbolic links are not valid quarantine entries.',
+      QuarantineInspectionErrorCodes.invalidRunId =>
+        'Quarantine directory name is not a valid run ID.',
+      QuarantineInspectionErrorCodes.unreadableBase =>
+        'Quarantine base could not be enumerated.',
+      QuarantineInspectionErrorCodes.entryChanged =>
+        'Quarantine entry changed during inspection.',
+      _ => 'Quarantine entry is invalid.',
+    },
+  );
+
+  int _compareQuarantineInspections(
+    QuarantineInspection left,
+    QuarantineInspection right,
+  ) {
+    final leftAttention = switch (left) {
+      InvalidQuarantineInspection() => true,
+      ValidQuarantineInspection() => left.requiresAttention,
+    };
+    final rightAttention = switch (right) {
+      InvalidQuarantineInspection() => true,
+      ValidQuarantineInspection() => right.requiresAttention,
+    };
+    if (leftAttention != rightAttention) return leftAttention ? -1 : 1;
+    if (leftAttention) return left.path.compareTo(right.path);
+    final leftValid = left as ValidQuarantineInspection;
+    final rightValid = right as ValidQuarantineInspection;
+    final timestamp = rightValid.timestamp.compareTo(leftValid.timestamp);
+    if (timestamp != 0) return timestamp;
+    final runId = leftValid.runId.compareTo(rightValid.runId);
+    if (runId != 0) return runId;
+    return leftValid.path.compareTo(rightValid.path);
+  }
+
+  QuarantineInfo _legacyQuarantineInfo(ValidQuarantineInspection inspection) =>
+      QuarantineInfo(
+        runId: inspection.runId,
+        timestamp: inspection.timestamp,
+        entryCount: inspection.entryCount,
+        path: inspection.path,
+      );
+
+  /// Builds a non-destructive preview of one or all quarantine clean targets.
+  ///
+  /// This fingerprint is observational evidence only. Mutation still requires
+  /// the identity-bound recoverable-clean store to revalidate every target.
+  Future<QuarantineCleanPlan> planCleanQuarantine({
+    String? runId,
+    Iterable<Directory>? quarantineBases,
+  }) async {
+    if (runId != null) validateRunId(runId);
+    final requestedBases =
+        quarantineBases?.toList(growable: false) ??
+        <Directory>[
+          Directory(_resolveQuarantineBase(defaultQuarantineDir)),
+          Directory(_resolveQuarantineBase(legacyQuarantineDir)),
+        ];
+    final initialBases = _canonicalCleanPlanBases(requestedBases);
+    final initialInspections = await inspectQuarantines(
+      quarantineBases: initialBases.map((base) => base.directory),
+    );
+    final initialValid = _requireCleanPlanInventory(initialInspections);
+    final selected = _selectCleanPlanTargets(initialValid, runId: runId);
+    final initialTargets = _canonicalCleanPlanTargets(
+      selected,
+      bases: initialBases,
+    );
+    final firstSnapshots = <String, _QuarantineCleanTreeSnapshot>{};
+    for (final target in initialTargets) {
+      firstSnapshots[target.inspection.runId] = await _captureCleanTree(
+        target.directory,
+      );
+    }
+
+    await _cleanPlanSnapshotHook?.call(
+      QuarantineCleanPlanSnapshotPoint.afterFirstSnapshot,
+    );
+
+    late final List<_CanonicalCleanBase> finalBases;
+    late final Map<String, _QuarantineCleanTreeSnapshot> secondSnapshots;
+    late final List<QuarantineInspection> finalInspections;
+    try {
+      finalBases = _canonicalCleanPlanBases(requestedBases);
+      secondSnapshots = <String, _QuarantineCleanTreeSnapshot>{};
+      for (final target in initialTargets) {
+        secondSnapshots[target.inspection.runId] = await _captureCleanTree(
+          target.directory,
+        );
+      }
+      finalInspections = await inspectQuarantines(
+        quarantineBases: finalBases.map((base) => base.directory),
+      );
+      _requireCleanPlanInventory(finalInspections);
+    } on QuarantineCleanPlanDriftException {
+      rethrow;
+    } on Object catch (error) {
+      throw QuarantineCleanPlanDriftException(
+        'Quarantine clean evidence drifted between snapshots: $error',
+      );
+    }
+
+    final initialBasePaths = initialBases
+        .map((base) => base.canonicalPath)
+        .toList(growable: false);
+    final finalBasePaths = finalBases
+        .map((base) => base.canonicalPath)
+        .toList(growable: false);
+    if (!_sameStringLists(initialBasePaths, finalBasePaths) ||
+        _cleanInventoryEvidence(initialInspections) !=
+            _cleanInventoryEvidence(finalInspections)) {
+      throw QuarantineCleanPlanDriftException(
+        'Quarantine clean authority drifted between snapshots.',
+      );
+    }
+
+    final targets = <QuarantineCleanTarget>[];
+    final anchoredByBase = <String, AnchoredCleanBase>{};
+    Object? closeError;
+    StackTrace? closeStackTrace;
+    try {
+      for (final target in initialTargets) {
+        final first = firstSnapshots[target.inspection.runId]!;
+        final second = secondSnapshots[target.inspection.runId]!;
+        if (first.canonicalJson != second.canonicalJson) {
+          throw QuarantineCleanPlanDriftException(
+            'Quarantine tree drifted between snapshots: '
+            '${target.directory.path}.',
+          );
+        }
+        final anchored = anchoredByBase[target.base.canonicalPath] ??=
+            await _cleanMoveBackendFactory().anchor(target.base.directory);
+        if (!p.equals(anchored.canonicalPath, target.base.canonicalPath)) {
+          throw QuarantineCleanPlanDriftException(
+            'Quarantine base identity changed during clean planning.',
+          );
+        }
+        final rootIdentity = await anchored.inspectDirectory(<String>[
+          target.inspection.runId,
+        ]);
+        final authority = target.inspection.authority;
+        targets.add(
+          QuarantineCleanTarget(
+            runId: target.inspection.runId,
+            canonicalPath: target.canonicalPath,
+            layoutSha256: first.sha256,
+            journalRevision: authority.revision,
+            payloadSha256: authority.payloadSha256,
+            authority: authority.authority,
+            repairAction: authority.repairAction,
+            rootIdentity: rootIdentity,
+            retainedDestinationComponents: <String>[
+              ToolWorkspace.retainedCleanDirectoryName,
+              ToolWorkspace.retainedCleanSchemaDirectoryName,
+              'operation-placeholder',
+              'runs',
+              target.inspection.runId,
+            ],
+          ),
+        );
+      }
+    } finally {
+      for (final anchored in anchoredByBase.values.toList().reversed) {
+        try {
+          await anchored.close();
+        } on Object catch (error, stackTrace) {
+          closeError ??= error;
+          closeStackTrace ??= stackTrace;
+        }
+      }
+      if (closeError != null) {
+        Error.throwWithStackTrace(closeError, closeStackTrace!);
+      }
+    }
+    return QuarantineCleanPlan.fromEvidence(
+      scope: runId == null ? CleanScope.all : CleanScope.targeted,
+      canonicalBases: initialBasePaths,
+      targets: targets,
+      backend: CleanBackendDisclosure.recoverableLogicalMove,
+    );
+  }
+
+  List<_CanonicalCleanBase> _canonicalCleanPlanBases(
+    Iterable<Directory> requestedBases,
+  ) {
+    final byCanonicalPath = <String, _CanonicalCleanBase>{};
+    for (final requestedBase in requestedBases) {
+      final absolute = p.normalize(p.absolute(requestedBase.path));
+      final type = FileSystemEntity.typeSync(absolute, followLinks: false);
+      if (type == FileSystemEntityType.link) {
+        throw QuarantineException(
+          'Quarantine base is a symbolic link: $absolute.',
+        );
+      }
+      if (type != FileSystemEntityType.directory &&
+          type != FileSystemEntityType.notFound) {
+        throw QuarantineException(
+          'Quarantine base is not a real directory: $absolute.',
+        );
+      }
+      final canonical = type == FileSystemEntityType.directory
+          ? p.normalize(Directory(absolute).resolveSymbolicLinksSync())
+          : _canonicalMissingCleanPlanPath(absolute);
+      byCanonicalPath[canonical] = _CanonicalCleanBase(
+        canonicalPath: canonical,
+        directory: Directory(canonical),
+      );
+    }
+    final result = byCanonicalPath.values.toList()
+      ..sort(
+        (left, right) => left.canonicalPath.compareTo(right.canonicalPath),
+      );
+    return List<_CanonicalCleanBase>.unmodifiable(result);
+  }
+
+  String _canonicalMissingCleanPlanPath(String path) {
+    var existing = path;
+    final missingSegments = <String>[];
+    while (FileSystemEntity.typeSync(existing, followLinks: false) ==
+        FileSystemEntityType.notFound) {
+      final parent = p.dirname(existing);
+      if (parent == existing) break;
+      missingSegments.add(p.basename(existing));
+      existing = parent;
+    }
+    final existingType = FileSystemEntity.typeSync(
+      existing,
+      followLinks: false,
+    );
+    if (existingType != FileSystemEntityType.directory &&
+        existingType != FileSystemEntityType.link) {
+      throw QuarantineException(
+        'Quarantine base has no canonical directory ancestor: $path.',
+      );
+    }
+    final canonicalAncestor = p.normalize(
+      Directory(existing).resolveSymbolicLinksSync(),
+    );
+    return p.normalize(
+      p.joinAll([canonicalAncestor, ...missingSegments.reversed]),
+    );
+  }
+
+  List<ValidQuarantineInspection> _requireCleanPlanInventory(
+    List<QuarantineInspection> inspections,
+  ) {
+    final invalid = inspections.whereType<InvalidQuarantineInspection>();
+    if (invalid.isNotEmpty) {
+      final first = invalid.first;
+      throw QuarantineException(
+        'Cannot plan quarantine clean: ${first.errorCode} at ${first.path}.',
+      );
+    }
+    final valid = inspections.whereType<ValidQuarantineInspection>().toList();
+    final blocked = valid.where((inspection) => !inspection.cleanable);
+    if (blocked.isNotEmpty) {
+      final first = blocked.first;
+      throw QuarantineException(
+        'Cannot plan quarantine clean: ${first.runId} is not cleanable.',
+      );
+    }
+    return List<ValidQuarantineInspection>.unmodifiable(valid);
+  }
+
+  List<ValidQuarantineInspection> _selectCleanPlanTargets(
+    List<ValidQuarantineInspection> valid, {
+    required String? runId,
+  }) {
+    final selected = runId == null
+        ? valid.toList()
+        : valid.where((inspection) => inspection.runId == runId).toList();
+    if (runId != null && selected.length != 1) {
+      throw QuarantineException('Quarantine not found: $runId');
+    }
+    selected.sort((left, right) {
+      final id = left.runId.compareTo(right.runId);
+      return id == 0 ? left.path.compareTo(right.path) : id;
+    });
+    return List<ValidQuarantineInspection>.unmodifiable(selected);
+  }
+
+  List<_CanonicalCleanTarget> _canonicalCleanPlanTargets(
+    List<ValidQuarantineInspection> inspections, {
+    required List<_CanonicalCleanBase> bases,
+  }) {
+    final result = <_CanonicalCleanTarget>[];
+    final seenCanonicalPaths = <String>{};
+    for (final inspection in inspections) {
+      final path = p.normalize(p.absolute(inspection.path));
+      final type = FileSystemEntity.typeSync(path, followLinks: false);
+      if (type != FileSystemEntityType.directory) {
+        throw QuarantineException(
+          'Quarantine target is not a real directory: $path.',
+        );
+      }
+      final containingBases = bases.where(
+        (base) => p.equals(p.dirname(path), base.canonicalPath),
+      );
+      if (containingBases.length != 1) {
+        throw QuarantineException(
+          'Quarantine target is outside its selected canonical base: $path.',
+        );
+      }
+      final base = containingBases.single;
+      final canonicalPath = p.normalize(
+        Directory(path).resolveSymbolicLinksSync(),
+      );
+      if (!p.isWithin(base.canonicalPath, canonicalPath) ||
+          !seenCanonicalPaths.add(canonicalPath)) {
+        throw QuarantineException(
+          'Quarantine target escapes or aliases its canonical base: $path.',
+        );
+      }
+      result.add(
+        _CanonicalCleanTarget(
+          inspection: inspection,
+          canonicalPath: canonicalPath,
+          directory: Directory(canonicalPath),
+          base: base,
+        ),
+      );
+    }
+    return List<_CanonicalCleanTarget>.unmodifiable(result);
+  }
+
+  String _cleanInventoryEvidence(List<QuarantineInspection> inspections) =>
+      jsonEncode(
+        inspections
+            .map<Object?>((inspection) {
+              return switch (inspection) {
+                InvalidQuarantineInspection() => <String, Object?>{
+                  'kind': 'invalid',
+                  'path': inspection.path,
+                  'errorCode': inspection.errorCode,
+                  'blocksApply': inspection.blocksApply,
+                },
+                ValidQuarantineInspection() => <String, Object?>{
+                  'kind': 'valid',
+                  'path': inspection.path,
+                  'runId': inspection.runId,
+                  'cleanable': inspection.cleanable,
+                  'recoveryRequired': inspection.recoveryRequired,
+                  'revision': inspection.authority.revision,
+                  'payloadSha256': inspection.authority.payloadSha256,
+                  'authority': inspection.authority.authority.name,
+                  'repairAction': inspection.authority.repairAction.name,
+                  'lifecycle': inspection.lifecycle?.name,
+                },
+              };
+            })
+            .toList(growable: false),
+      );
+
+  bool _sameStringLists(List<String> left, List<String> right) {
+    if (left.length != right.length) return false;
+    for (var index = 0; index < left.length; index++) {
+      if (left[index] != right[index]) return false;
+    }
+    return true;
+  }
+
+  Future<_QuarantineCleanTreeSnapshot> _captureCleanTree(Directory root) async {
+    final canonicalRoot = p.normalize(p.absolute(root.path));
+    final entries = <Map<String, Object?>>[];
+    try {
+      await _captureCleanDirectory(
+        directory: root,
+        canonicalRoot: canonicalRoot,
+        entries: entries,
+      );
+    } on QuarantineException {
+      rethrow;
+    } on FileSystemException catch (error) {
+      throw QuarantineException(
+        'Quarantine tree entry is unreadable: ${error.path ?? root.path}.',
+      );
+    }
+    entries.sort(
+      (left, right) =>
+          (left['path']! as String).compareTo(right['path']! as String),
+    );
+    final canonicalJson = jsonEncode(<String, Object?>{
+      'version': 1,
+      'entries': entries,
+    });
+    return _QuarantineCleanTreeSnapshot(
+      canonicalJson: canonicalJson,
+      sha256: sha256.convert(utf8.encode(canonicalJson)).toString(),
+    );
+  }
+
+  Future<void> _captureCleanDirectory({
+    required Directory directory,
+    required String canonicalRoot,
+    required List<Map<String, Object?>> entries,
+  }) async {
+    final path = p.normalize(p.absolute(directory.path));
+    _requireCleanTreePath(path, canonicalRoot: canonicalRoot, allowRoot: true);
+    final beforeType = FileSystemEntity.typeSync(path, followLinks: false);
+    if (beforeType != FileSystemEntityType.directory) {
+      if (beforeType == FileSystemEntityType.link) {
+        throw QuarantineException(
+          'Symbolic links are not allowed in a quarantine clean plan: $path.',
+        );
+      }
+      throw QuarantineCleanPlanDriftException(
+        'Quarantine directory changed during tree enumeration: $path.',
+      );
+    }
+    _requireResolvedCleanTreePath(
+      directory.resolveSymbolicLinksSync(),
+      expectedPath: path,
+      canonicalRoot: canonicalRoot,
+    );
+    final beforeStat = directory.statSync();
+    final children = await directory.list(followLinks: false).toList();
+    children.sort((left, right) => left.path.compareTo(right.path));
+    entries.add(
+      _cleanTreeEntry(
+        path: _portableCleanTreePath(path, canonicalRoot),
+        type: 'directory',
+        size: null,
+        byteSha256: null,
+        posixMode: _portableCleanTreeMode(beforeStat),
+      ),
+    );
+    for (final child in children) {
+      final childPath = p.normalize(p.absolute(child.path));
+      _requireCleanTreePath(childPath, canonicalRoot: canonicalRoot);
+      final childType = FileSystemEntity.typeSync(
+        childPath,
+        followLinks: false,
+      );
+      switch (childType) {
+        case FileSystemEntityType.directory:
+          await _captureCleanDirectory(
+            directory: Directory(childPath),
+            canonicalRoot: canonicalRoot,
+            entries: entries,
+          );
+        case FileSystemEntityType.file:
+          entries.add(
+            await _captureCleanFile(
+              File(childPath),
+              canonicalRoot: canonicalRoot,
+            ),
+          );
+        case FileSystemEntityType.link:
+          throw QuarantineException(
+            'Symbolic links are not allowed in a quarantine clean plan: '
+            '$childPath.',
+          );
+        case FileSystemEntityType.pipe || FileSystemEntityType.unixDomainSock:
+          throw QuarantineException(
+            'Special filesystem entries are not allowed in a quarantine '
+            'clean plan: $childPath.',
+          );
+        case FileSystemEntityType.notFound:
+          throw QuarantineCleanPlanDriftException(
+            'Quarantine entry disappeared during tree enumeration: '
+            '$childPath.',
+          );
+        default:
+          throw QuarantineException(
+            'Unsupported filesystem entry in quarantine clean plan: '
+            '$childPath.',
+          );
+      }
+    }
+    final afterType = FileSystemEntity.typeSync(path, followLinks: false);
+    final afterStat = directory.statSync();
+    if (afterType != FileSystemEntityType.directory ||
+        !_sameCleanTreeStat(beforeStat, afterStat)) {
+      throw QuarantineCleanPlanDriftException(
+        'Quarantine directory changed during tree enumeration: $path.',
+      );
+    }
+    _requireResolvedCleanTreePath(
+      directory.resolveSymbolicLinksSync(),
+      expectedPath: path,
+      canonicalRoot: canonicalRoot,
+    );
+  }
+
+  Future<Map<String, Object?>> _captureCleanFile(
+    File file, {
+    required String canonicalRoot,
+  }) async {
+    final path = p.normalize(p.absolute(file.path));
+    _requireCleanTreePath(path, canonicalRoot: canonicalRoot);
+    final beforeType = FileSystemEntity.typeSync(path, followLinks: false);
+    if (beforeType != FileSystemEntityType.file) {
+      throw QuarantineCleanPlanDriftException(
+        'Quarantine file changed before it could be opened: $path.',
+      );
+    }
+    _requireResolvedCleanTreePath(
+      file.resolveSymbolicLinksSync(),
+      expectedPath: path,
+      canonicalRoot: canonicalRoot,
+    );
+    final beforeStat = file.statSync();
+    final digestSink = _SingleDigestSink();
+    final input = sha256.startChunkedConversion(digestSink);
+    var bytesRead = 0;
+    final handle = await file.open();
+    try {
+      while (true) {
+        final chunk = await handle.read(64 * 1024);
+        if (chunk.isEmpty) break;
+        bytesRead += chunk.length;
+        input.add(chunk);
+      }
+    } finally {
+      await handle.close();
+    }
+    input.close();
+    final afterType = FileSystemEntity.typeSync(path, followLinks: false);
+    final afterStat = file.statSync();
+    if (afterType != FileSystemEntityType.file ||
+        bytesRead != beforeStat.size ||
+        bytesRead != afterStat.size ||
+        !_sameCleanTreeStat(beforeStat, afterStat)) {
+      throw QuarantineCleanPlanDriftException(
+        'Quarantine file changed while it was being read: $path.',
+      );
+    }
+    _requireResolvedCleanTreePath(
+      file.resolveSymbolicLinksSync(),
+      expectedPath: path,
+      canonicalRoot: canonicalRoot,
+    );
+    return _cleanTreeEntry(
+      path: _portableCleanTreePath(path, canonicalRoot),
+      type: 'file',
+      size: bytesRead,
+      byteSha256: digestSink.value.toString(),
+      posixMode: _portableCleanTreeMode(beforeStat),
+    );
+  }
+
+  void _requireCleanTreePath(
+    String path, {
+    required String canonicalRoot,
+    bool allowRoot = false,
+  }) {
+    if (p.equals(path, canonicalRoot)) {
+      if (allowRoot) return;
+      throw QuarantineException(
+        'Quarantine tree child aliases its canonical root: $path.',
+      );
+    }
+    if (!p.isWithin(canonicalRoot, path)) {
+      throw QuarantineException(
+        'Quarantine tree path escapes its canonical target: $path.',
+      );
+    }
+  }
+
+  void _requireResolvedCleanTreePath(
+    String resolved, {
+    required String expectedPath,
+    required String canonicalRoot,
+  }) {
+    final normalized = p.normalize(resolved);
+    if (!p.equals(normalized, expectedPath) ||
+        (!p.equals(normalized, canonicalRoot) &&
+            !p.isWithin(canonicalRoot, normalized))) {
+      throw QuarantineException(
+        'Quarantine tree path resolves outside its canonical target: '
+        '$expectedPath.',
+      );
+    }
+  }
+
+  String _portableCleanTreePath(String path, String canonicalRoot) {
+    if (p.equals(path, canonicalRoot)) return '.';
+    final relative = p.relative(path, from: canonicalRoot);
+    if (p.isAbsolute(relative) ||
+        relative == '..' ||
+        relative.startsWith('..${p.separator}')) {
+      throw QuarantineException(
+        'Quarantine tree path escapes its canonical target: $path.',
+      );
+    }
+    return p.posix.joinAll(p.split(relative));
+  }
+
+  Map<String, Object?> _cleanTreeEntry({
+    required String path,
+    required String type,
+    required int? size,
+    required String? byteSha256,
+    required int? posixMode,
+  }) => <String, Object?>{
+    'path': path,
+    'type': type,
+    'size': size,
+    'byteSha256': byteSha256,
+    'posixMode': posixMode,
+  };
+
+  int? _portableCleanTreeMode(FileStat stat) =>
+      Platform.isLinux || Platform.isMacOS ? stat.mode & 0xfff : null;
+
+  bool _sameCleanTreeStat(FileStat left, FileStat right) =>
+      left.type == right.type &&
+      left.size == right.size &&
+      left.modified == right.modified &&
+      left.changed == right.changed &&
+      _portableCleanTreeMode(left) == _portableCleanTreeMode(right);
 
   /// Strictly enumerates and validates every raw run directory before a batch
   /// clean. Unlike [listQuarantines], invalid ledgers are never skipped.
@@ -2057,6 +3280,10 @@ class QuarantineManager {
           await Directory(basePath).list(followLinks: false).toList()
             ..sort((left, right) => left.path.compareTo(right.path));
       for (final child in children) {
+        if (p.basename(child.path) ==
+            ToolWorkspace.retainedCleanDirectoryName) {
+          continue;
+        }
         final childType = FileSystemEntity.typeSync(
           child.path,
           followLinks: false,
@@ -2085,7 +3312,6 @@ class QuarantineManager {
               '${manifest.runId}.',
             );
           }
-          _validateManifestProject(manifest);
           await _requireCleanableState(quarantineDir, document);
           final previousPath = runPathsById[manifest.runId];
           if (previousPath != null && !p.equals(previousPath, child.path)) {
@@ -2114,18 +3340,6 @@ class QuarantineManager {
     }
     quarantines.sort((a, b) => b.timestamp.compareTo(a.timestamp));
     return quarantines;
-  }
-
-  /// Deletes the quarantine directory for [runId].
-  Future<void> cleanQuarantine({
-    required String runId,
-    String quarantineBase = defaultQuarantineDir,
-  }) async {
-    final quarantineDir = await _validateCleanTarget(
-      runId: runId,
-      quarantineBase: quarantineBase,
-    );
-    await quarantineDir.delete(recursive: true);
   }
 
   /// Verifies that cleaning [runId] cannot discard active or recovery state.
@@ -2175,7 +3389,6 @@ class QuarantineManager {
         'Run ID mismatch: expected $runId, got ${manifest.runId}',
       );
     }
-    _validateManifestProject(manifest);
     await _requireCleanableState(quarantineDir, document);
 
     return quarantineDir;
@@ -2185,8 +3398,79 @@ class QuarantineManager {
     Directory quarantineDir,
     _ManifestDocument document,
   ) async {
+    _validateManifestForInspectionAndClean(document);
+    await _requireCleanableFilesystemState(quarantineDir, document);
+  }
+
+  void _validateManifestForInspectionAndClean(_ManifestDocument document) {
     final manifest = document.manifest;
+    _validateManifestProject(manifest);
     _requireV3PosixModeEvidence(manifest);
+    _validateTypedManifestTerminalState(document);
+  }
+
+  void _validateTypedManifestTerminalState(_ManifestDocument document) {
+    final manifest = document.manifest;
+    final lifecycle = document.runLifecycle?.state;
+    if (!manifest.usesTransactionJournal) {
+      if (lifecycle != null) {
+        throw QuarantineException(
+          'Legacy manifest ${manifest.runId} has a V3 lifecycle marker.',
+        );
+      }
+      return;
+    }
+    switch (lifecycle) {
+      case null:
+        if (!manifest.fullRollbackVerified) {
+          final claimsRollbackWithoutFullRunProof =
+              manifest.fullRollbackAtUtc != null ||
+              manifest.transactions.any(
+                (transaction) =>
+                    transaction.status ==
+                        QuarantineTransactionStatus.rolledBackVerified ||
+                    transaction.rollbackVerified,
+              ) ||
+              manifest.cases.any(
+                (applyCase) =>
+                    applyCase.status == QuarantineCaseStatus.rolledBack,
+              );
+          if (claimsRollbackWithoutFullRunProof) {
+            throw QuarantineException(
+              'Markerless V3 run ${manifest.runId} claims rollback without '
+              'full-run verification.',
+            );
+          }
+          return;
+        }
+        _validateRolledBackTransactionJournal(manifest);
+        _validateSelectionTransactions(manifest, requireExactCoverage: false);
+      case QuarantineRunLifecycleState.active ||
+          QuarantineRunLifecycleState.recoveryRequired:
+        if (manifest.fullRollbackVerified) {
+          throw QuarantineException(
+            'Non-terminal run ${manifest.runId} claims a full rollback.',
+          );
+        }
+      case QuarantineRunLifecycleState.completed:
+        _validateCompletedTransactionJournal(manifest);
+        _validateSelectionTransactions(manifest, requireExactCoverage: true);
+      case QuarantineRunLifecycleState.rolledBackVerified:
+        _validateRolledBackTransactionJournal(manifest);
+        _validateSelectionTransactions(manifest, requireExactCoverage: false);
+    }
+  }
+
+  Future<void> _requireCleanableFilesystemState(
+    Directory quarantineDir,
+    _ManifestDocument document,
+  ) async {
+    final manifest = document.manifest;
+    final lifecycle = document.runLifecycle?.state;
+    final manifestStateCleanable = isQuarantineManifestStateCleanable(
+      manifest: manifest,
+      lifecycle: lifecycle,
+    );
     final recoveryPath = p.join(quarantineDir.path, 'recovery');
     final recoveryType = FileSystemEntity.typeSync(
       recoveryPath,
@@ -2208,14 +3492,10 @@ class QuarantineManager {
     }
 
     final blockedTransactions = manifest.transactions.where(
-      (transaction) => switch (transaction.status) {
-        QuarantineTransactionStatus.rolledBackVerified => false,
-        QuarantineTransactionStatus.committed => !manifest.fullRollbackVerified,
-        QuarantineTransactionStatus.pending ||
-        QuarantineTransactionStatus.applied ||
-        QuarantineTransactionStatus.verified ||
-        QuarantineTransactionStatus.recoveryRequired => true,
-      },
+      (transaction) => quarantineTransactionBlocksClean(
+        transaction,
+        fullRollbackVerified: manifest.fullRollbackVerified,
+      ),
     );
     if (blockedTransactions.isNotEmpty) {
       final states = blockedTransactions
@@ -2232,11 +3512,10 @@ class QuarantineManager {
     }
 
     final blockedCases = manifest.cases.where(
-      (applyCase) => switch (applyCase.status) {
-        QuarantineCaseStatus.rolledBack || QuarantineCaseStatus.failed => false,
-        QuarantineCaseStatus.kept => !manifest.fullRollbackVerified,
-        QuarantineCaseStatus.backedUp || QuarantineCaseStatus.applied => true,
-      },
+      (applyCase) => quarantineCaseBlocksClean(
+        applyCase,
+        fullRollbackVerified: manifest.fullRollbackVerified,
+      ),
     );
     if (blockedCases.isNotEmpty) {
       final states = blockedCases
@@ -2246,6 +3525,26 @@ class QuarantineManager {
         'Quarantine ${manifest.runId} has unrolled cases: $states. '
         'Rollback or recover them before cleaning.',
       );
+    }
+
+    if (!manifestStateCleanable) {
+      switch (lifecycle) {
+        case QuarantineRunLifecycleState.active:
+          throw QuarantineException(
+            'Quarantine ${manifest.runId} is active. Complete or roll back '
+            'the run before cleaning.',
+          );
+        case QuarantineRunLifecycleState.recoveryRequired:
+          throw QuarantineException(
+            'Quarantine ${manifest.runId} requires recovery before cleaning.',
+          );
+        case QuarantineRunLifecycleState.completed ||
+            QuarantineRunLifecycleState.rolledBackVerified ||
+            null:
+          throw QuarantineException(
+            'Quarantine ${manifest.runId} is not cleanable.',
+          );
+      }
     }
 
     if (!manifest.usesCaseJournal && !manifest.fullRollbackVerified) {
@@ -2280,6 +3579,7 @@ class QuarantineManager {
             !await Directory(recoveryPath).list(followLinks: false).isEmpty)) {
       throw QuarantineException('Recovery artifacts are still present.');
     }
+    _validateTypedManifestTerminalState(document);
 
     if (!manifest.usesTransactionJournal) {
       if (!manifest.fullRollbackVerified) {
@@ -2301,8 +3601,6 @@ class QuarantineManager {
           'V3 ledger has no run-level completion marker.',
         );
       }
-      _validateRolledBackTransactionJournal(manifest);
-      _validateSelectionTransactions(manifest, requireExactCoverage: false);
       await _validateRestoredDisplacements(quarantineDir, document);
       return;
     }
@@ -2314,12 +3612,8 @@ class QuarantineManager {
       case QuarantineRunLifecycleState.recoveryRequired:
         throw QuarantineException('Run ${manifest.runId} requires recovery.');
       case QuarantineRunLifecycleState.completed:
-        _validateCompletedTransactionJournal(manifest);
-        _validateSelectionTransactions(manifest, requireExactCoverage: true);
         await _validateCompletedDisplacements(quarantineDir, document);
       case QuarantineRunLifecycleState.rolledBackVerified:
-        _validateRolledBackTransactionJournal(manifest);
-        _validateSelectionTransactions(manifest, requireExactCoverage: false);
         await _validateRestoredDisplacements(quarantineDir, document);
     }
   }
@@ -2440,6 +3734,11 @@ class QuarantineManager {
   }
 
   void _validateCompletedTransactionJournal(QuarantineManifest manifest) {
+    if (manifest.transactions.isEmpty) {
+      throw QuarantineException(
+        'Completed run ${manifest.runId} has no transactions.',
+      );
+    }
     if (manifest.fullRollbackVerified) {
       throw QuarantineException(
         'Completed run ${manifest.runId} also claims a full rollback.',
@@ -2642,7 +3941,13 @@ class QuarantineManager {
       casesById[applyCase.caseId] = applyCase;
     }
     final ownedCaseIds = <String>{};
+    final transactionIds = <String>{};
     for (final transaction in manifest.transactions) {
+      if (!transactionIds.add(transaction.transactionId)) {
+        throw QuarantineException(
+          'Duplicate transaction ID: ${transaction.transactionId}.',
+        );
+      }
       if (transaction.status != expectedTransactionStatus) {
         throw QuarantineException(
           'Transaction ${transaction.transactionId} is '
@@ -2829,6 +4134,123 @@ class QuarantineManager {
     final manifestFile = File(p.join(quarantineDir.path, 'manifest.json'));
     final temporaryFile = File('${manifestFile.path}.tmp');
     final previousFile = File('${manifestFile.path}.previous');
+    final resolution = await _evaluateManifestAuthority(quarantineDir);
+    final expected = resolution.candidate;
+    if (resolution.repairAction != ManifestRepairAction.none) {
+      await _journalHook?.call(
+        QuarantineJournalPoint.beforeAuthorityRepairRevalidation,
+      );
+    }
+    switch (resolution.repairAction) {
+      case ManifestRepairAction.none:
+        break;
+      case ManifestRepairAction.discardUncommittedTemporary:
+        await _journalHook?.call(
+          QuarantineJournalPoint.beforeStaleCandidateCleanup,
+        );
+        await _requireUnchangedManifestAuthority(quarantineDir, resolution);
+        await _requireUnchangedManifestCandidate(
+          temporaryFile,
+          resolution.repairCandidate!,
+        );
+        await temporaryFile.delete();
+        break;
+      case ManifestRepairAction.promoteTemporary:
+        await _requireUnchangedManifestAuthority(quarantineDir, resolution);
+        if (manifestFile.existsSync()) {
+          throw QuarantineException(
+            'Manifest authority changed before temporary promotion in '
+            '${quarantineDir.path}.',
+          );
+        }
+        await _requireUnchangedManifestCandidate(
+          temporaryFile,
+          resolution.repairCandidate!,
+        );
+        await temporaryFile.rename(manifestFile.path);
+        break;
+      case ManifestRepairAction.restorePrevious:
+        await _requireUnchangedManifestAuthority(quarantineDir, resolution);
+        if (manifestFile.existsSync()) {
+          throw QuarantineException(
+            'Manifest authority changed before previous restoration in '
+            '${quarantineDir.path}.',
+          );
+        }
+        final previous = await _requireUnchangedManifestCandidate(
+          previousFile,
+          resolution.repairCandidate!,
+        );
+        await _writeFlushed(manifestFile, previous.contents);
+        break;
+    }
+
+    final authoritative = await _readManifestCandidate(manifestFile);
+    if (authoritative.revision != expected.revision ||
+        authoritative.payloadSha256 != expected.payloadSha256) {
+      throw QuarantineException(
+        'Manifest authority changed while applying '
+        '${resolution.repairAction.name} in ${quarantineDir.path}.',
+      );
+    }
+    return authoritative;
+  }
+
+  Future<void> _requireUnchangedManifestAuthority(
+    Directory quarantineDir,
+    _ManifestAuthorityResolution expected,
+  ) async {
+    final current = await _evaluateManifestAuthority(quarantineDir);
+    if (current.repairAction != expected.repairAction ||
+        current.candidate.candidateName != expected.candidate.candidateName ||
+        current.candidates.length != expected.candidates.length) {
+      throw QuarantineException(
+        'Manifest authority changed before declared repair in '
+        '${quarantineDir.path}.',
+      );
+    }
+    for (final entry in expected.candidates.entries) {
+      final candidate = current.candidates[entry.key];
+      if (candidate == null ||
+          !_sameManifestCandidate(candidate, entry.value)) {
+        throw QuarantineException(
+          'Manifest authority changed before declared repair in '
+          '${quarantineDir.path}.',
+        );
+      }
+    }
+  }
+
+  bool _sameManifestCandidate(
+    _ManifestDocument left,
+    _ManifestDocument right,
+  ) =>
+      left.candidateName == right.candidateName &&
+      left.revision == right.revision &&
+      left.payloadSha256 == right.payloadSha256 &&
+      left.contents == right.contents;
+
+  Future<_ManifestDocument> _requireUnchangedManifestCandidate(
+    File file,
+    _ManifestDocument expected,
+  ) async {
+    final current = await _readManifestCandidate(file);
+    if (current.revision != expected.revision ||
+        current.payloadSha256 != expected.payloadSha256 ||
+        current.contents != expected.contents) {
+      throw QuarantineException(
+        'Manifest candidate changed before declared repair: ${file.path}.',
+      );
+    }
+    return current;
+  }
+
+  Future<_ManifestAuthorityResolution> _evaluateManifestAuthority(
+    Directory quarantineDir,
+  ) async {
+    final manifestFile = File(p.join(quarantineDir.path, 'manifest.json'));
+    final temporaryFile = File('${manifestFile.path}.tmp');
+    final previousFile = File('${manifestFile.path}.previous');
 
     Future<_ManifestDocument?> load(File file) async {
       if (!file.existsSync()) return null;
@@ -2838,62 +4260,34 @@ class QuarantineManager {
     final primary = await load(manifestFile);
     final temporary = await load(temporaryFile);
     final previous = await load(previousFile);
-
-    if (primary != null) {
-      if (temporary != null) {
-        final stagedNext = temporary.revision == primary.revision + 1;
-        final duplicate =
-            temporary.revision == primary.revision &&
-            temporary.payloadSha256 == primary.payloadSha256;
-        if (!stagedNext && !duplicate) {
-          throw QuarantineException(
-            'Ambiguous manifest transition in ${quarantineDir.path}.',
-          );
-        }
-        await _journalHook?.call(
-          QuarantineJournalPoint.beforeStaleCandidateCleanup,
-        );
-        await temporaryFile.delete();
-      }
-      if (previous != null) {
-        final validPrevious =
-            (primary.revision == previous.revision + 1) ||
-            (primary.revision == previous.revision &&
-                primary.payloadSha256 == previous.payloadSha256);
-        if (!validPrevious) {
-          throw QuarantineException(
-            'Ambiguous previous manifest in ${quarantineDir.path}.',
-          );
-        }
-      }
-      return primary;
+    try {
+      final evaluation = evaluateManifestAuthority(
+        primary: primary?.authorityEvidence,
+        temporary: temporary?.authorityEvidence,
+        previous: previous?.authorityEvidence,
+        location: quarantineDir.path,
+      );
+      final documents = <ManifestCandidateName, _ManifestDocument>{
+        if (primary != null) primary.candidateName: primary,
+        if (temporary != null) temporary.candidateName: temporary,
+        if (previous != null) previous.candidateName: previous,
+      };
+      return _ManifestAuthorityResolution(
+        candidate: documents[evaluation.authority]!,
+        repairAction: evaluation.repairAction,
+        repairCandidate: switch (evaluation.repairAction) {
+          ManifestRepairAction.none => null,
+          ManifestRepairAction.discardUncommittedTemporary ||
+          ManifestRepairAction.promoteTemporary => temporary,
+          ManifestRepairAction.restorePrevious => previous,
+        },
+        candidates: Map<ManifestCandidateName, _ManifestDocument>.unmodifiable(
+          documents,
+        ),
+      );
+    } on FormatException catch (error) {
+      throw QuarantineException(error.message);
     }
-
-    if (temporary != null && previous != null) {
-      if (temporary.revision != previous.revision + 1) {
-        throw QuarantineException(
-          'Ambiguous interrupted manifest replacement in '
-          '${quarantineDir.path}.',
-        );
-      }
-      await temporaryFile.rename(manifestFile.path);
-      return temporary;
-    }
-    if (temporary != null) {
-      if (temporary.revision != 1) {
-        throw QuarantineException(
-          'Manifest staging file has no authoritative predecessor: '
-          '${temporaryFile.path}.',
-        );
-      }
-      await temporaryFile.rename(manifestFile.path);
-      return temporary;
-    }
-    if (previous != null) {
-      await _writeFlushed(manifestFile, previous.contents);
-      return previous;
-    }
-    throw QuarantineException('Manifest not found: ${manifestFile.path}');
   }
 
   Future<_ManifestDocument> _readManifestCandidate(File file) async {
@@ -2909,6 +4303,7 @@ class QuarantineManager {
       if (decoded is! Map<String, dynamic>) {
         throw const FormatException('root must be a JSON object');
       }
+      _validateSupportedManifestVersion(decoded);
       final payload = Map<String, dynamic>.from(decoded)..remove('_journal');
       final journal = decoded['_journal'];
       var revision = 0;
@@ -2959,10 +4354,12 @@ class QuarantineManager {
       final manifest = QuarantineManifest.fromJson(payload);
       _validateVerificationWaveJournal(manifest);
       return _ManifestDocument(
+        candidateName: _manifestCandidateName(file),
         manifest: manifest,
         revision: revision,
         payloadSha256: payloadSha256,
         contents: contents,
+        canonicalDocument: _immutableJsonMap(decoded),
         runLifecycle: runLifecycle,
         caseDisplacements: caseDisplacements,
       );
@@ -2972,6 +4369,14 @@ class QuarantineManager {
       throw QuarantineException(
         'Invalid quarantine manifest: ${file.path} ($error)',
       );
+    }
+  }
+
+  void _validateSupportedManifestVersion(Map<String, dynamic> document) {
+    final version = document['version'];
+    if (version == null) return;
+    if (version is! String || !RegExp(r'^(?:1|2|3)\.').hasMatch(version)) {
+      throw const FormatException('unsupported quarantine manifest version');
     }
   }
 
@@ -3274,10 +4679,25 @@ class QuarantineManager {
         timeout: const Duration(seconds: 10),
         maxOutputBytesPerStream: 64 * 1024,
       );
-    } on ProcessTerminationUnconfirmedException catch (error) {
+    } on ProcessCancellationBeforeLaunchException catch (error) {
       final state = await _describeAtomicPublishState(prepared, target);
       throw _AtomicPublishException(
-        'Atomic link process termination was not confirmed: $error. $state',
+        'Atomic link process was cancelled before launch by '
+        '${error.originalSignal}. $state',
+      );
+    } on ProcessCancellationConfirmedException catch (error) {
+      final state = await _describeAtomicPublishState(prepared, target);
+      throw _AtomicPublishException(
+        'Atomic link process cancellation was confirmed for root PID '
+        '${error.rootPid} after ${error.originalSignal}. $state',
+      );
+    } on ProcessTerminationUnconfirmedException catch (error) {
+      final state = await _describeAtomicPublishState(prepared, target);
+      final trigger = error.triggerSignal;
+      throw _AtomicPublishException(
+        'Atomic link process termination was not confirmed'
+        '${trigger == null ? '' : ' after $trigger'}: $error. $state',
+        processTerminationUnconfirmed: error,
       );
     } catch (error) {
       final state = await _describeAtomicPublishState(prepared, target);
@@ -5545,6 +6965,76 @@ class QuarantineManager {
   }
 }
 
+/// Observable boundary between the 2 independent clean tree snapshots.
+enum QuarantineCleanPlanSnapshotPoint {
+  /// Every selected target completed its first no-follow tree snapshot.
+  afterFirstSnapshot,
+}
+
+/// Observer used to test concurrent drift at the clean planning boundary.
+typedef QuarantineCleanPlanSnapshotHook =
+    FutureOr<void> Function(QuarantineCleanPlanSnapshotPoint point);
+
+class _CanonicalCleanBase {
+  const _CanonicalCleanBase({
+    required this.canonicalPath,
+    required this.directory,
+  });
+
+  final String canonicalPath;
+  final Directory directory;
+}
+
+class _CanonicalCleanTarget {
+  const _CanonicalCleanTarget({
+    required this.inspection,
+    required this.canonicalPath,
+    required this.directory,
+    required this.base,
+  });
+
+  final ValidQuarantineInspection inspection;
+  final String canonicalPath;
+  final Directory directory;
+  final _CanonicalCleanBase base;
+}
+
+RecoverableCleanMoveBackend _defaultCleanMoveBackend() {
+  if (Platform.isLinux || Platform.isMacOS) {
+    return PosixRecoverableCleanMoveBackend();
+  }
+  if (Platform.isWindows) return WindowsRecoverableCleanMoveBackend();
+  throw const CleanMoveException(
+    category: CleanMoveFailure.unsupportedPlatform,
+    operation: 'select-clean-backend',
+  );
+}
+
+class _QuarantineCleanTreeSnapshot {
+  const _QuarantineCleanTreeSnapshot({
+    required this.canonicalJson,
+    required this.sha256,
+  });
+
+  final String canonicalJson;
+  final String sha256;
+}
+
+class _SingleDigestSink implements Sink<Digest> {
+  Digest? _value;
+
+  Digest get value => _value ?? (throw StateError('Digest is not complete.'));
+
+  @override
+  void add(Digest data) {
+    if (_value != null) throw StateError('Digest was emitted more than once.');
+    _value = data;
+  }
+
+  @override
+  void close() {}
+}
+
 /// Metadata about a quarantine.
 class QuarantineInfo {
   /// Creates quarantine info.
@@ -5702,22 +7192,65 @@ bool _sameOrderedValues<T>(List<T> left, List<T> right) {
   return true;
 }
 
+Map<String, Object?> _immutableJsonMap(Map<String, dynamic> source) =>
+    Map<String, Object?>.unmodifiable(
+      source.map(
+        (key, value) =>
+            MapEntry<String, Object?>(key, _immutableJsonValue(value)),
+      ),
+    );
+
+Object? _immutableJsonValue(Object? value) => switch (value) {
+  final Map<String, dynamic> map => _immutableJsonMap(map),
+  final List<dynamic> list => List<Object?>.unmodifiable(
+    list.map(_immutableJsonValue),
+  ),
+  _ => value,
+};
+
+ManifestCandidateName _manifestCandidateName(File file) {
+  if (file.path.endsWith('.tmp')) return ManifestCandidateName.temporary;
+  if (file.path.endsWith('.previous')) return ManifestCandidateName.previous;
+  return ManifestCandidateName.primary;
+}
+
 class _ManifestDocument {
   const _ManifestDocument({
+    required this.candidateName,
     required this.manifest,
     required this.revision,
     required this.payloadSha256,
     required this.contents,
+    required this.canonicalDocument,
     required this.runLifecycle,
     required this.caseDisplacements,
   });
 
+  final ManifestCandidateName candidateName;
   final QuarantineManifest manifest;
   final int revision;
   final String payloadSha256;
   final String contents;
+  final Map<String, Object?> canonicalDocument;
   final _RunLifecycleDocument? runLifecycle;
   final List<_CaseDisplacementDocument> caseDisplacements;
+
+  ({int revision, String payloadSha256}) get authorityEvidence =>
+      (revision: revision, payloadSha256: payloadSha256);
+}
+
+class _ManifestAuthorityResolution {
+  const _ManifestAuthorityResolution({
+    required this.candidate,
+    required this.repairAction,
+    required this.repairCandidate,
+    required this.candidates,
+  });
+
+  final _ManifestDocument candidate;
+  final ManifestRepairAction repairAction;
+  final _ManifestDocument? repairCandidate;
+  final Map<ManifestCandidateName, _ManifestDocument> candidates;
 }
 
 class _CaseDisplacementDocument {
@@ -5805,21 +7338,6 @@ class _RunLifecycleDocument {
   Map<String, dynamic> toJson() => {'version': 1, 'state': state.name};
 }
 
-/// Run-level lifecycle persisted alongside the transaction journal.
-enum QuarantineRunLifecycleState {
-  /// The command may still add transactions or perform convergence checks.
-  active,
-
-  /// Every transaction committed and all run-level obligations completed.
-  completed,
-
-  /// A process or recovery failure left project bytes unsafe to touch.
-  recoveryRequired,
-
-  /// The whole run was restored and verified against its original baseline.
-  rolledBackVerified,
-}
-
 /// Observable points in the atomic manifest-journal publication protocol.
 enum QuarantineJournalPoint {
   /// The next revision is flushed and validated in the temporary file.
@@ -5836,6 +7354,9 @@ enum QuarantineJournalPoint {
 
   /// A completed or duplicate staged candidate is about to be removed.
   beforeStaleCandidateCleanup,
+
+  /// Authority repair is selected but no candidate has been mutated yet.
+  beforeAuthorityRepairRevalidation,
 }
 
 /// Fault observer used by journal crash-recovery tests.
@@ -5961,7 +7482,9 @@ typedef QuarantineSourceRenamer =
     Future<File> Function(File source, String destination);
 
 class _AtomicPublishException extends QuarantineException {
-  _AtomicPublishException(super.message);
+  _AtomicPublishException(super.message, {this.processTerminationUnconfirmed});
+
+  final ProcessTerminationUnconfirmedException? processTerminationUnconfirmed;
 }
 
 /// Signals path ambiguity that must not trigger automatic working-copy writes.
@@ -5969,6 +7492,37 @@ class QuarantineDisplacementRecoveryRequiredException
     extends QuarantineException {
   /// Creates a recovery-required displacement failure.
   QuarantineDisplacementRecoveryRequiredException(super.message);
+}
+
+/// Signals that clean-preview evidence changed while it was being observed.
+class QuarantineCleanPlanDriftException extends QuarantineException {
+  /// Creates a typed clean-plan drift failure.
+  QuarantineCleanPlanDriftException(super.message);
+}
+
+final class _RollbackWorkingCopyEvidence {
+  const _RollbackWorkingCopyEvidence({
+    required this.path,
+    required this.type,
+    required this.sha256,
+    required this.posixMode,
+  });
+
+  final String path;
+  final FileSystemEntityType type;
+  final String? sha256;
+  final int? posixMode;
+
+  @override
+  bool operator ==(Object other) =>
+      other is _RollbackWorkingCopyEvidence &&
+      path == other.path &&
+      type == other.type &&
+      sha256 == other.sha256 &&
+      posixMode == other.posixMode;
+
+  @override
+  int get hashCode => Object.hash(path, type, sha256, posixMode);
 }
 
 /// Thrown when a quarantine operation fails.

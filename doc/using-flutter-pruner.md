@@ -17,6 +17,96 @@ the [CLI example](../example/README.md). For implementation details, see the
 
 `scan` and dry-run still create tool-owned state under `.flutter_pruner/`.
 
+## CLI hierarchy, streams, and exits
+
+Use bare `flutter_pruner` for top-level help and bare `flutter_pruner
+quarantine` for quarantine help. `q` is the quarantine alias. `flutter_pruner
+help <path>` and `flutter_pruner <path> --help` are equivalent. Help presents
+canonical commands first, places aliases beside the owning command, and has no
+project, report, quarantine, or stdin side effect.
+
+Human command results are written to stdout and remain human text, including
+when redirected. Scan/apply progress, diagnostics, usage, and errors belong on
+stderr. JSON is not selected by redirecting stdout: scan/apply machine evidence
+is the immutable saved report. Use `--format json --output <file>` for a new
+scan or apply integration. `apply --report-format` and `apply --report-output`
+remain supported aliases with identical values and conflict behavior; use
+`--format` and `--output` in new invocations.
+
+### Terminal presentation and interruption
+
+Human output keeps its ANSI styling when stdout or stderr is redirected. This
+preserves the same status cues in captured logs; it does not turn that stream
+into a machine contract. Use the saved scan/apply JSON report or a quarantine
+`--format json` result for colorless automation data. Progress animation and
+cursor clearing are TTY-only; redirected progress uses finite milestone lines.
+
+Human paths, recovery tokens, fingerprints, and ordinary suggested commands
+wrap at terminal display-cell and grapheme boundaries rather than being
+silently truncated. Workflow sections own their separators, so a completed
+progress activity does not add an extra blank line. Two intentional
+parseability exceptions remain unwrapped: the `Canonical manifest:` tail of
+human `quarantine inspect`, and the `Exact action argv` JSON line in a rollback
+recovery instruction. They are retained evidence documents that must stay
+decodable. The preceding human summary is display-cell wrapped; use
+`quarantine inspect --format json` when a bounded terminal layout or an
+automation contract is required.
+
+On Linux and macOS, the CLI coordinates the first `SIGINT` or `SIGTERM` while a
+command is running. It clears an active animated line and, when an owned
+managed process tree is pending or active, requests cancellation so that
+runner can terminate and confirm that identity-checked tree. This is
+interruption handling, not a successful completion or automatic recovery. If
+termination, verification, rollback, or retained-quarantine authority cannot
+be confirmed, the command records the applicable failure or
+`recoveryRequired` state and its typed next action; do not infer that project
+bytes or recovery are safe from the signal alone.
+
+When no owned managed tree is pending or active, the first signal is
+re-delivered to the CLI process after presentation cleanup. In that path there
+is no promise that a report is written. A second signal detaches the handler
+and is re-delivered immediately as an explicit hard stop. Windows currently
+uses the default no-op signal coordinator: Flutter Pruner makes no Windows
+ConPTY interrupted-line cleanup or equivalent managed-tree signal guarantee.
+
+`scan` also holds the project operation lock while managed analyzer diagnostics
+run. If a managed analyzer tree cannot be confirmed terminated, `operation.lock`
+retains the exact root and observed-descendant process identities. A later
+`scan`, `apply`, `rollback`, or quarantine clean fails closed while a recorded
+identity is still active; it also remains blocked when that evidence is corrupt
+or process inspection is unavailable. On a later invocation, Flutter Pruner
+clears the uncertainty only after every exact identity is definitively absent
+or its PID has been reused. There is no flag or manual unsafe override for this
+check.
+
+An interrupted scan, or an apply analyzer/verification-baseline report, names
+the unconfirmed root PID and explicitly says that source mutation did not
+begin, while warning that the process may still run. It is not a
+recovery-success claim: preserve `operation.lock`, let the next command recheck
+the recorded identities, and do not start a mutation until that check admits
+it.
+
+Successful `quarantine list` and `quarantine inspect` runs with `--format json`
+write exactly one ANSI-free JSON document to stdout. Their human mode is styled
+human text. Argument, workspace, and inspection failures write diagnostics to
+stderr and leave stdout empty. At the reviewed backend-neutral injected executor
+seam only, clean follows the same one-document JSON-receipt rule after it
+attempts deletion, even if it exits `1`; that receipt is current-process
+evidence only. The production CLI does not wire that executor while the clean
+release prerequisite remains open.
+
+| Exit | Contract |
+|---:|---|
+| `0` | Command completed, including no changes, dry run, and a deliberate interactive `Cancelled.` response before mutation |
+| `1` | Operational failure, such as project/configuration, filesystem, report, or verification precondition failure |
+| `2` | Safe stop: the requested action was not admitted, or apply retained no mutation from this run after verified rollback |
+| `64` | Usage error; stderr includes the relevant command usage and stdout is empty |
+| `70` | Internal command failure; a committed failure report, if any, is named on stderr |
+
+The user-facing copy grammar is deliberate: help descriptions and progress
+labels are concise fragments without a trailing period. Results, warnings,
+errors, empty states, and next actions are direct sentence-case statements.
+
 ## Prepare the project
 
 Start from a clean Git worktree or a verified filesystem backup. Run `init`
@@ -110,18 +200,25 @@ For the predicate-level policy, see the
 
 ## Preview a plan
 
-Always preview before mutation:
+Always preview before mutation. A dry run validates the frozen **initial
+physical plan**: the ordered operations and the unique regular-file sources
+snapshotted before mutation. It does not run a verifier, create quarantine, or
+change project sources. It still writes an immutable report and updates
+tool-owned operation-lock state while acquiring the shared exclusive lock. Lock
+metadata is rewritten on acquire, and the lock file remains after release; a
+concurrent `apply`, `rollback`, or `quarantine clean` fails closed rather than
+waits, and operational lock contention exits `1`.
 
 ```bash
 flutter_pruner apply --dry-run
 ```
 
-To operate on a smaller reviewed set, repeat exact finding IDs:
+To operate on a smaller reviewed set, repeat exact finding IDs. This is
+placeholder syntax, not a runnable finding ID:
 
-```bash
+```text
 flutter_pruner apply --dry-run \
-  --finding-id 'dart:my_app/lib/example.dart#_unusedHelper' \
-  --finding-id 'asset:my_app:assets/legacy.png'
+  --finding-id <exact-finding-id>
 ```
 
 IDs are exact and case-sensitive. The requested batch must:
@@ -135,25 +232,74 @@ Flutter Pruner never adds an unrequested logical finding. An unknown,
 non-actionable, blocked, or incomplete selection stops before verification or
 quarantine.
 
+An all-eligible preview has `initial_round_only` scope: a later rescan can find
+additional all-eligible work, so it is not a promise about every later round.
+An exact, dependency-closed selection has `complete_exact_selection` scope:
+the initial plan covers the requested batch. A `removeFinding` action edits a
+declaration; it may delete the resulting empty file only if no retained importer
+prevents deletion. The preview therefore describes the operation, not a
+guaranteed final file deletion.
+
+### Bind an exact preview to apply
+
+For automation or a reviewed handoff, save an exact dry-run as JSON v3, copy
+its full preview token, then repeat the same IDs in the mutating command. The
+following is a conceptual template; substitute evidence from the current saved
+report rather than copying its placeholders:
+
+```text
+flutter_pruner apply --dry-run \
+  --finding-id <exact-finding-id> \
+  --format json \
+  --output <unused-report.json>
+
+jq -r '.apply.initialPlan.preview.fingerprint' \
+  <saved-report.json>
+
+flutter_pruner apply \
+  --finding-id <same-exact-finding-id> \
+  --expect-preview-fingerprint <saved-v1-fingerprint>
+```
+
+`--expect-preview-fingerprint` requires at least one `--finding-id`; it cannot
+bind an all-eligible apply. It is not a secret and does not grant future
+all-eligible authorization. It binds only the exact current physical plan and
+its source snapshots. If either differs, `apply` writes a `safeStopped` report
+with `preview_fingerprint_mismatch`, exits `2`, and starts no verifier,
+quarantine, or source mutation. Use a new output filename for every saved
+report; report destinations are single-assignment.
+
 ## Apply and verify
 
-After reviewing the same plan, remove `--dry-run`:
+After reviewing the same plan, remove `--dry-run` (and, for a bound exact
+selection, retain the repeated IDs and add its fingerprint):
 
-```bash
-flutter_pruner apply \
-  --finding-id 'dart:my_app/lib/example.dart#_unusedHelper'
+```text
+flutter_pruner apply --finding-id <exact-finding-id>
 ```
 
 A mutating run:
 
-1. acquires the project operation lock;
-2. rejects non-terminal historical quarantine state;
-3. captures the verification baseline;
-4. builds a dependency-closed plan;
-5. quarantines originals before editing;
-6. stages each non-empty fixed-point round and verifies its combined state once;
-7. commits the accepted wave, then rescans for the next round;
-8. keeps the result only after the whole run completes.
+1. prepares immutable report persistence and acquires the exclusive project
+   operation lock;
+2. analyzes the project and validates the requested selection;
+3. builds the dependency-closed initial physical plan and captures its source
+   snapshots;
+4. for a bound exact selection, compares the expected preview fingerprint
+   before checking historical quarantine state; a mismatch safely stops before
+   any verifier, quarantine, or source mutation;
+5. validates the captured sources immediately before capturing the verification
+   baseline;
+6. captures that baseline, then validates the same snapshots again before the
+   baseline can admit mutation or a quarantine is created;
+7. quarantines originals before editing;
+8. stages each non-empty fixed-point round and verifies its combined state once;
+9. commits the accepted wave, then rescans for the next round;
+10. keeps the result only after the whole run completes.
+
+An unbound apply checks historical quarantine state earlier in its preflight;
+the ordering above calls out the bound workflow specifically so a stale preview
+can never run the baseline verifier first.
 
 The command is all-or-nothing at the run level. If a later mutation, rescan,
 verification, convergence check, or canonical report fails, Flutter Pruner
@@ -185,6 +331,15 @@ Export JSON for CI:
 flutter_pruner scan --format json --output scan.json
 ```
 
+The saved file is the scan/apply machine contract; do not parse their human
+stdout as JSON. If an internal failure occurs after output identity is known,
+the command attempts one sanitized failure report and names it on stderr as
+`Failure report saved: <path>`. If persistence itself fails, stderr says
+`Error: report was not saved: <reason>` and no saved-report claim is made. A
+close failure after a commit still names the committed report path, but the
+command exits `70`. JSON v2 cannot represent failed run reports; use JSON v3
+for failure-report automation.
+
 A relative override is contained below the report directory. An absolute
 destination is also supported. The requested file and its adjacent hidden
 authority record must both be absent; exact output paths are single-assignment
@@ -212,35 +367,183 @@ selectors.
 
 ## Rollback and recovery
 
-List retained runs:
-
-```bash
-flutter_pruner quarantine list
-```
-
-Restore one run:
-
-```bash
-flutter_pruner rollback <run-id>
-```
-
 Quarantine lives under `.flutter_pruner/quarantine/<run-id>`. Its checksummed
 manifest is the authoritative rollback ledger. Reports are observability
 artifacts and are never used to restore project files.
 
+### Read-only inventory and inspection
+
+List retained runs in bounded human output (the default is 50 records), or
+request exactly one ANSI-free JSON document for automation:
+
+```bash
+flutter_pruner quarantine list --project path/to/project
+flutter_pruner quarantine list --project path/to/project --format json --limit 100
+flutter_pruner quarantine inspect <run-id> --project path/to/project
+flutter_pruner quarantine inspect <run-id> --project path/to/project --format json
+# Use an explicit retained base only when it is the intended quarantine authority.
+flutter_pruner quarantine inspect <run-id> --project path/to/project \
+  --quarantine path/to/retained/quarantine
+```
+
+Both surfaces evaluate manifest authority without modifying it. Human output
+uses UTC timestamps; JSON fields such as `createdAtUtc` are UTC ISO-8601
+timestamps. `list` includes invalid sibling directories as `ATTENTION` / JSON
+`kind: "invalid"` entries rather than silently claiming that no quarantine
+exists. Its valid **human** rows show lifecycle, path, selected authority,
+repair guidance when needed, and cleanability; its valid **JSON** rows provide
+the stable summary fields `runId`, `createdAtUtc`, `entryCount`, `path`,
+`lifecycle`, `cleanable`, `recoveryRequired`, `journalRevision`, and
+`payloadSha256`. Transaction detail, the authority name, repair action, and the
+canonical manifest are **inspect-only** fields. `inspect` renders that complete
+selected-authority evidence in both human and JSON formats. A repair-required
+journal is still not repaired by either command: repair is a separate locked
+mutation and must revalidate authority first.
+
+### Quarantine clean: recoverable logical removal
+
+Preview the exact evidence set before any clean attempt:
+
+```bash
+flutter_pruner quarantine clean <run-id> --dry-run --project path/to/project
+flutter_pruner quarantine clean --all --dry-run --project path/to/project --format json
+```
+
+The plan records canonical bases, stable root identities, retained
+destinations, complete no-follow tree hashes, authoritative manifest
+revision/checksum, and a versioned fingerprint. An interactive `--all`
+execution requires typing the displayed phrase
+`clean-all <target-count> <12-hex-prefix>`; a non-interactive or JSON `--all`
+execution requires the whole value with
+`--confirm-clean-fingerprint <versioned-fingerprint>`. A mismatch is stale
+evidence and exits `2`, so generate a fresh dry run. A targeted clean keeps its
+existing positional syntax:
+
+```bash
+flutter_pruner quarantine clean <run-id> --project path/to/project
+```
+
+Production clean never recursively deletes the selected run. It anchors the
+quarantine base with a native filesystem capability, durably records intent,
+and moves each exact run without replacement into:
+
+```text
+<quarantine-base>/.clean-retained/v1/<operation-id>/runs/<run-id>
+```
+
+The move is identity-bound and crash-recoverable, but clean-all remains ordered
+and non-atomic. Physical bytes remain on the same filesystem and no disk space
+is reclaimed. A success receipt includes the operation ID, retained path, and
+exact restore command. There is no purge or automatic-expiry command.
+
+On restart, Flutter Pruner reconciles only exact states. A reviewed object still
+at its active name terminalizes an intent that never moved; the same object at
+its retained destination is committed only after its full tree digest matches.
+Both-present, both-absent, reused names, collisions, content drift, unreadable
+authority, or ambiguous native outcomes remain `recoveryRequired` and block a
+new clean mutation.
+
+Read retained authority or restore one run explicitly:
+
+```bash
+flutter_pruner quarantine retained list --project path/to/project
+flutter_pruner quarantine retained inspect <operation-id> --project path/to/project
+flutter_pruner quarantine retained restore <operation-id> <run-id> --project path/to/project
+```
+
+Restore revalidates retained identity and the complete tree digest, then uses
+the same no-replace native move in reverse. An existing active name is a
+collision and neither object is overwritten. Do not use an older Flutter
+Pruner destructive clean against a quarantine base containing
+`.clean-retained`.
+
+`CLEAN-TOCTOU-1` is resolved only through release admission that binds the exact
+candidate commit to hosted Linux `renameat2`, macOS `renameatx_np`, and Windows
+NTFS conformance evidence. A missing, stale, skipped, or mismatched platform
+artifact still blocks release. This gate is not operator-waivable and does not
+change the local retained-byte semantics above.
+
+### Restore one run
+
+```bash
+flutter_pruner rollback <run-id> --project path/to/project
+```
+
 Use `rollback <run-id> --clean` only when restoration has completed and the
-quarantine should also be removed. Keeping the quarantine until the project has
-been reviewed gives you more recovery evidence.
+active quarantine should be moved into retained recovery storage. It does not
+delete bytes or reclaim disk space. Keeping the active quarantine until the
+project has been reviewed remains the simplest recovery posture.
 
 ### If recovery is required
 
-`recoveryRequired` means Flutter Pruner could not prove that the original
-working-copy state was restored. Stop using mutating commands, inspect the
-quarantine and report, and recover the project before continuing.
+`recoveryRequired` means Flutter Pruner could not prove a fully authorized
+terminal result. The uncertainty can concern working-copy bytes, the verifier,
+retained run-original authority, or journal terminalization—even when the
+transcript says original bytes were restored. Stop mutation and follow the
+transcript's exact typed next action, normally inspect the retained quarantine.
+Do not retry rollback, apply, or clean unless that transcript explicitly
+permits it.
 
-A successfully recovered failed run does not retain earlier mutations. If
-recovery cannot be proven, Flutter Pruner reports the uncertainty instead of
-presenting a partial success.
+An interrupted managed process whose tree termination is unconfirmed is also a
+recovery concern, not a normal cancellation result. Preserve the quarantine and
+follow the report or recovery transcript before starting any new verifier or
+mutation.
+
+The transcript records uncertainty rather than presenting a partial success.
+Only its typed state can say whether this run retained mutation, restored
+original bytes, or left the working copy unknown.
+
+### Read a rollback recovery transcript
+
+`ROLLBACK RECOVERY REQUIRED` is a typed state report, not a generic retry
+prompt. It distinguishes: no project bytes changed; original bytes restored;
+restore outcome unknown; restored bytes invalidated before journal
+terminalization; and authority snapshot failure before the working copy could
+be revalidated. It likewise distinguishes a verifier that was not started,
+failed to match its recorded baseline, threw before complete evidence, may
+still be alive, or completed but could not authorize terminalization after
+authority drift. The transcript also states whether quarantine is preserved,
+recovery-required, authority-corrupt, or retained for recovery; and whether
+optional `--clean` was not requested, not attempted, preserved by validation,
+retained, or requires retained-journal recovery. Legacy `removed` and
+`outcomeUnknown` values remain readable for older journals but are not emitted
+by the production logical-clean path.
+
+When the verifier process tree may still be alive, do **not** run `apply`,
+`rollback`, or `quarantine clean`. Confirm termination independently, then use
+the suggested `quarantine inspect` action. For ordinary argv (including spaces,
+quotes, `$()`, backticks, semicolons, and ampersands), the renderer emits exact
+arguments using host-appropriate POSIX or PowerShell quoting; it does not
+substitute a display-safe path. Only terminal-unsafe controls, bidi controls,
+or Unicode line separators switch the renderer to an exact JSON argv array and
+an explicit `invoke without a shell` instruction. Decode and invoke that argv
+directly; never reconstruct hostile path data through a shell. After a verified
+rollback without `--clean`, the suggested targeted clean command is only a
+follow-up for retained verified evidence; review a fresh clean dry run first.
+
+The recovery header, typed state, certainty, and allowed next action map as
+follows. `inspect` means inspect the retained run before another action; the
+command supplies its exact suggested argv.
+
+| Failure class | Typed state and mutation certainty | Exact next action |
+|---|---|---|
+| Manifest read, baseline evidence, selected-project mismatch, or failure to mark recovery-required before restore | Working copy `unchanged`; verification `notStarted`; quarantine `preserved` | `inspect` |
+| Working-copy conflict or restore-phase failure before bytes mutate | Working copy `unchanged`; verification `notStarted`; quarantine `recoveryRequired` | `inspect` |
+| Restore stopped after mutation | Working copy `outcomeUnknown` (project bytes may be partial); verification `notStarted`; quarantine `recoveryRequired` | `inspect` |
+| Verification did not match baseline or threw before complete evidence | Working copy `originalBytesRestored`; verification `failed` or `exception`; quarantine `recoveryRequired` | `inspect` |
+| Verifier termination unconfirmed | Working copy `originalBytesRestored`; verification `terminationUnconfirmed`; quarantine `recoveryRequired`; clean is not attempted | Independently confirm termination, then `inspect`; do not mutate first |
+| Retained authority snapshot drift | Working copy `notRevalidatedAfterAuthorityFailure`; completed verification cannot authorize terminalization; quarantine `authorityCorruptRecoveryRequired` | `inspect` |
+| Working-copy drift before terminalization | Working copy `restoredStateInvalidated`; prior verification `invalidatedByWorkingCopyRevalidation`; quarantine `recoveryRequired` | `inspect` |
+| Terminalization precondition rejected or journal persistence failed | Working copy `originalBytesRestored`; verification `verified`; quarantine `recoveryRequired` | `inspect` |
+| Verified rollback with `--clean` validation failure | `ROLLBACK COMPLETE WITH CLEANUP FAILURE`; project restore and verification are verified; quarantine is `preserved` | `list`, then `inspect` surviving evidence |
+| Verified rollback with retained-move or journal failure | `ROLLBACK COMPLETE WITH CLEANUP FAILURE`; project restore and verification are verified; quarantine/clean is `recoveryRequired` and physical bytes are preserved wherever observed | Inspect the retained operation; do not retry clean blindly |
+
+`ROLLBACK COMPLETE WITH CLEANUP FAILURE` is different from a failed rollback:
+the project restore and verifier were successful, but logical quarantine clean
+either failed validation before its move or could not prove a terminal retained
+journal state. Durable intent is inspected on the next mutation attempt and is
+terminalized automatically only when exact identity and tree evidence match;
+otherwise inspect retained evidence and do not retry blindly.
 
 ### Rollback limits
 
@@ -282,7 +585,7 @@ leaving the finding in `REVIEW`. Do not widen `SAFE` to obtain more findings.
 | `ANALYSIS LIMITED` | Resolve the listed target, parser, adapter, or blocker evidence |
 | Package apply is refused | Keep audit-only `package` mode or explicitly choose the intended local boundary |
 | Report collision | Choose an absent output path or use the automatic unique destination |
-| `recoveryRequired` | Stop mutation; inspect quarantine and restore before continuing |
+| `recoveryRequired` | Stop mutation; follow the transcript's typed next action—normally inspect, never retry by default |
 | Report is too sensitive to share | Sanitize it or reproduce the issue with a public fixture |
 
 ## Related documentation

@@ -1,6 +1,7 @@
 import '../adapters/adapter_report_definition.dart';
 import '../core/confidence/finding.dart';
 import '../core/project/project_context.dart';
+import 'reportable_command_failure.dart';
 import 'run_clock.dart';
 import 'run_id_generator.dart';
 import 'run_report.dart';
@@ -42,6 +43,7 @@ class RunRecorder {
   final Map<String, ApplyFindingOutcome> _applyFindingOutcomes = {};
   final Map<String, AdapterReportDefinition> _adapterReportDefinitions = {};
   ApplySelectionReport? _applySelection;
+  ApplyInitialPlanReport? _applyInitialPlan;
   List<String> _acceptedRiskCodes = const [];
   RiskAcceptanceSource _riskAcceptanceSource = RiskAcceptanceSource.notRequired;
 
@@ -60,6 +62,21 @@ class RunRecorder {
       throw StateError('Finding selection evidence belongs only to apply.');
     }
     _applySelection = selection;
+  }
+
+  /// Records the immutable initial physical plan exactly once.
+  ///
+  /// Re-recording structurally equal evidence is idempotent. Any drift is a
+  /// lifecycle error because formatters and authorization must share one plan.
+  void recordApplyInitialPlan(ApplyInitialPlanReport initialPlan) {
+    if (command != RunCommand.apply) {
+      throw StateError('Initial physical plans belong only to apply.');
+    }
+    final recorded = _applyInitialPlan;
+    if (recorded != null && recorded != initialPlan) {
+      throw StateError('Initial physical plan changed during the run.');
+    }
+    _applyInitialPlan ??= initialPlan;
   }
 
   /// Registers the immutable presentation catalog used by every report pass.
@@ -120,6 +137,9 @@ class RunRecorder {
   }) {
     final finishedAt = _clock.nowUtc();
     final elapsed = _clock.monotonicMicros() - _startedMicros;
+    final canonicalProjectRoot = _applyInitialPlan?.preview == null
+        ? null
+        : project.root.resolveSymbolicLinksSync();
     return RunReport(
       identity: RunIdentity(
         id: runId,
@@ -133,6 +153,7 @@ class RunRecorder {
       exitCode: exitCode,
       partialApplied: partialApplied,
       projectRoot: project.root.absolute.path,
+      canonicalProjectRoot: canonicalProjectRoot,
       packageName: project.packageName,
       analysisMode: project.analysisMode,
       requestedAdapters: List.unmodifiable(requestedAdapters),
@@ -151,10 +172,47 @@ class RunRecorder {
           ..sort((left, right) => left.findingId.compareTo(right.findingId)),
       ),
       applySelection: _applySelection,
+      applyInitialPlan: _applyInitialPlan,
       applyStatistics: applyStatistics,
       quarantinePath: quarantinePath,
       acceptedRiskCodes: _acceptedRiskCodes,
       riskAcceptanceSource: _riskAcceptanceSource,
+    );
+  }
+
+  /// Finalizes an incomplete command as a zero-finding failed report.
+  ///
+  /// Arbitrary exceptions and stack traces never enter this boundary; callers
+  /// must supply only a stable [ReportableCommandFailure].
+  RunReport finishFailure({
+    required ProjectContext project,
+    required ReportableCommandFailure failure,
+    List<Finding>? completedFindings,
+    ApplyStatistics? applyStatistics,
+  }) {
+    if (_analysisPasses.isEmpty && completedFindings?.isNotEmpty == true) {
+      throw StateError(
+        'Incomplete-analysis failure reports cannot retain findings.',
+      );
+    }
+    if (_analysisPasses.isNotEmpty && completedFindings == null) {
+      throw StateError(
+        'Completed analysis passes require their truthful finding snapshot.',
+      );
+    }
+    addDiagnostic(
+      RunDiagnostic(
+        code: failure.code,
+        phase: failure.phase,
+        message: failure.message,
+      ),
+    );
+    return finish(
+      project: project,
+      status: failure.status,
+      exitCode: failure.exitCode,
+      findings: completedFindings ?? const [],
+      applyStatistics: applyStatistics,
     );
   }
 

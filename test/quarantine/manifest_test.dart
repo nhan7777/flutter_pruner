@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter_pruner/src/apply/finding_selection.dart';
 import 'package:flutter_pruner/src/quarantine/manifest.dart';
 import 'package:flutter_pruner/src/verification/verification_policy.dart';
@@ -351,6 +353,55 @@ void main() {
       () => evidence.requestedFindingIds.add('external'),
       throwsUnsupportedError,
     );
+    expect(json['version'], 2);
+  });
+
+  test('V2 selection evidence round-trips matching preview authorization', () {
+    final evidence = QuarantineSelectionEvidence(
+      mode: FindingSelectionMode.exact,
+      requestedFindingIds: const ['finding-a'],
+      planFingerprint: 'b' * 64,
+      previewFingerprintVersion: 1,
+      previewFingerprint: 'v1:${'c' * 64}',
+      expectedPreviewFingerprint: 'v1:${'c' * 64}',
+    );
+
+    final json = evidence.toJson();
+    final restored = QuarantineSelectionEvidence.fromJson(json);
+
+    expect(json, {
+      'version': 2,
+      'mode': 'exact',
+      'requestedFindingIds': ['finding-a'],
+      'planFingerprint': 'b' * 64,
+      'previewFingerprintVersion': 1,
+      'previewFingerprint': 'v1:${'c' * 64}',
+      'expectedPreviewFingerprint': 'v1:${'c' * 64}',
+    });
+    expect(restored.previewFingerprintVersion, 1);
+    expect(restored.previewFingerprint, 'v1:${'c' * 64}');
+    expect(restored.expectedPreviewFingerprint, 'v1:${'c' * 64}');
+    expect(restored.toJson(), json);
+  });
+
+  test('legacy V1 selection evidence retains its original projection', () {
+    final json = <String, dynamic>{
+      'version': 1,
+      'mode': 'exact',
+      'requestedFindingIds': ['finding-a'],
+      'planFingerprint': 'a' * 64,
+    };
+
+    final restored = QuarantineSelectionEvidence.fromJson(json);
+
+    expect(restored.previewFingerprintVersion, isNull);
+    expect(restored.previewFingerprint, isNull);
+    expect(restored.expectedPreviewFingerprint, isNull);
+    expect(
+      jsonEncode(restored.toJson()),
+      '{"version":1,"mode":"exact","requestedFindingIds":["finding-a"],'
+      '"planFingerprint":"${'a' * 64}"}',
+    );
   });
 
   test('malformed or misplaced selection evidence fails closed', () {
@@ -367,7 +418,7 @@ void main() {
     for (final selection in <Object?>[
       'not-a-map',
       {
-        'version': 2,
+        'version': 3,
         'mode': 'exact',
         'requestedFindingIds': ['finding-a'],
         'planFingerprint': 'a' * 64,
@@ -401,6 +452,58 @@ void main() {
         'mode': 'exact',
         'requestedFindingIds': ['finding-a'],
         'planFingerprint': 'short',
+      },
+      {
+        'version': 1,
+        'mode': 'exact',
+        'requestedFindingIds': ['finding-a'],
+        'planFingerprint': 'a' * 64,
+        'previewFingerprintVersion': 1,
+        'previewFingerprint': 'v1:${'b' * 64}',
+        'expectedPreviewFingerprint': 'v1:${'b' * 64}',
+      },
+      for (final previewFields in <Map<String, Object?>>[
+        {'previewFingerprintVersion': 1},
+        {'previewFingerprintVersion': null},
+        {
+          'previewFingerprintVersion': 1,
+          'previewFingerprint': 'v1:${'b' * 64}',
+        },
+        {
+          'previewFingerprint': 'v1:${'b' * 64}',
+          'expectedPreviewFingerprint': 'v1:${'b' * 64}',
+        },
+        {
+          'previewFingerprintVersion': 2,
+          'previewFingerprint': 'v1:${'b' * 64}',
+          'expectedPreviewFingerprint': 'v1:${'b' * 64}',
+        },
+        {
+          'previewFingerprintVersion': 1,
+          'previewFingerprint': 'v1:${'B' * 64}',
+          'expectedPreviewFingerprint': 'v1:${'B' * 64}',
+        },
+        {
+          'previewFingerprintVersion': 1,
+          'previewFingerprint': 'v1:${'b' * 64}',
+          'expectedPreviewFingerprint': 'v1:${'c' * 64}',
+        },
+      ])
+        {
+          'version': 2,
+          'mode': 'exact',
+          'requestedFindingIds': ['finding-a'],
+          'planFingerprint': 'a' * 64,
+          ...previewFields,
+        },
+      {
+        'version': 2,
+        'mode': 'allEligible',
+        'requestedFindingIds': <String>[],
+        'planFingerprint': 'a' * 64,
+        'previewFingerprintVersion': 1,
+        'previewFingerprint': 'v1:${'b' * 64}',
+        'expectedPreviewFingerprint': 'v1:${'b' * 64}',
       },
     ]) {
       expect(

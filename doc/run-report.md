@@ -9,7 +9,7 @@ the same v3 payload.
 flutter_pruner scan --project path/to/app
 flutter_pruner apply --project path/to/app
 flutter_pruner scan --project path/to/app --format json
-flutter_pruner apply --project path/to/app --report-format json
+flutter_pruner apply --project path/to/app --format json
 ```
 
 A mutating `apply` writes monotonic canonical snapshots below
@@ -22,9 +22,11 @@ Schema v3 records `analysisMode`, `internalBoundaryComplete`,
 `externalConsumersCovered`, per-finding `manualRiskCodes`/`applyEligible`, and
 apply authorization (`acceptedRiskCodes` plus `interactive`, `yesFlag`, or
 `notRequired`). Apply reports also include an additive `apply.selection`
-record and wave identity on candidate verification attempts. These optional v3
-fields keep existing schema-v3 readers backward compatible; no schema bump is
-required. JSON v2 remains byte-for-byte unchanged.
+record, an additive `apply.initialPlan` preview projection, and wave identity
+on candidate verification attempts. These optional v3 fields keep existing
+schema-v3 readers backward compatible; no schema bump is required. JSON v2
+omits the preview-selection fields and `initialPlan` entirely, and remains
+byte-for-byte unchanged.
 
 Candidate verification attempts always identify the fixed-point wave they
 checked. `waveId` has the form `wave-rNNN`; `transactionIds` preserves planner
@@ -57,12 +59,14 @@ monotonic canonical JSON objects with the quarantine and exports the selected
 terminal format separately. Self-contained HTML is the default, with a JSON v3
 payload embedded in the report. The terminal renders the human summary and
 highlights the actual committed object path.
-`--format`/`apply --report-format` select another representation;
-`--output`/`apply --report-output` override the automatic destination. Relative
-overrides remain contained below the report directory, while absolute
-destinations remain supported. An exact override is single-assignment: both the
-requested path and its adjacent hidden `<name>.commit.json` authority must be
-absent. Flutter Pruner never overwrites either path.
+`--format` selects another representation and `--output` overrides the
+automatic destination. For compatibility, `apply --report-format` and
+`apply --report-output` are equivalent aliases; neither spelling is deprecated
+or removed by this contract. Relative overrides remain contained below the
+report directory, while absolute destinations remain supported. An exact
+override is single-assignment: both the requested path and its adjacent hidden
+`<name>.commit.json` authority must be absent. Flutter Pruner never overwrites
+either path.
 
 A report becomes READY only after its object bytes have been flushed, reread,
 hashed, recorded in a commit, and revalidated through retained directory and
@@ -72,6 +76,25 @@ later canonical-only sequence records that failure; earlier report objects are
 never rewritten. A formatter, object, commit, close, or reachability failure may
 leave immutable orphan artifacts, but cannot produce a valid READY result for
 that incomplete batch.
+
+## Command streams and report-persistence failures
+
+Saved reports, not terminal stdout, are the scan/apply machine interface.
+Completed, report-renderable outcomes write a human summary to stdout and must
+not be parsed as JSON. Failure paths can leave stdout empty and use stderr plus
+a saved report when one commits. Progress, diagnostics, usage, and errors use
+stderr. A failure report is attempted only after project and output identity are
+known and only when a report write is not already in progress; it cannot replace
+recovery-required or uncertain mutation evidence.
+
+If that failure report commits, stderr says `Failure report saved: <path>` and
+the report's `run.status`/`exitCode` remain the machine evidence. If it cannot
+be persisted, stderr says `Error: report was not saved: <reason>` and does not
+claim a saved report. If a close operation fails after commit, the committed
+path remains authoritative and is named, but the command exits `70`. JSON v2
+cannot represent a failed run report, so an attempted failed v2 export reports
+the persistence error and creates no substitute success-shaped v2 report; use
+JSON v3 instead.
 
 ## Legacy JSON v2 compatibility exports
 
@@ -162,6 +185,40 @@ registry even when `findings` is empty, so malformed source input cannot be
 misreported as a clean inventory. Terminal output presents the same condition
 as an analysis-limited warning.
 
+### Apply initial physical plan and preview binding
+
+When `apply` reaches planning, JSON v3 may include `apply.initialPlan`. It is
+the immutable initial physical plan, not a reconstruction from later execution
+or a claim that later all-eligible rounds are already known. Its fields are:
+
+| Field | Meaning |
+|---|---|
+| `canonicalVersion` | Initial-plan encoding version, currently `1` |
+| `scope` | `initial_round_only` for all-eligible planning, or `complete_exact_selection` for an exact dependency-closed batch |
+| `planFingerprint` | Existing SHA-256 fingerprint of the initial plan topology; null for no units |
+| `units` / `blocked` | Ordered physical units/actions and planner-owned blocks |
+| `preview` | Captured source evidence and its `v1:<64 lowercase hex>` fingerprint when capture completed |
+
+`preview.sources` is ordered and records each unique action source's
+project-relative path, canonical path, SHA-256, size, and nullable POSIX mode.
+`preview.fingerprint` binds that source evidence to the initial physical plan.
+An operation named `removeFinding` is not a guaranteed file deletion: it edits
+the declaration and can delete a now-empty file only when no retained importer
+prevents it. Dry-run planned counts belong in `initialPlan`; execution counter
+`apply.actions.declared` remains `0` until a transaction begins.
+
+For an exact selection, `apply.selection` can additionally contain
+`actualPreviewFingerprint`, `expectedPreviewFingerprint`, and
+`previewComparison` (`notRequested`, `matched`, or `mismatched`). A mismatch
+retains both tokens for audit and produces a safe stop before verification,
+quarantine, or source mutation. The token is not a secret and is not authority
+for an all-eligible or future rescan; `--expect-preview-fingerprint` applies
+only when the repeated `--finding-id` values form the exact current selection.
+
+These are additive schema-v3 fields. Consumers requesting JSON v2 do not see
+them, including on runs that also have the in-memory initial plan; v2's
+historical bytes and semantics are preserved.
+
 ## Status and exit code
 
 | Status | Exit | Meaning |
@@ -171,6 +228,14 @@ as an analysis-limited warning.
 | `infrastructureFailure` | 1 | Configuration, verifier, hash or I/O precondition failed |
 | `recoveryRequired` | 1 | Bytes or rollback verification need manual recovery |
 | `internalError` | 70 | Unexpected tool error |
+
+Across the CLI, argv-only misuse exits `64` with usage on stderr and no stdout.
+Intentional interactive cancellation before mutation is a completed result with
+exit `0` and `Cancelled.`. Quarantine list/inspect JSON success is exactly one
+ANSI-free stdout document. Quarantine logical-clean JSON is likewise exactly
+one ANSI-free document. Its v2 receipt reports retained paths, operation IDs,
+`physicalDelete: false`, and crash-durable journal authority. Diagnostics stay
+on stderr; the receipt never claims physical deletion or reclaimed disk space.
 
 `partialApplied` is retained for JSON v3 compatibility. In current
 all-or-nothing apply runs, it is **not** evidence that a previously committed

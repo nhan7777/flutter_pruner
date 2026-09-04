@@ -2,6 +2,129 @@
   "schemaVersion": 3,
   "blockers": [
     {
+      "id": "clean-path-replacement-toctou",
+      "status": "resolved",
+      "severity": "critical",
+      "reason": "Production quarantine clean now uses recoverable identity-bound no-replace moves, and release admission requires exact-candidate hosted Linux, macOS, and Windows evidence for race resistance, crash reconciliation, and restore.",
+      "evidence": [
+        "lib/src/quarantine/clean_move_backend.dart",
+        "lib/src/quarantine/recoverable_clean_store.dart",
+        "lib/src/quarantine/native/posix_clean_move_backend.dart",
+        "lib/src/quarantine/native/windows_clean_move_backend.dart",
+        "lib/src/quarantine/native/windows_clean_move_bindings.dart",
+        "lib/src/quarantine/native/windows_clean_open_mode.dart",
+        "lib/src/reporting/native/windows_bindings.dart",
+        "lib/src/quarantine/quarantine_manager.dart",
+        "test/quarantine/recoverable_clean_store_test.dart",
+        "test/quarantine/recoverable_clean_recovery_process_test.dart",
+        "test/quarantine/posix_clean_move_backend_test.dart",
+        "test/quarantine/windows_clean_move_backend_test.dart",
+        "test/quarantine/quarantine_manager_test.dart",
+        "test/cli/quarantine_command_test.dart",
+        "test/cli/rollback_command_test.dart",
+        "tool/generate_clean_blocker_evidence.dart",
+        "test/core/clean_blocker_evidence_generator_test.dart"
+      ],
+      "requiredTestRuns": [
+        {"platform": "linux", "path": "test/quarantine/recoverable_clean_store_test.dart", "name": "logical clean retains exact bytes and commits a durable journal"},
+        {"platform": "linux", "path": "test/quarantine/recoverable_clean_store_test.dart", "name": "restore uses no-replace move and never overwrites an active run"},
+        {"platform": "linux", "path": "test/quarantine/recoverable_clean_recovery_process_test.dart", "name": "restart reconciles a hard process exit at intentFlushed"},
+        {"platform": "linux", "path": "test/quarantine/recoverable_clean_recovery_process_test.dart", "name": "restart reconciles a hard process exit at beforeMove"},
+        {"platform": "linux", "path": "test/quarantine/recoverable_clean_recovery_process_test.dart", "name": "restart reconciles a hard process exit at afterMove"},
+        {"platform": "linux", "path": "test/quarantine/recoverable_clean_recovery_process_test.dart", "name": "restart reconciles a hard process exit at metadataFlushed"},
+        {"platform": "linux", "path": "test/quarantine/recoverable_clean_recovery_process_test.dart", "name": "restart reconciles a hard process exit at retainedVerified"},
+        {"platform": "linux", "path": "test/quarantine/recoverable_clean_recovery_process_test.dart", "name": "restart reconciles a hard process exit at committedJournalFlushed"},
+        {"platform": "linux", "path": "test/quarantine/posix_clean_move_backend_test.dart", "name": "destination collision preserves both source and foreign bytes"},
+        {"platform": "linux", "path": "test/quarantine/posix_clean_move_backend_test.dart", "name": "rejects a symlinked directory component without touching its target"},
+        {"platform": "linux", "path": "test/quarantine/posix_clean_move_backend_test.dart", "name": "base pathname replacement blocks the move and preserves both trees"},
+        {"platform": "macos", "path": "test/quarantine/recoverable_clean_store_test.dart", "name": "logical clean retains exact bytes and commits a durable journal"},
+        {"platform": "macos", "path": "test/quarantine/recoverable_clean_store_test.dart", "name": "restore uses no-replace move and never overwrites an active run"},
+        {"platform": "macos", "path": "test/quarantine/recoverable_clean_recovery_process_test.dart", "name": "restart reconciles a hard process exit at intentFlushed"},
+        {"platform": "macos", "path": "test/quarantine/recoverable_clean_recovery_process_test.dart", "name": "restart reconciles a hard process exit at beforeMove"},
+        {"platform": "macos", "path": "test/quarantine/recoverable_clean_recovery_process_test.dart", "name": "restart reconciles a hard process exit at afterMove"},
+        {"platform": "macos", "path": "test/quarantine/recoverable_clean_recovery_process_test.dart", "name": "restart reconciles a hard process exit at metadataFlushed"},
+        {"platform": "macos", "path": "test/quarantine/recoverable_clean_recovery_process_test.dart", "name": "restart reconciles a hard process exit at retainedVerified"},
+        {"platform": "macos", "path": "test/quarantine/recoverable_clean_recovery_process_test.dart", "name": "restart reconciles a hard process exit at committedJournalFlushed"},
+        {"platform": "macos", "path": "test/quarantine/posix_clean_move_backend_test.dart", "name": "destination collision preserves both source and foreign bytes"},
+        {"platform": "macos", "path": "test/quarantine/posix_clean_move_backend_test.dart", "name": "rejects a symlinked directory component without touching its target"},
+        {"platform": "macos", "path": "test/quarantine/posix_clean_move_backend_test.dart", "name": "base pathname replacement blocks the move and preserves both trees"},
+        {"platform": "windows", "path": "test/quarantine/recoverable_clean_store_test.dart", "name": "logical clean retains exact bytes and commits a durable journal"},
+        {"platform": "windows", "path": "test/quarantine/recoverable_clean_store_test.dart", "name": "restore uses no-replace move and never overwrites an active run"},
+        {"platform": "windows", "path": "test/quarantine/recoverable_clean_recovery_process_test.dart", "name": "restart reconciles a hard process exit at intentFlushed"},
+        {"platform": "windows", "path": "test/quarantine/recoverable_clean_recovery_process_test.dart", "name": "restart reconciles a hard process exit at beforeMove"},
+        {"platform": "windows", "path": "test/quarantine/recoverable_clean_recovery_process_test.dart", "name": "restart reconciles a hard process exit at afterMove"},
+        {"platform": "windows", "path": "test/quarantine/recoverable_clean_recovery_process_test.dart", "name": "restart reconciles a hard process exit at metadataFlushed"},
+        {"platform": "windows", "path": "test/quarantine/recoverable_clean_recovery_process_test.dart", "name": "restart reconciles a hard process exit at retainedVerified"},
+        {"platform": "windows", "path": "test/quarantine/recoverable_clean_recovery_process_test.dart", "name": "restart reconciles a hard process exit at committedJournalFlushed"},
+        {"platform": "windows", "path": "test/quarantine/windows_clean_move_backend_test.dart", "name": "Windows NTFS no-replace collision preserves both directory trees"},
+        {"platform": "windows", "path": "test/quarantine/windows_clean_move_backend_test.dart", "name": "reparse directories are rejected without a rename"},
+        {"platform": "windows", "path": "test/quarantine/windows_clean_move_backend_test.dart", "name": "base identity replacement blocks the move"}
+      ],
+      "requiredArtifacts": [
+        {"path": "lib/src/quarantine/clean_move_backend.dart", "sha256": "f21fc424bbd38f55c7d525d78d6ef2d44b9d83fbada253b1562529a24f1d093c"},
+        {"path": "lib/src/quarantine/native/posix_clean_move_backend.dart", "sha256": "37884b9f23cde1b80afbff5356058fb6e8c94f12dfbb34bd05e550590e47de8e"},
+        {"path": "lib/src/quarantine/native/windows_clean_move_backend.dart", "sha256": "decdc988abcefcf35655c188a26f765e5a6e747b880f37384c02f0383a5450b0"},
+        {"path": "lib/src/quarantine/native/windows_clean_move_bindings.dart", "sha256": "71bca5121ffad923ae4d37960b10e88b162380a3266656ea56ec2e122ea649dc"},
+        {"path": "lib/src/quarantine/native/windows_clean_open_mode.dart", "sha256": "438b2bb9d6514241fe1a77486e088032a01af03d42c7083e80a823c1fa496b64"},
+        {"path": "lib/src/reporting/native/windows_bindings.dart", "sha256": "fe5ec4a24cf429c6d74ec14c323d3cbb9707dce68af33b689437620b6bedfd8c"},
+        {"path": "lib/src/quarantine/recoverable_clean_store.dart", "sha256": "50b734547adf690ddd7bcd681fca6fda4634f3a22c9a2dd3e66c66f19da16a73"},
+        {"path": "lib/src/quarantine/recoverable_clean_transaction.dart", "sha256": "1bf1d11f6a724ce403f4e66688ca6088a87b5d2d1b0dfe21e218f2928a49f6e0"}
+      ],
+      "requiredHostedEvidence": [
+        {
+          "platform": "linux",
+          "filesystem": "renameat2",
+          "testRuns": [
+            {"platform": "linux", "path": "test/quarantine/recoverable_clean_store_test.dart", "name": "logical clean retains exact bytes and commits a durable journal"},
+            {"platform": "linux", "path": "test/quarantine/recoverable_clean_store_test.dart", "name": "restore uses no-replace move and never overwrites an active run"},
+            {"platform": "linux", "path": "test/quarantine/recoverable_clean_recovery_process_test.dart", "name": "restart reconciles a hard process exit at intentFlushed"},
+            {"platform": "linux", "path": "test/quarantine/recoverable_clean_recovery_process_test.dart", "name": "restart reconciles a hard process exit at beforeMove"},
+            {"platform": "linux", "path": "test/quarantine/recoverable_clean_recovery_process_test.dart", "name": "restart reconciles a hard process exit at afterMove"},
+            {"platform": "linux", "path": "test/quarantine/recoverable_clean_recovery_process_test.dart", "name": "restart reconciles a hard process exit at metadataFlushed"},
+            {"platform": "linux", "path": "test/quarantine/recoverable_clean_recovery_process_test.dart", "name": "restart reconciles a hard process exit at retainedVerified"},
+            {"platform": "linux", "path": "test/quarantine/recoverable_clean_recovery_process_test.dart", "name": "restart reconciles a hard process exit at committedJournalFlushed"},
+            {"platform": "linux", "path": "test/quarantine/posix_clean_move_backend_test.dart", "name": "destination collision preserves both source and foreign bytes"},
+            {"platform": "linux", "path": "test/quarantine/posix_clean_move_backend_test.dart", "name": "rejects a symlinked directory component without touching its target"},
+            {"platform": "linux", "path": "test/quarantine/posix_clean_move_backend_test.dart", "name": "base pathname replacement blocks the move and preserves both trees"}
+          ]
+        },
+        {
+          "platform": "macos",
+          "filesystem": "renameatx_np",
+          "testRuns": [
+            {"platform": "macos", "path": "test/quarantine/recoverable_clean_store_test.dart", "name": "logical clean retains exact bytes and commits a durable journal"},
+            {"platform": "macos", "path": "test/quarantine/recoverable_clean_store_test.dart", "name": "restore uses no-replace move and never overwrites an active run"},
+            {"platform": "macos", "path": "test/quarantine/recoverable_clean_recovery_process_test.dart", "name": "restart reconciles a hard process exit at intentFlushed"},
+            {"platform": "macos", "path": "test/quarantine/recoverable_clean_recovery_process_test.dart", "name": "restart reconciles a hard process exit at beforeMove"},
+            {"platform": "macos", "path": "test/quarantine/recoverable_clean_recovery_process_test.dart", "name": "restart reconciles a hard process exit at afterMove"},
+            {"platform": "macos", "path": "test/quarantine/recoverable_clean_recovery_process_test.dart", "name": "restart reconciles a hard process exit at metadataFlushed"},
+            {"platform": "macos", "path": "test/quarantine/recoverable_clean_recovery_process_test.dart", "name": "restart reconciles a hard process exit at retainedVerified"},
+            {"platform": "macos", "path": "test/quarantine/recoverable_clean_recovery_process_test.dart", "name": "restart reconciles a hard process exit at committedJournalFlushed"},
+            {"platform": "macos", "path": "test/quarantine/posix_clean_move_backend_test.dart", "name": "destination collision preserves both source and foreign bytes"},
+            {"platform": "macos", "path": "test/quarantine/posix_clean_move_backend_test.dart", "name": "rejects a symlinked directory component without touching its target"},
+            {"platform": "macos", "path": "test/quarantine/posix_clean_move_backend_test.dart", "name": "base pathname replacement blocks the move and preserves both trees"}
+          ]
+        },
+        {
+          "platform": "windows",
+          "filesystem": "NTFS",
+          "testRuns": [
+            {"platform": "windows", "path": "test/quarantine/recoverable_clean_store_test.dart", "name": "logical clean retains exact bytes and commits a durable journal"},
+            {"platform": "windows", "path": "test/quarantine/recoverable_clean_store_test.dart", "name": "restore uses no-replace move and never overwrites an active run"},
+            {"platform": "windows", "path": "test/quarantine/recoverable_clean_recovery_process_test.dart", "name": "restart reconciles a hard process exit at intentFlushed"},
+            {"platform": "windows", "path": "test/quarantine/recoverable_clean_recovery_process_test.dart", "name": "restart reconciles a hard process exit at beforeMove"},
+            {"platform": "windows", "path": "test/quarantine/recoverable_clean_recovery_process_test.dart", "name": "restart reconciles a hard process exit at afterMove"},
+            {"platform": "windows", "path": "test/quarantine/recoverable_clean_recovery_process_test.dart", "name": "restart reconciles a hard process exit at metadataFlushed"},
+            {"platform": "windows", "path": "test/quarantine/recoverable_clean_recovery_process_test.dart", "name": "restart reconciles a hard process exit at retainedVerified"},
+            {"platform": "windows", "path": "test/quarantine/recoverable_clean_recovery_process_test.dart", "name": "restart reconciles a hard process exit at committedJournalFlushed"},
+            {"platform": "windows", "path": "test/quarantine/windows_clean_move_backend_test.dart", "name": "Windows NTFS no-replace collision preserves both directory trees"},
+            {"platform": "windows", "path": "test/quarantine/windows_clean_move_backend_test.dart", "name": "reparse directories are rejected without a rename"},
+            {"platform": "windows", "path": "test/quarantine/windows_clean_move_backend_test.dart", "name": "base identity replacement blocks the move"}
+          ]
+        }
+      ]
+    },
+    {
       "id": "report-writer-hostile-path-race",
       "status": "resolved",
       "severity": "critical",
@@ -86,7 +209,7 @@
       "requiredArtifacts": [
         {
           "path": "lib/src/reporting/native/windows_bindings.dart",
-          "sha256": "ffc2d636005e5e6b9f2f991564e6f65383b7320eee8936c9dc0d85cdb869a13e"
+          "sha256": "fe5ec4a24cf429c6d74ec14c323d3cbb9707dce68af33b689437620b6bedfd8c"
         },
         {
           "path": "lib/src/reporting/native/windows_report_object_backend.dart",

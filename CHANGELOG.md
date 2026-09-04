@@ -7,6 +7,73 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+### Added
+
+- Define the CLI automation contract: bare command hierarchy/help and the `q`
+  alias, usage exit `64`, domain exits `0`/`1`/`2`, internal exit `70`, human
+  stdout versus stderr diagnostics, immutable scan/apply report evidence, and
+  one-document quarantine JSON output.
+- Add `--format` and `--output` as preferred `apply` aliases for the retained
+  `--report-format` and `--report-output` options; both spellings remain
+  supported with identical behavior.
+- Make `apply --dry-run` report a validated initial physical plan with ordered
+  actions and source snapshots. Exact `--finding-id` batches can now bind a
+  later apply to the saved JSON v3 preview fingerprint through
+  `--expect-preview-fingerprint`; stale evidence safely stops before
+  verification, quarantine, or source mutation.
+- Add read-only quarantine `list` and `inspect` human/JSON projections with
+  UTC timestamps, invalid-entry visibility, manifest-authority and
+  repair-required evidence, bounded lists, and terminal-safe path display.
+- Replace production quarantine deletion with a recoverable logical clean:
+  anchored POSIX/Windows no-replace moves retain exact bytes below
+  `.clean-retained/v1`, immutable journals make restart state inspectable, and
+  `quarantine retained list|inspect|restore` exposes explicit recovery.
+- Add deterministic reconciliation for durable intent and post-move crashes.
+  Exact identity and tree evidence may terminalize an interrupted operation;
+  collision, drift, absence, or ambiguity remains recovery-required.
+- Add typed rollback recovery transcripts that separate working-copy,
+  verification, authority-revalidation, quarantine, and optional-clean states;
+  suggested follow-ups preserve exact argv through host-appropriate POSIX or
+  PowerShell quoting for ordinary values or JSON/no-shell guidance for
+  terminal-unsafe values.
+- Add display-cell and grapheme-aware human terminal wrapping, deterministic
+  workflow/progress spacing, and TTY-only animation. Redirected human output
+  remains ANSI-styled; saved reports and `--format json` remain colorless
+  machine interfaces. The parseable JSON tails for human `quarantine inspect`
+  canonical manifests and rollback `Exact action argv` instructions
+  intentionally remain unwrapped.
+- Add Unix first-signal coordination for owned managed process trees: clear the
+  active line, request identity-checked tree cancellation, and preserve typed
+  interruption or recovery evidence. A no-tree first signal and every second
+  signal are re-delivered as default process signals; Windows keeps the no-op
+  coordinator and has no ConPTY-equivalence claim.
+- Make scan analyzer diagnostics participate in the project operation lock. An
+  unconfirmed analyzer tree retains exact root/descendant identity evidence,
+  blocks scan/apply/rollback/clean until automatic reinspection proves each
+  recorded identity absent or PID-reused, and reports that no source mutation
+  began without claiming recovery success.
+
+### Changed
+
+- Extend JSON report v3 additively with initial-plan and preview-comparison
+  evidence while preserving JSON v2 bytes and compatibility behavior.
+- Define `clean` as removal from active quarantine inventory, not physical
+  deletion. Targeted clean, clean-all, and `rollback --clean` now report that
+  recovery bytes and disk usage are retained. Resolve `CLEAN-TOCTOU-1` through
+  exact-commit hosted Linux, macOS, and Windows evidence for native collision,
+  path-replacement, crash-reconciliation, and restore behavior; admission
+  remains fail-closed when any artifact is absent, stale, skipped, or invalid.
+- Treat an interrupted process with unconfirmed tree termination, verifier, or
+  recovery evidence as recovery-required rather than successful cancellation.
+
+### Fixed
+
+- Use `NtSetInformationFile` with the retained destination-directory handle and
+  a complete `FILE_RENAME_INFORMATION` ABI buffer for anchored no-replace
+  quarantine moves, restoring native NTFS clean and retained-restore behavior
+  without falling back to an unconfirmed move result. Map absent relative NTFS
+  objects to the typed not-found observation used by restart reconciliation.
+
 ## [1.6.0] - 2026-08-24
 
 ### Changed

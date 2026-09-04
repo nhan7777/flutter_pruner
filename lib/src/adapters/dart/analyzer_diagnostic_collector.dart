@@ -1,10 +1,10 @@
-import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
 import 'package:analyzer/source/line_info.dart';
 import 'package:path/path.dart' as p;
 
+import '../../core/process/managed_process_runner.dart';
 import '../../core/project/project_context.dart';
 import 'dart_ids.dart';
 
@@ -14,6 +14,12 @@ import 'dart_ids.dart';
 /// API consumers. `dart analyze --format=machine` supplies those additional
 /// lint results using the project's own analysis-options and package config.
 final class AnalyzerDiagnosticCollector {
+  /// Creates a collector backed by one bounded managed process runner.
+  const AnalyzerDiagnosticCollector({
+    ProcessExecutionRunner processRunner = const ManagedProcessRunner(),
+    this.maxOutputBytesPerStream = defaultMaxOutputBytesPerStream,
+  }) : _processRunner = processRunner;
+
   /// Stable unused-diagnostic codes surfaced as review-only findings.
   static const supportedCodes = {
     'avoid_unused_constructor_parameters',
@@ -26,6 +32,14 @@ final class AnalyzerDiagnosticCollector {
 
   /// Maximum wall time for the one project-level analyzer invocation.
   static const timeout = Duration(minutes: 2);
+
+  /// Maximum retained bytes for each analyzer output stream.
+  static const defaultMaxOutputBytesPerStream = 4 * 1024 * 1024;
+
+  final ProcessExecutionRunner _processRunner;
+
+  /// Configured per-stream output bound.
+  final int maxOutputBytesPerStream;
 
   /// Removes analyzer code-family prefixes and normalizes the wire value.
   static String normalizeCode(String value) {
@@ -47,46 +61,36 @@ final class AnalyzerDiagnosticCollector {
     final executable = p.basenameWithoutExtension(resolvedExecutable) == 'dart'
         ? resolvedExecutable
         : 'dart';
-    Process process;
+    ManagedProcessResult result;
     try {
-      process = await Process.start(
+      result = await _processRunner.run(
         executable,
         ['analyze', '--format=machine', project.root.path],
         workingDirectory: project.root.path,
-        runInShell: false,
+        timeout: timeout,
+        maxOutputBytesPerStream: maxOutputBytesPerStream,
       );
     } on ProcessException catch (error) {
       return AnalyzerDiagnosticCollection.unavailable(error.message);
     }
-
-    final stdoutFuture = process.stdout.transform(utf8.decoder).join();
-    final stderrFuture = process.stderr.transform(utf8.decoder).join();
-    int exitCode;
-    try {
-      exitCode = await process.exitCode.timeout(timeout);
-    } on TimeoutException {
-      process.kill();
-      try {
-        await process.exitCode.timeout(const Duration(seconds: 5));
-        await Future.wait([
-          stdoutFuture,
-          stderrFuture,
-        ]).timeout(const Duration(seconds: 5));
-      } on TimeoutException {
-        process.kill(ProcessSignal.sigkill);
-      }
+    if (result.timedOut) {
       return const AnalyzerDiagnosticCollection.unavailable(
         'dart analyze timed out while collecting lint diagnostics',
       );
     }
-    final output = await stdoutFuture;
-    final errorOutput = await stderrFuture;
-    if (exitCode < 0 || exitCode > 3) {
+    if (result.outputTruncated) {
+      return const AnalyzerDiagnosticCollection.unavailable(
+        'dart analyze output exceeded the bounded diagnostic capture limit',
+      );
+    }
+    final output = result.stdout.text;
+    final errorOutput = result.stderr.text;
+    if (result.exitCode < 0 || result.exitCode > 3) {
       final detail = errorOutput.trim();
       return AnalyzerDiagnosticCollection.unavailable(
         detail.isEmpty
-            ? 'dart analyze exited with code $exitCode'
-            : 'dart analyze exited with code $exitCode: $detail',
+            ? 'dart analyze exited with code ${result.exitCode}'
+            : 'dart analyze exited with code ${result.exitCode}: $detail',
       );
     }
 
