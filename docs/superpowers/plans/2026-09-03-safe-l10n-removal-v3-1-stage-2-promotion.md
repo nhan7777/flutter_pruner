@@ -505,60 +505,38 @@
 
 ---
 
-### Task 7: L10n publication preflight
+### Task 7: L10n publication preflight ~~[OBSOLETE - SKIP]~~
 
-**Goal:** Fresh staging pipeline runner immediately before live mutation.
+**Status:** ~~Task không cần thiết - chức năng đã được implement sẵn trong `L10nEvidencePipeline`.~~
 
-**Files to create:**
-- `lib/src/adapters/l10n/l10n_publication_preflight.dart`
-- `test/adapters/l10n/l10n_publication_preflight_test.dart`
+**Lý do skip:**
+1. `L10nEvidencePipeline.evaluate()` đã có drift detection qua `L10nSnapshotRevalidator`
+2. Pipeline đã revalidate source hashes, config, và toolchain trong mỗi lần chạy
+3. Việc tạo wrapper mỏng chỉ delegate đến pipeline là over-engineering
+4. API trong plan mô tả không khớp với codebase thực tế:
+   - Plan giả định `runFreshPreflight` với `ProjectContext` và `L10nFamilySnapshot`
+   - Thực tế pipeline cần `L10nEvidenceRequest` với `AnalysisSnapshot`
+   - Pipeline trả về `L10nEvidenceEvaluation` (chứa verdict + witnessedChangeSet)
 
-**Requirements:**
+**Quyết định:** Skip Task 7, tiếp tục Task 8.
 
-- [ ] Define `L10nPublicationPreflight` orchestrating fresh staging:
-  ```dart
-  final class L10nPublicationPreflight {
-    final L10nEvidencePipeline _pipeline;
-    
-    /// Run complete staging pipeline before live mutation
-    /// Revalidates paths/types/hashes/modes
-    /// Returns rejection if any drift detected
-    Future<L10nEvidenceVerdict> runFreshPreflight({
-      required ProjectContext project,
-      required L10nFamilySnapshot snapshot,
-      required Set<String> selectedKeys,
-    })
-  }
-  ```
+---
 
-- [ ] Preflight steps:
-  1. Revalidate all source paths/hashes/modes match snapshot
-  2. Run complete `L10nEvidencePipeline` with selected keys
-  3. Compare candidate hashes with previous evidence (optional, for consistency)
-  4. Return verdict with any new drift detected
+**ORIGINAL OBSOLETE REQUIREMENTS** (giữ lại để tham khảo):
 
-- [ ] Drift detection:
-  - Source file hash changed → reject
-  - Configuration changed → reject
-  - Toolchain changed → reject
-  - Output behavior changed → reject
+~~**Goal:** Fresh staging pipeline runner immediately before live mutation.~~
 
-- [ ] Never load earlier Stage 1 evidence as authority. Always rerun.
+~~**Files to create:**~~
+- ~~`lib/src/adapters/l10n/l10n_publication_preflight.dart`~~
+- ~~`test/adapters/l10n/l10n_publication_preflight_test.dart`~~
 
-- [ ] Write tests:
-  - Successful fresh preflight (no drift)
-  - Source hash drift detected → rejected
-  - Config drift detected → rejected
-  - Toolchain drift detected → rejected
-  - Fresh preflight with different keys than original evidence
-  - Staging failure in fresh preflight → rejected verdict
+~~**Requirements:**~~
 
-- [ ] Commit:
-  ```sh
-  git add lib/src/adapters/l10n/l10n_publication_preflight.dart \
-          test/adapters/l10n/l10n_publication_preflight_test.dart
-  git commit -m "feat(l10n): add fresh publication preflight pipeline"
-  ```
+- ~~[ ] Define `L10nPublicationPreflight` orchestrating fresh staging~~
+- ~~[ ] Preflight steps: revalidate paths/hashes/modes, run pipeline, detect drift~~
+- ~~[ ] Drift detection: source/config/toolchain/output changes → reject~~
+- ~~[ ] Never load earlier Stage 1 evidence as authority. Always rerun.~~
+- ~~[ ] Write tests for drift detection scenarios~~
 
 ---
 
