@@ -2,9 +2,12 @@ import 'dart:io';
 
 import 'package:flutter_pruner/src/adapters/adapter_report_definition.dart';
 import 'package:flutter_pruner/src/apply/removal_planner.dart';
+import 'package:flutter_pruner/src/core/confidence/action_readiness_index.dart';
+import 'package:flutter_pruner/src/core/confidence/action_risk_scope.dart';
 import 'package:flutter_pruner/src/core/confidence/classification_reason.dart';
 import 'package:flutter_pruner/src/core/confidence/confidence.dart';
 import 'package:flutter_pruner/src/core/confidence/finding_generator.dart';
+import 'package:flutter_pruner/src/core/confidence/mutation_footprint.dart';
 import 'package:flutter_pruner/src/core/graph/build_condition.dart';
 import 'package:flutter_pruner/src/core/graph/edge.dart';
 import 'package:flutter_pruner/src/core/graph/evidence.dart';
@@ -1674,6 +1677,152 @@ void main() {
           (risk) => risk.code,
         ),
         ['external-consumers-not-scanned'],
+      );
+    });
+
+    // Action readiness index propagation tests
+    test('no index provided preserves existing behavior', () {
+      final graph = ReachabilityGraph()
+        ..addNode(
+          GraphNode(
+            id: 'l10n:app/greeting',
+            kind: NodeKind.localizationKey,
+            origin: Uri.file('/project/lib/l10n/app_en.arb'),
+          ),
+        );
+
+      final findings = const FindingGenerator().generate(
+        graph: graph,
+        project: _mockProject(),
+        graphIntegrity: _integrity(graph),
+        reportingNodeSchemes: {'l10n'},
+      );
+
+      final l10nFinding = findings.firstWhere(
+        (f) => f.node.id == 'l10n:app/greeting',
+      );
+
+      // Without index, l10n findings remain REVIEW-only (Stage 1 behavior)
+      expect(l10nFinding.confidence, equals(Confidence.review));
+      expect(l10nFinding.proposedAction, isNull);
+    });
+
+    test('empty index preserves existing behavior', () {
+      final graph = ReachabilityGraph()
+        ..addNode(
+          GraphNode(
+            id: 'l10n:app/greeting',
+            kind: NodeKind.localizationKey,
+            origin: Uri.file('/project/lib/l10n/app_en.arb'),
+          ),
+        );
+
+      final findings = const FindingGenerator().generate(
+        graph: graph,
+        project: _mockProject(),
+        graphIntegrity: _integrity(graph),
+        reportingNodeSchemes: {'l10n'},
+        actionReadinessIndex: ActionReadinessIndex.empty,
+      );
+
+      final l10nFinding = findings.firstWhere(
+        (f) => f.node.id == 'l10n:app/greeting',
+      );
+
+      // Empty index same as no index
+      expect(l10nFinding.confidence, equals(Confidence.review));
+      expect(l10nFinding.proposedAction, isNull);
+    });
+
+    test('index with entries is passed to capability resolution', () {
+      final graph = ReachabilityGraph()
+        ..addNode(
+          GraphNode(
+            id: 'dart:app/lib/unused.dart#unused',
+            kind: NodeKind.declaration,
+            origin: Uri.file('/project/lib/unused.dart'),
+          ),
+        );
+
+      final index = ActionReadinessIndex({
+        'dart:app/lib/unused.dart#unused': ActionReadinessEntry(
+          adapterId: 'dart',
+          nodeKind: NodeKind.declaration,
+          familyId: 'unused',
+          configurationFingerprint: 'sha256:test',
+          mutationFootprint: MutationFootprint(
+            findingIds: {'dart:app/lib/unused.dart#unused'},
+            physicalPaths: {'lib/unused.dart'},
+            riskScope: ActionRiskScope.boundedSingle,
+          ),
+          inverseKind: DeterministicInverseKind.proven,
+          riskScope: ActionRiskScope.boundedSingle,
+          hasExternalConsumerExposure: false,
+        ),
+      });
+
+      final findings = const FindingGenerator().generate(
+        graph: graph,
+        project: _mockProject(),
+        graphIntegrity: _integrity(graph),
+        actionReadinessIndex: index,
+      );
+
+      // Finding is generated (ActionCapability receives index)
+      // Task 8 will implement actual delegation logic
+      expect(findings, hasLength(1));
+      expect(findings.first.node.id, equals('dart:app/lib/unused.dart#unused'));
+    });
+
+    test('index does not affect non-indexed nodes', () {
+      final graph = ReachabilityGraph()
+        ..addNode(
+          GraphNode(
+            id: 'dart:app/lib/indexed.dart#indexed',
+            kind: NodeKind.declaration,
+            origin: Uri.file('/project/lib/indexed.dart'),
+          ),
+        )
+        ..addNode(
+          GraphNode(
+            id: 'dart:app/lib/not_indexed.dart#notIndexed',
+            kind: NodeKind.declaration,
+            origin: Uri.file('/project/lib/not_indexed.dart'),
+          ),
+        );
+
+      final index = ActionReadinessIndex({
+        'dart:app/lib/indexed.dart#indexed': ActionReadinessEntry(
+          adapterId: 'dart',
+          nodeKind: NodeKind.declaration,
+          familyId: 'indexed',
+          configurationFingerprint: 'sha256:test',
+          mutationFootprint: MutationFootprint(
+            findingIds: {'dart:app/lib/indexed.dart#indexed'},
+            physicalPaths: {'lib/indexed.dart'},
+            riskScope: ActionRiskScope.boundedSingle,
+          ),
+          inverseKind: DeterministicInverseKind.proven,
+          riskScope: ActionRiskScope.boundedSingle,
+          hasExternalConsumerExposure: false,
+        ),
+      });
+
+      final findings = const FindingGenerator().generate(
+        graph: graph,
+        project: _mockProject(),
+        graphIntegrity: _integrity(graph),
+        actionReadinessIndex: index,
+      );
+
+      // Both findings generated, index only affects indexed node
+      expect(findings, hasLength(2));
+      expect(
+        findings.map((f) => f.node.id),
+        containsAll([
+          'dart:app/lib/indexed.dart#indexed',
+          'dart:app/lib/not_indexed.dart#notIndexed',
+        ]),
       );
     });
   });
