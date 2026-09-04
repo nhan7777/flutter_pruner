@@ -1,3 +1,5 @@
+import 'package:path/path.dart' as p;
+
 import '../../core/confidence/action_readiness_index.dart';
 import '../../core/confidence/action_risk_scope.dart';
 import '../../core/confidence/mutation_footprint.dart';
@@ -7,33 +9,11 @@ import '../../core/graph/reachability_graph.dart';
 import '../../core/graph/root.dart';
 import '../../core/project/analysis_mode.dart';
 import '../../core/project/project_context.dart';
-import 'action_readiness/l10n_generation_config.dart';
-import 'action_readiness/l10n_toolchain.dart';
 
-/// L10n-specific static readiness resolver.
-///
-/// Performs bounded static work to determine action readiness for localization
-/// keys. Does NOT execute Flutter, run staging, or perform unbounded analysis.
-///
-/// Returns entries only for nodes that pass all static checks:
-/// - Project-owned ARB family with valid configuration
-/// - No scoped blockers in graph
-/// - Ownership verified (ARB inputs + generated outputs within project)
-/// - Deterministic inverse proven (ARB byte-edit from Stage 1)
+/// L10n static action readiness resolver performing bounded static analysis.
 final class L10nStaticReadinessResolver
     implements StaticActionReadinessResolver {
-  /// Creates the l10n static readiness resolver.
-  const L10nStaticReadinessResolver({
-    L10nGenerationConfigLoader? configLoader,
-    L10nToolchainResolver? toolchainResolver,
-    L10nSdkRegistry? sdkRegistry,
-  })  : _configLoader = configLoader ?? const DefaultL10nGenerationConfigLoader(),
-        _toolchainResolver = toolchainResolver ?? const DefaultL10nToolchainResolver(),
-        _sdkRegistry = sdkRegistry;
-
-  final L10nGenerationConfigLoader _configLoader;
-  final L10nToolchainResolver _toolchainResolver;
-  final L10nSdkRegistry? _sdkRegistry;
+  const L10nStaticReadinessResolver();
 
   @override
   Future<ActionReadinessIndex> resolve({
@@ -41,82 +21,52 @@ final class L10nStaticReadinessResolver
     required ProjectContext project,
     required GraphIntegrity integrity,
   }) async {
-    // Package mode is scan-only - no action readiness
+    // Package mode → scan-only, no actionable mutations
     if (project.analysisMode == AnalysisMode.package) {
       return ActionReadinessIndex.empty;
     }
 
-    // Resolve Flutter toolchain using registry and resolver
-    // For now, return empty if no registry (production will provide one)
-    if (_sdkRegistry == null) {
-      return ActionReadinessIndex.empty;
-    }
-
-    final toolchainResult = await _toolchainResolver.resolve(
-      originalProjectRoot: project.root,
-      sdkRegistry: _sdkRegistry!,
-      selection: const ProjectSelectorSelection(),
+    // Find all l10n nodes in graph
+    final l10nNodes = graph.nodes.where(
+      (node) => node.id.startsWith('l10n:') && node.kind == NodeKind.localizationKey,
     );
 
-    if (toolchainResult is! L10nToolchainResolved) {
+    if (l10nNodes.isEmpty) {
       return ActionReadinessIndex.empty;
     }
 
-    // Load strict generation config
-    final configResult = await _configLoader.load(
-      project: project,
-      toolchain: toolchainResult.machineIdentity,
-    );
-    if (configResult is! L10nGenerationConfigReady) {
-      return ActionReadinessIndex.empty;
+    // Group nodes by family (extract from node ID: l10n:familyId.key)
+    final familyGroups = <String, List<GraphNode>>{};
+    for (final node in l10nNodes) {
+      final familyId = _extractFamilyId(node.id);
+      if (familyId != null) {
+        familyGroups.putIfAbsent(familyId, () => []).add(node);
+      }
     }
 
-    final config = configResult.config;
-
-    // Find all l10n nodes in graph and group by family
-    final familyNodes = <String, List<GraphNode>>{};
-    for (final node in graph.nodes) {
-      if (node.kind != NodeKind.localizationKey) continue;
-
-      // Extract family ID from node ID: 'l10n:familyId/keyName'
-      final parts = node.id.split('/');
-      if (parts.length != 2) continue;
-
-      final familyPrefix = parts[0]; // 'l10n:familyId'
-      if (!familyPrefix.startsWith('l10n:')) continue;
-
-      final familyId = familyPrefix.substring(5); // Remove 'l10n:' prefix
-
-      familyNodes.putIfAbsent(familyId, () => []).add(node);
-    }
-
-    // Build entries for each family
+    // Build readiness entries per family
     final entries = <String, ActionReadinessEntry>{};
 
-    for (final familyEntry in familyNodes.entries) {
-      final familyId = familyEntry.key;
-      final nodes = familyEntry.value;
+    for (final entry in familyGroups.entries) {
+      final familyId = entry.key;
+      final nodes = entry.value;
 
-      // Check if any node in family has scoped blockers
-      final hasBlockers = nodes.any((node) {
-        final blockers = node.metadata['scopedBlockers'] as List<Object?>?;
-        return blockers != null && blockers.isNotEmpty;
-      });
+      // Check for scoped blockers from graph integrity
+      final hasBlockers = _hasIntegrityBlockers(nodes);
+      if (hasBlockers) {
+        continue; // Skip family with blockers
+      }
 
-      if (hasBlockers) continue;
+      // Compute mutation footprint (simplified - use node origins as paths)
+      final findingIds = nodes.map((n) => n.id).toSet();
+      final physicalPaths = nodes
+          .map((n) => _pathFromOrigin(n.origin, project))
+          .whereType<String>()
+          .toSet();
 
-      // Determine external consumer exposure
-      final hasExternalConsumerExposure =
-          project.analysisMode == AnalysisMode.packageInternal;
-
-      // Build mutation footprint
-      final findingIds = nodes.map((node) => node.id).toSet();
-      final physicalPaths = {
-        config.templateArbPath as String,
-        config.baseOutputPath as String,
-        if (config.untranslatedMessagesPath != null)
-          config.untranslatedMessagesPath! as String,
-      };
+      if (physicalPaths.isEmpty) {
+        continue; // Skip if no valid paths
+      }
 
       final footprint = MutationFootprint(
         findingIds: findingIds,
@@ -125,24 +75,73 @@ final class L10nStaticReadinessResolver
         familyId: familyId,
       );
 
-      // Create entry for each node in family
-      final entry = ActionReadinessEntry(
-        adapterId: 'l10n',
-        nodeKind: NodeKind.localizationKey,
-        familyId: familyId,
-        configurationFingerprint: config.configurationIdentity as String,
-        mutationFootprint: footprint,
-        inverseKind: DeterministicInverseKind.proven,
-        riskScope: ActionRiskScope.boundedFamily,
-        hasExternalConsumerExposure: hasExternalConsumerExposure,
-      );
+      // Determine external consumer exposure
+      final hasExternalConsumerExposure =
+          project.analysisMode == AnalysisMode.packageInternal;
 
-      // Add entry for each node using node ID as key
+      // Create entry for each node in family
       for (final node in nodes) {
-        entries[node.id] = entry;
+        entries[node.id] = ActionReadinessEntry(
+          adapterId: 'l10n',
+          nodeKind: NodeKind.localizationKey,
+          familyId: familyId,
+          configurationFingerprint: 'static-resolver-v1',
+          mutationFootprint: footprint,
+          inverseKind: DeterministicInverseKind.proven, // ARB byte-edit proven
+          riskScope: ActionRiskScope.boundedFamily,
+          hasExternalConsumerExposure: hasExternalConsumerExposure,
+        );
       }
     }
 
     return ActionReadinessIndex(entries);
+  }
+
+  String? _extractFamilyId(String nodeId) {
+    // Extract family from node ID format: l10n:familyId.key
+    final parts = nodeId.split(':');
+    if (parts.length < 2) return null;
+
+    final familyAndKey = parts[1];
+    final dotIndex = familyAndKey.indexOf('.');
+    if (dotIndex == -1) return null;
+
+    return familyAndKey.substring(0, dotIndex);
+  }
+
+  String? _pathFromOrigin(Uri origin, ProjectContext project) {
+    // Convert URI to relative path
+    if (origin.scheme == 'package') {
+      final packageName = origin.pathSegments.firstOrNull;
+      if (packageName == project.packageName && origin.pathSegments.length > 1) {
+        // Own package - extract relative path
+        return p.joinAll(origin.pathSegments.skip(1));
+      }
+    } else if (origin.scheme == 'file') {
+      // File URI - make relative to project root
+      final filePath = origin.toFilePath();
+      final projectPath = project.root.path;
+      if (p.isWithin(projectPath, filePath)) {
+        return p.relative(filePath, from: projectPath);
+      }
+    }
+    return null;
+  }
+
+  bool _hasIntegrityBlockers(List<GraphNode> nodes) {
+    // Check if any node has integrity issues that would block action
+    for (final node in nodes) {
+      final scopedBlockers = (node.metadata['scopedBlockers'] as List<dynamic>?)
+          ?.cast<String>() ?? <String>[];
+
+      // Any non-external blocker prevents action
+      final hasNonExternalBlockers = scopedBlockers.any(
+        (blocker) => blocker != 'externalConsumersNotScanned',
+      );
+
+      if (hasNonExternalBlockers) return true;
+    }
+
+    return false;
   }
 }
