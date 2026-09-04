@@ -3,23 +3,30 @@ import '../graph/root.dart';
 import '../project/project_context.dart';
 import 'action_readiness_index.dart';
 
-/// Resolves action readiness after all adapters finish, before finding generation.
+/// Resolves action readiness after adapters finish, before finding generation.
 ///
-/// Performs bounded static work to determine family-level action capabilities.
-/// Must NOT execute Flutter, run staging, or perform unbounded analysis.
+/// Implementations perform bounded static analysis to determine which graph
+/// nodes are ready for safe actionable removal. Must NOT execute Flutter,
+/// run staging pipelines, or perform unbounded filesystem traversal.
 ///
-/// Returns an immutable index keyed by canonical node ID. The core verifies
-/// adapter ownership and node kind before an entry can override the existing
-/// core allowlist, so custom adapters cannot gain mutation authority by
-/// copying metadata.
+/// The resolver runs as a core-owned step in [ProjectAnalyzer], after all
+/// adapters complete but before [FindingGenerator] runs. This allows adapters
+/// to remain pure graph builders while action readiness becomes a separate
+/// concern.
 abstract interface class StaticActionReadinessResolver {
-  /// Resolves action readiness for all eligible nodes in the graph.
+  /// Resolve action readiness for all actionable nodes in the graph.
   ///
-  /// Called by [ProjectAnalyzer] after all adapters complete and graph
-  /// integrity is computed, but before finding generation.
+  /// Returns an [ActionReadinessIndex] keyed by canonical node ID. Only nodes
+  /// that pass all static checks appear in the index.
   ///
-  /// The returned index is passed to [FindingGenerator] to determine
-  /// family-level action capabilities during finding classification.
+  /// Implementations must:
+  /// - Perform only bounded static work (config loading, graph inspection)
+  /// - Never execute Flutter or run staging pipelines
+  /// - Never generate files or modify the project
+  /// - Return an empty index on any blocking condition
+  ///
+  /// The [graph] contains all adapter-discovered nodes and edges.
+  /// The [integrity] report captures any graph-level anomalies.
   Future<ActionReadinessIndex> resolve({
     required ReachabilityGraph graph,
     required ProjectContext project,
@@ -30,9 +37,11 @@ abstract interface class StaticActionReadinessResolver {
 /// No-op resolver that returns an empty index.
 ///
 /// Used as the default when no action readiness resolution is configured.
-/// Preserves existing behavior where all findings remain REVIEW-only.
+/// Ensures that projects without actionable adapters (or with resolution
+/// disabled) can still analyze successfully.
 final class NoOpActionReadinessResolver
     implements StaticActionReadinessResolver {
+  /// Creates a no-op resolver.
   const NoOpActionReadinessResolver();
 
   @override
