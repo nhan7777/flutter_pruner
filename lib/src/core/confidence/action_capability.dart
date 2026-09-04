@@ -1,4 +1,5 @@
 import '../graph/node.dart';
+import 'action_readiness_index.dart';
 
 /// Physical scope of the edit required to apply a finding.
 enum ActionScope {
@@ -24,10 +25,17 @@ class ActionCapability {
   /// Rule IDs and all other adapter report metadata are intentionally absent
   /// from this decision. A custom adapter reusing a built-in [NodeKind]
   /// therefore remains unsupported.
+  ///
+  /// If [actionReadinessIndex] is provided and contains an entry for this node,
+  /// adapter-specific capability logic may be invoked (e.g., l10n family-level
+  /// actions). If null or empty, falls back to the core allowlist.
   factory ActionCapability.forFinding({
     required String adapterId,
     required GraphNode node,
+    ActionReadinessIndex? actionReadinessIndex,
   }) {
+    // TODO(Task 8): Delegate to adapter-specific capability when index present
+    // For now, preserve existing behavior regardless of index
     return switch ((adapterId, node.kind)) {
       ('assets', NodeKind.asset)
           when node.metadata['removalSupported'] != false =>

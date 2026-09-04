@@ -6,6 +6,7 @@ import '../adapters/dart/dart_execution_context_service.dart';
 import '../adapters/dart/dart_execution_reachability_service.dart';
 import '../adapters/registry.dart';
 import '../core/confidence/finding_generator.dart';
+import '../core/confidence/static_action_readiness_resolver.dart';
 import '../core/graph/reachability_graph.dart';
 import '../core/project/project_context.dart';
 import '../reporting/run_report.dart';
@@ -19,9 +20,12 @@ class ProjectAnalyzer {
     Set<String>? only,
     this.dartProfile,
     List<AnalyzerAdapter>? adapterCatalog,
+    StaticActionReadinessResolver? actionReadinessResolver,
   }) : _requestedAdapterIds = only,
        _reportingNodeSchemes = _reportingSchemes(only, adapterCatalog),
-       adapters = _resolveAdapters(only, adapterCatalog) {
+       adapters = _resolveAdapters(only, adapterCatalog),
+       _actionReadinessResolver =
+           actionReadinessResolver ?? const NoOpActionReadinessResolver() {
     adapterReportDefinitions = List.unmodifiable(
       adapters.map((adapter) => adapter.reportDefinition.snapshot()),
     );
@@ -43,6 +47,9 @@ class ProjectAnalyzer {
   /// facts, but their own findings are not reported or applied.
   final Set<String>? _reportingNodeSchemes;
   final Set<String>? _requestedAdapterIds;
+
+  /// Resolver for static action readiness, called after adapters complete.
+  final StaticActionReadinessResolver _actionReadinessResolver;
 
   /// Runs every applicable adapter and classifies the resulting graph.
   Future<AnalysisSnapshot> analyze({
@@ -155,6 +162,14 @@ class ProjectAnalyzer {
       }
     }
     final graphIntegrity = graph.integrityFor(project.targets);
+
+    // Run static action readiness resolver after adapters, before findings
+    final actionReadinessIndex = await _actionReadinessResolver.resolve(
+      graph: graph,
+      project: project,
+      integrity: graphIntegrity,
+    );
+
     final findingStopwatch = Stopwatch()..start();
     final findings = const FindingGenerator().generate(
       graph: graph,
@@ -165,6 +180,7 @@ class ProjectAnalyzer {
         for (final definition in adapterReportDefinitions)
           definition.adapterId: definition,
       },
+      actionReadinessIndex: actionReadinessIndex,
     );
     findingStopwatch.stop();
     analysisStopwatch.stop();
