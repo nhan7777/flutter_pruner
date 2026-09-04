@@ -1,0 +1,23 @@
+version: 1
+analysis:
+  mode: application
+target_matrix:
+  complete: true
+  targets:
+    - name: android-google-play
+      platform: android
+      entrypoint: lib/entrypoints/android/main_google_play.dart
+    - name: android-fdroid
+      platform: android
+      entrypoint: lib/entrypoints/android/main_fdroid.dart
+    - name: ios-app-store
+      platform: ios
+      entrypoint: lib/entrypoints/ios/main_ios.dart
+    - name: macos-app-store
+      platform: macos
+      entrypoint: lib/entrypoints/ios/main_ios.dart
+  excluded_entrypoints:
+    - path: lib/main.dart
+      reason: launcher guard terminates and is not a supported launch target
+    - path: lib/entrypoints/android/main_samsung_gallery.dart
+      reason: tracked dormant stub throws and has no retained launch or release invocation
