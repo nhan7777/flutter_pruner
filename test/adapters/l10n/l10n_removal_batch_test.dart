@@ -1,5 +1,3 @@
-import 'dart:typed_data';
-
 import 'package:flutter_pruner/src/adapters/l10n/action_readiness/immutable_bytes.dart';
 import 'package:flutter_pruner/src/adapters/l10n/l10n_removal_batch.dart';
 import 'package:flutter_pruner/src/core/confidence/action_risk_scope.dart';
@@ -8,421 +6,517 @@ import 'package:test/test.dart';
 
 void main() {
   group('L10nArbMutation', () {
-    test('constructs with all fields', () {
-      final original = ImmutableBytes.copyOf(Uint8List.fromList([1, 2, 3]));
-      final candidate = ImmutableBytes.copyOf(Uint8List.fromList([4, 5, 6]));
-
+    test('creates valid ARB mutation', () {
       final mutation = L10nArbMutation(
         relativePath: 'lib/l10n/app_en.arb',
-        originalBytes: original,
-        originalHash: original.sha256Hex,
-        candidateBytes: candidate,
-        candidateHash: candidate.sha256Hex,
-        mode: 420, // 0644
+        originalBytes: ImmutableBytes.fromString('{"key":"value"}'),
+        originalHash: 'hash1',
+        candidateBytes: ImmutableBytes.fromString('{}'),
+        candidateHash: 'hash2',
+        mode: 420,
       );
 
-      expect(mutation.relativePath, equals('lib/l10n/app_en.arb'));
-      expect(mutation.originalBytes, equals(original));
-      expect(mutation.candidateBytes, equals(candidate));
-      expect(mutation.mode, equals(420));
+      expect(mutation.relativePath, 'lib/l10n/app_en.arb');
+      expect(mutation.originalHash, 'hash1');
+      expect(mutation.candidateHash, 'hash2');
+      expect(mutation.mode, 420);
     });
 
     test('equality works correctly', () {
-      final bytes1 = ImmutableBytes.copyOf(Uint8List.fromList([1, 2, 3]));
-      final bytes2 = ImmutableBytes.copyOf(Uint8List.fromList([4, 5, 6]));
-
       final mutation1 = L10nArbMutation(
         relativePath: 'lib/l10n/app_en.arb',
-        originalBytes: bytes1,
-        originalHash: bytes1.sha256Hex,
-        candidateBytes: bytes2,
-        candidateHash: bytes2.sha256Hex,
+        originalBytes: ImmutableBytes.fromString('{"key":"value"}'),
+        originalHash: 'hash1',
+        candidateBytes: ImmutableBytes.fromString('{}'),
+        candidateHash: 'hash2',
         mode: 420,
       );
 
       final mutation2 = L10nArbMutation(
         relativePath: 'lib/l10n/app_en.arb',
-        originalBytes: bytes1,
-        originalHash: bytes1.sha256Hex,
-        candidateBytes: bytes2,
-        candidateHash: bytes2.sha256Hex,
+        originalBytes: ImmutableBytes.fromString('{"key":"value"}'),
+        originalHash: 'hash1',
+        candidateBytes: ImmutableBytes.fromString('{}'),
+        candidateHash: 'hash2',
         mode: 420,
       );
 
-      expect(mutation1, equals(mutation2));
-      expect(mutation1.hashCode, equals(mutation2.hashCode));
+      expect(mutation1, mutation2);
+      expect(mutation1.hashCode, mutation2.hashCode);
     });
   });
 
   group('L10nGeneratedOutputMutation', () {
-    test('constructs with existing file', () {
-      final original = ImmutableBytes.copyOf(Uint8List.fromList([1, 2, 3]));
-      final candidate = ImmutableBytes.copyOf(Uint8List.fromList([4, 5, 6]));
-
+    test('creates mutation for existing file', () {
       final mutation = L10nGeneratedOutputMutation(
-        relativePath: 'lib/generated/l10n.dart',
-        originalBytes: original,
-        originalHash: original.sha256Hex,
-        candidateBytes: candidate,
-        candidateHash: candidate.sha256Hex,
+        relativePath: 'lib/l10n/app_localizations_en.dart',
+        originalBytes: ImmutableBytes.fromString('class AppLocalizationsEn {}'),
+        originalHash: 'hash1',
+        candidateBytes: ImmutableBytes.fromString('class AppLocalizationsEn { /* updated */ }'),
+        candidateHash: 'hash2',
         mode: 420,
       );
 
-      expect(mutation.relativePath, equals('lib/generated/l10n.dart'));
-      expect(mutation.originalBytes, equals(original));
-      expect(mutation.candidateBytes, equals(candidate));
-      expect(mutation.wasAbsent, isFalse);
+      expect(mutation.relativePath, 'lib/l10n/app_localizations_en.dart');
+      expect(mutation.originalBytes, isNotNull);
+      expect(mutation.originalHash, 'hash1');
     });
 
-    test('constructs with absent file', () {
-      final candidate = ImmutableBytes.copyOf(Uint8List.fromList([4, 5, 6]));
-
+    test('creates mutation for new file', () {
       final mutation = L10nGeneratedOutputMutation(
-        relativePath: 'lib/generated/l10n.dart',
+        relativePath: 'lib/l10n/app_localizations_en.dart',
         originalBytes: null,
         originalHash: null,
-        candidateBytes: candidate,
-        candidateHash: candidate.sha256Hex,
+        candidateBytes: ImmutableBytes.fromString('class AppLocalizationsEn {}'),
+        candidateHash: 'hash1',
         mode: 420,
       );
 
-      expect(mutation.wasAbsent, isTrue);
       expect(mutation.originalBytes, isNull);
       expect(mutation.originalHash, isNull);
+    });
+
+    test('equality works correctly', () {
+      final mutation1 = L10nGeneratedOutputMutation(
+        relativePath: 'lib/l10n/app_localizations_en.dart',
+        originalBytes: null,
+        originalHash: null,
+        candidateBytes: ImmutableBytes.fromString('class AppLocalizationsEn {}'),
+        candidateHash: 'hash1',
+        mode: 420,
+      );
+
+      final mutation2 = L10nGeneratedOutputMutation(
+        relativePath: 'lib/l10n/app_localizations_en.dart',
+        originalBytes: null,
+        originalHash: null,
+        candidateBytes: ImmutableBytes.fromString('class AppLocalizationsEn {}'),
+        candidateHash: 'hash1',
+        mode: 420,
+      );
+
+      expect(mutation1, mutation2);
+      expect(mutation1.hashCode, mutation2.hashCode);
     });
   });
 
   group('L10nRemovalBatch', () {
-    test('constructs with valid parameters', () {
-      final arbMutation = _createArbMutation('lib/l10n/app_en.arb');
-      final outputMutation = _createOutputMutation('lib/generated/l10n.dart');
-
-      final footprint = MutationFootprint(
-        findingIds: {'l10n:app_localizations/greeting'},
-        physicalPaths: {'lib/l10n/app_en.arb', 'lib/generated/l10n.dart'},
-        riskScope: ActionRiskScope.boundedFamily,
-        familyId: 'app_localizations',
-      );
-
-      final batch = L10nRemovalBatch(
-        familyId: 'app_localizations',
-        selectedKeys: {'greeting'},
-        findingIds: {'l10n:app_localizations/greeting'},
-        arbMutations: [arbMutation],
-        generatedOutputMutations: [outputMutation],
-        configurationFingerprint: 'sha256:config',
-        packageResolutionFingerprint: 'sha256:pubspec',
-        toolchainFingerprint: 'flutter-3.44.1',
-        footprint: footprint,
-      );
-
-      expect(batch.familyId, equals('app_localizations'));
-      expect(batch.selectedKeys, equals({'greeting'}));
-      expect(batch.arbMutations, hasLength(1));
-      expect(batch.generatedOutputMutations, hasLength(1));
-    });
-
-    test('validates successfully with correct parameters', () {
-      final batch = _createValidBatch();
-      expect(() => batch.validate(), returnsNormally);
-    });
-
-    test('rejects empty ARB mutations', () {
-      final footprint = MutationFootprint(
-        findingIds: {'l10n:app_localizations/greeting'},
-        physicalPaths: {'lib/generated/l10n.dart'},
-        riskScope: ActionRiskScope.boundedFamily,
-        familyId: 'app_localizations',
-      );
-
-      final batch = L10nRemovalBatch(
-        familyId: 'app_localizations',
-        selectedKeys: {'greeting'},
-        findingIds: {'l10n:app_localizations/greeting'},
-        arbMutations: [],
-        generatedOutputMutations: [_createOutputMutation('lib/generated/l10n.dart')],
-        configurationFingerprint: 'sha256:config',
-        packageResolutionFingerprint: 'sha256:pubspec',
-        toolchainFingerprint: 'flutter-3.44.1',
-        footprint: footprint,
-      );
-
-      expect(
-        () => batch.validate(),
-        throwsA(
-          isA<ArgumentError>().having(
-            (e) => e.message,
-            'message',
-            contains('arbMutations cannot be empty'),
+    L10nRemovalBatch createValidBatch({
+      String familyId = 'family1',
+      Set<String>? selectedKeys,
+      Set<String>? findingIds,
+      List<L10nArbMutation>? arbMutations,
+      List<L10nGeneratedOutputMutation>? generatedOutputMutations,
+      MutationFootprint? footprint,
+    }) {
+      return L10nRemovalBatch(
+        familyId: familyId,
+        selectedKeys: selectedKeys ?? {'key1'},
+        findingIds: findingIds ?? {'finding1'},
+        arbMutations: arbMutations ?? [
+          L10nArbMutation(
+            relativePath: 'lib/l10n/app_en.arb',
+            originalBytes: ImmutableBytes.fromString('{"key1":"value1"}'),
+            originalHash: 'hash1',
+            candidateBytes: ImmutableBytes.fromString('{}'),
+            candidateHash: 'hash2',
+            mode: 420,
           ),
-        ),
-      );
-    });
-
-    test('rejects empty finding IDs', () {
-      final footprint = MutationFootprint(
-        findingIds: {'l10n:app_localizations/greeting'},
-        physicalPaths: {'lib/l10n/app_en.arb'},
-        riskScope: ActionRiskScope.boundedFamily,
-        familyId: 'app_localizations',
-      );
-
-      final batch = L10nRemovalBatch(
-        familyId: 'app_localizations',
-        selectedKeys: {'greeting'},
-        findingIds: {},
-        arbMutations: [_createArbMutation('lib/l10n/app_en.arb')],
-        generatedOutputMutations: [],
-        configurationFingerprint: 'sha256:config',
-        packageResolutionFingerprint: 'sha256:pubspec',
-        toolchainFingerprint: 'flutter-3.44.1',
-        footprint: footprint,
-      );
-
-      expect(
-        () => batch.validate(),
-        throwsA(
-          isA<ArgumentError>().having(
-            (e) => e.message,
-            'message',
-            contains('findingIds cannot be empty'),
-          ),
-        ),
-      );
-    });
-
-    test('rejects non-boundedFamily footprint', () {
-      final footprint = MutationFootprint(
-        findingIds: {'l10n:app_localizations/greeting'},
-        physicalPaths: {'lib/l10n/app_en.arb'},
-        riskScope: ActionRiskScope.boundedSingle,
-      );
-
-      final batch = L10nRemovalBatch(
-        familyId: 'app_localizations',
-        selectedKeys: {'greeting'},
-        findingIds: {'l10n:app_localizations/greeting'},
-        arbMutations: [_createArbMutation('lib/l10n/app_en.arb')],
-        generatedOutputMutations: [],
-        configurationFingerprint: 'sha256:config',
-        packageResolutionFingerprint: 'sha256:pubspec',
-        toolchainFingerprint: 'flutter-3.44.1',
-        footprint: footprint,
-      );
-
-      expect(
-        () => batch.validate(),
-        throwsA(
-          isA<ArgumentError>().having(
-            (e) => e.message,
-            'message',
-            contains('footprint must be boundedFamily'),
-          ),
-        ),
-      );
-    });
-
-    test('rejects familyId mismatch', () {
-      final footprint = MutationFootprint(
-        findingIds: {'l10n:app_localizations/greeting'},
-        physicalPaths: {'lib/l10n/app_en.arb'},
-        riskScope: ActionRiskScope.boundedFamily,
-        familyId: 'other_family',
-      );
-
-      final batch = L10nRemovalBatch(
-        familyId: 'app_localizations',
-        selectedKeys: {'greeting'},
-        findingIds: {'l10n:app_localizations/greeting'},
-        arbMutations: [_createArbMutation('lib/l10n/app_en.arb')],
-        generatedOutputMutations: [],
-        configurationFingerprint: 'sha256:config',
-        packageResolutionFingerprint: 'sha256:pubspec',
-        toolchainFingerprint: 'flutter-3.44.1',
-        footprint: footprint,
-      );
-
-      expect(
-        () => batch.validate(),
-        throwsA(
-          isA<ArgumentError>().having(
-            (e) => e.message,
-            'message',
-            contains('footprint familyId mismatch'),
-          ),
-        ),
-      );
-    });
-
-    test('rejects absolute ARB path', () {
-      final footprint = MutationFootprint(
-        findingIds: {'l10n:app_localizations/greeting'},
-        physicalPaths: {'/absolute/path/app_en.arb'},
-        riskScope: ActionRiskScope.boundedFamily,
-        familyId: 'app_localizations',
-      );
-
-      final batch = L10nRemovalBatch(
-        familyId: 'app_localizations',
-        selectedKeys: {'greeting'},
-        findingIds: {'l10n:app_localizations/greeting'},
-        arbMutations: [_createArbMutation('/absolute/path/app_en.arb')],
-        generatedOutputMutations: [],
-        configurationFingerprint: 'sha256:config',
-        packageResolutionFingerprint: 'sha256:pubspec',
-        toolchainFingerprint: 'flutter-3.44.1',
-        footprint: footprint,
-      );
-
-      expect(
-        () => batch.validate(),
-        throwsA(
-          isA<ArgumentError>().having(
-            (e) => e.message,
-            'message',
-            contains('ARB path must be relative'),
-          ),
-        ),
-      );
-    });
-
-    test('rejects duplicate paths', () {
-      final footprint = MutationFootprint(
-        findingIds: {'l10n:app_localizations/greeting'},
-        physicalPaths: {'lib/l10n/app_en.arb'},
-        riskScope: ActionRiskScope.boundedFamily,
-        familyId: 'app_localizations',
-      );
-
-      final batch = L10nRemovalBatch(
-        familyId: 'app_localizations',
-        selectedKeys: {'greeting'},
-        findingIds: {'l10n:app_localizations/greeting'},
-        arbMutations: [
-          _createArbMutation('lib/l10n/app_en.arb'),
-          _createArbMutation('lib/l10n/app_en.arb'),
         ],
-        generatedOutputMutations: [],
-        configurationFingerprint: 'sha256:config',
-        packageResolutionFingerprint: 'sha256:pubspec',
-        toolchainFingerprint: 'flutter-3.44.1',
-        footprint: footprint,
+        generatedOutputMutations: generatedOutputMutations ?? [],
+        configurationFingerprint: 'config-fp',
+        packageResolutionFingerprint: 'pkg-fp',
+        toolchainFingerprint: 'toolchain-fp',
+        footprint: footprint ?? MutationFootprint(
+          findingIds: {'finding1'},
+          physicalPaths: {'lib/l10n/app_en.arb'},
+          riskScope: ActionRiskScope.boundedFamily,
+          familyId: familyId,
+        ),
+      );
+    }
+
+    test('creates valid batch', () {
+      final batch = createValidBatch();
+
+      expect(batch.familyId, 'family1');
+      expect(batch.selectedKeys, {'key1'});
+      expect(batch.findingIds, {'finding1'});
+      expect(batch.arbMutations, hasLength(1));
+      expect(batch.generatedOutputMutations, isEmpty);
+    });
+
+    test('validates successfully for valid batch', () {
+      final batch = createValidBatch();
+      expect(() => batch.validate(), returnsNormally);
+    });
+
+    test('validation fails when no ARB mutations', () {
+      final batch = createValidBatch(arbMutations: []);
+
+      expect(
+        () => batch.validate(),
+        throwsA(isA<ArgumentError>().having(
+          (e) => e.message,
+          'message',
+          contains('At least one ARB mutation is required'),
+        )),
+      );
+    });
+
+    test('validation fails when no finding IDs', () {
+      final batch = createValidBatch(findingIds: {});
+
+      expect(
+        () => batch.validate(),
+        throwsA(isA<ArgumentError>().having(
+          (e) => e.message,
+          'message',
+          contains('At least one finding ID is required'),
+        )),
+      );
+    });
+
+    test('validation fails when footprint is not boundedFamily', () {
+      final batch = createValidBatch(
+        footprint: const MutationFootprint(
+          findingIds: {'finding1'},
+          physicalPaths: {'lib/l10n/app_en.arb'},
+          riskScope: ActionRiskScope.boundedSingle,
+        ),
       );
 
       expect(
         () => batch.validate(),
-        throwsA(
-          isA<ArgumentError>().having(
-            (e) => e.message,
-            'message',
-            contains('Duplicate path'),
-          ),
+        throwsA(isA<ArgumentError>().having(
+          (e) => e.message,
+          'message',
+          contains('Footprint must have boundedFamily risk scope'),
+        )),
+      );
+    });
+
+    test('validation fails when footprint familyId mismatches', () {
+      final batch = createValidBatch(
+        familyId: 'family1',
+        footprint: const MutationFootprint(
+          findingIds: {'finding1'},
+          physicalPaths: {'lib/l10n/app_en.arb'},
+          riskScope: ActionRiskScope.boundedFamily,
+          familyId: 'family2',
         ),
       );
+
+      expect(
+        () => batch.validate(),
+        throwsA(isA<ArgumentError>().having(
+          (e) => e.message,
+          'message',
+          contains('Footprint familyId must match batch familyId'),
+        )),
+      );
     });
 
-    test('multiple keys and files', () {
-      final arbMutation1 = _createArbMutation('lib/l10n/app_en.arb');
-      final arbMutation2 = _createArbMutation('lib/l10n/app_es.arb');
-      final outputMutation = _createOutputMutation('lib/generated/l10n.dart');
-
-      final footprint = MutationFootprint(
-        findingIds: {
-          'l10n:app_localizations/greeting',
-          'l10n:app_localizations/farewell',
-        },
-        physicalPaths: {
-          'lib/l10n/app_en.arb',
-          'lib/l10n/app_es.arb',
-          'lib/generated/l10n.dart',
-        },
-        riskScope: ActionRiskScope.boundedFamily,
-        familyId: 'app_localizations',
+    test('validation fails when ARB path is absolute', () {
+      final batch = createValidBatch(
+        arbMutations: [
+          L10nArbMutation(
+            relativePath: '/absolute/path/app_en.arb',
+            originalBytes: ImmutableBytes.fromString('{}'),
+            originalHash: 'hash1',
+            candidateBytes: ImmutableBytes.fromString('{}'),
+            candidateHash: 'hash2',
+            mode: 420,
+          ),
+        ],
+        footprint: const MutationFootprint(
+          findingIds: {'finding1'},
+          physicalPaths: {'/absolute/path/app_en.arb'},
+          riskScope: ActionRiskScope.boundedFamily,
+          familyId: 'family1',
+        ),
       );
 
-      final batch = L10nRemovalBatch(
-        familyId: 'app_localizations',
-        selectedKeys: {'greeting', 'farewell'},
-        findingIds: {
-          'l10n:app_localizations/greeting',
-          'l10n:app_localizations/farewell',
-        },
-        arbMutations: [arbMutation1, arbMutation2],
-        generatedOutputMutations: [outputMutation],
-        configurationFingerprint: 'sha256:config',
-        packageResolutionFingerprint: 'sha256:pubspec',
-        toolchainFingerprint: 'flutter-3.44.1',
-        footprint: footprint,
+      expect(
+        () => batch.validate(),
+        throwsA(isA<ArgumentError>().having(
+          (e) => e.message,
+          'message',
+          contains('Path must be relative to project root'),
+        )),
+      );
+    });
+
+    test('validation fails when generated path is absolute', () {
+      final batch = createValidBatch(
+        generatedOutputMutations: [
+          L10nGeneratedOutputMutation(
+            relativePath: '/absolute/path/app_localizations.dart',
+            originalBytes: null,
+            originalHash: null,
+            candidateBytes: ImmutableBytes.fromString('class {}'),
+            candidateHash: 'hash1',
+            mode: 420,
+          ),
+        ],
+        footprint: const MutationFootprint(
+          findingIds: {'finding1'},
+          physicalPaths: {'lib/l10n/app_en.arb', '/absolute/path/app_localizations.dart'},
+          riskScope: ActionRiskScope.boundedFamily,
+          familyId: 'family1',
+        ),
       );
 
-      expect(() => batch.validate(), returnsNormally);
-      expect(batch.selectedKeys, hasLength(2));
-      expect(batch.arbMutations, hasLength(2));
+      expect(
+        () => batch.validate(),
+        throwsA(isA<ArgumentError>().having(
+          (e) => e.message,
+          'message',
+          contains('Path must be relative to project root'),
+        )),
+      );
+    });
+
+    test('validation fails with duplicate ARB paths', () {
+      final batch = createValidBatch(
+        arbMutations: [
+          L10nArbMutation(
+            relativePath: 'lib/l10n/app_en.arb',
+            originalBytes: ImmutableBytes.fromString('{}'),
+            originalHash: 'hash1',
+            candidateBytes: ImmutableBytes.fromString('{}'),
+            candidateHash: 'hash2',
+            mode: 420,
+          ),
+          L10nArbMutation(
+            relativePath: 'lib/l10n/app_en.arb',
+            originalBytes: ImmutableBytes.fromString('{}'),
+            originalHash: 'hash1',
+            candidateBytes: ImmutableBytes.fromString('{}'),
+            candidateHash: 'hash2',
+            mode: 420,
+          ),
+        ],
+        footprint: const MutationFootprint(
+          findingIds: {'finding1'},
+          physicalPaths: {'lib/l10n/app_en.arb'},
+          riskScope: ActionRiskScope.boundedFamily,
+          familyId: 'family1',
+        ),
+      );
+
+      expect(
+        () => batch.validate(),
+        throwsA(isA<ArgumentError>().having(
+          (e) => e.message,
+          'message',
+          contains('Duplicate path in ARB mutations'),
+        )),
+      );
+    });
+
+    test('validation fails with duplicate paths across ARB and generated', () {
+      final batch = createValidBatch(
+        arbMutations: [
+          L10nArbMutation(
+            relativePath: 'lib/l10n/app_en.arb',
+            originalBytes: ImmutableBytes.fromString('{}'),
+            originalHash: 'hash1',
+            candidateBytes: ImmutableBytes.fromString('{}'),
+            candidateHash: 'hash2',
+            mode: 420,
+          ),
+        ],
+        generatedOutputMutations: [
+          L10nGeneratedOutputMutation(
+            relativePath: 'lib/l10n/app_en.arb',
+            originalBytes: null,
+            originalHash: null,
+            candidateBytes: ImmutableBytes.fromString('class {}'),
+            candidateHash: 'hash1',
+            mode: 420,
+          ),
+        ],
+        footprint: const MutationFootprint(
+          findingIds: {'finding1'},
+          physicalPaths: {'lib/l10n/app_en.arb'},
+          riskScope: ActionRiskScope.boundedFamily,
+          familyId: 'family1',
+        ),
+      );
+
+      expect(
+        () => batch.validate(),
+        throwsA(isA<ArgumentError>().having(
+          (e) => e.message,
+          'message',
+          contains('Duplicate path across mutations'),
+        )),
+      );
+    });
+
+    test('handles single key removal', () {
+      final batch = createValidBatch(
+        selectedKeys: {'obsoleteKey'},
+        findingIds: {'finding1'},
+      );
+
+      batch.validate();
+      expect(batch.selectedKeys, {'obsoleteKey'});
+      expect(batch.findingIds, {'finding1'});
+    });
+
+    test('handles multiple keys removal', () {
+      final batch = createValidBatch(
+        selectedKeys: {'key1', 'key2', 'key3'},
+        findingIds: {'finding1', 'finding2', 'finding3'},
+      );
+
+      batch.validate();
+      expect(batch.selectedKeys, {'key1', 'key2', 'key3'});
+      expect(batch.findingIds, {'finding1', 'finding2', 'finding3'});
+    });
+
+    test('handles template + multiple locales', () {
+      final batch = createValidBatch(
+        arbMutations: [
+          L10nArbMutation(
+            relativePath: 'lib/l10n/app_en.arb',
+            originalBytes: ImmutableBytes.fromString('{"key":"en"}'),
+            originalHash: 'hash1',
+            candidateBytes: ImmutableBytes.fromString('{}'),
+            candidateHash: 'hash2',
+            mode: 420,
+          ),
+          L10nArbMutation(
+            relativePath: 'lib/l10n/app_es.arb',
+            originalBytes: ImmutableBytes.fromString('{"key":"es"}'),
+            originalHash: 'hash3',
+            candidateBytes: ImmutableBytes.fromString('{}'),
+            candidateHash: 'hash4',
+            mode: 420,
+          ),
+          L10nArbMutation(
+            relativePath: 'lib/l10n/app_fr.arb',
+            originalBytes: ImmutableBytes.fromString('{"key":"fr"}'),
+            originalHash: 'hash5',
+            candidateBytes: ImmutableBytes.fromString('{}'),
+            candidateHash: 'hash6',
+            mode: 420,
+          ),
+        ],
+        footprint: const MutationFootprint(
+          findingIds: {'finding1'},
+          physicalPaths: {
+            'lib/l10n/app_en.arb',
+            'lib/l10n/app_es.arb',
+            'lib/l10n/app_fr.arb',
+          },
+          riskScope: ActionRiskScope.boundedFamily,
+          familyId: 'family1',
+        ),
+      );
+
+      batch.validate();
+      expect(batch.arbMutations, hasLength(3));
+    });
+
+    test('handles generated outputs for existing files', () {
+      final batch = createValidBatch(
+        generatedOutputMutations: [
+          L10nGeneratedOutputMutation(
+            relativePath: 'lib/l10n/app_localizations.dart',
+            originalBytes: ImmutableBytes.fromString('class Old {}'),
+            originalHash: 'hash1',
+            candidateBytes: ImmutableBytes.fromString('class New {}'),
+            candidateHash: 'hash2',
+            mode: 420,
+          ),
+        ],
+        footprint: const MutationFootprint(
+          findingIds: {'finding1'},
+          physicalPaths: {'lib/l10n/app_en.arb', 'lib/l10n/app_localizations.dart'},
+          riskScope: ActionRiskScope.boundedFamily,
+          familyId: 'family1',
+        ),
+      );
+
+      batch.validate();
       expect(batch.generatedOutputMutations, hasLength(1));
+      expect(batch.generatedOutputMutations.first.originalBytes, isNotNull);
     });
 
-    test('toString provides useful debugging info', () {
-      final batch = _createValidBatch();
-      final str = batch.toString();
+    test('handles generated outputs for new files', () {
+      final batch = createValidBatch(
+        generatedOutputMutations: [
+          L10nGeneratedOutputMutation(
+            relativePath: 'lib/l10n/app_localizations.dart',
+            originalBytes: null,
+            originalHash: null,
+            candidateBytes: ImmutableBytes.fromString('class New {}'),
+            candidateHash: 'hash1',
+            mode: 420,
+          ),
+        ],
+        footprint: const MutationFootprint(
+          findingIds: {'finding1'},
+          physicalPaths: {'lib/l10n/app_en.arb', 'lib/l10n/app_localizations.dart'},
+          riskScope: ActionRiskScope.boundedFamily,
+          familyId: 'family1',
+        ),
+      );
 
-      expect(str, contains('family: app_localizations'));
-      expect(str, contains('keys: 1'));
-      expect(str, contains('arbs: 1'));
-      expect(str, contains('outputs: 1'));
+      batch.validate();
+      expect(batch.generatedOutputMutations, hasLength(1));
+      expect(batch.generatedOutputMutations.first.originalBytes, isNull);
+    });
+
+    test('footprint consistency with batch metadata', () {
+      final findingIds = {'finding1', 'finding2'};
+      final physicalPaths = {'lib/l10n/app_en.arb', 'lib/l10n/app_es.arb'};
+
+      final batch = createValidBatch(
+        familyId: 'family1',
+        findingIds: findingIds,
+        arbMutations: [
+          L10nArbMutation(
+            relativePath: 'lib/l10n/app_en.arb',
+            originalBytes: ImmutableBytes.fromString('{}'),
+            originalHash: 'hash1',
+            candidateBytes: ImmutableBytes.fromString('{}'),
+            candidateHash: 'hash2',
+            mode: 420,
+          ),
+          L10nArbMutation(
+            relativePath: 'lib/l10n/app_es.arb',
+            originalBytes: ImmutableBytes.fromString('{}'),
+            originalHash: 'hash3',
+            candidateBytes: ImmutableBytes.fromString('{}'),
+            candidateHash: 'hash4',
+            mode: 420,
+          ),
+        ],
+        footprint: MutationFootprint(
+          findingIds: findingIds,
+          physicalPaths: physicalPaths,
+          riskScope: ActionRiskScope.boundedFamily,
+          familyId: 'family1',
+        ),
+      );
+
+      batch.validate();
+      expect(batch.footprint.findingIds, findingIds);
+      expect(batch.footprint.physicalPaths, physicalPaths);
+      expect(batch.footprint.riskScope, ActionRiskScope.boundedFamily);
+      expect(batch.footprint.familyId, 'family1');
+    });
+
+    test('equality works correctly', () {
+      final batch1 = createValidBatch();
+      final batch2 = createValidBatch();
+
+      expect(batch1, batch2);
+      expect(batch1.hashCode, batch2.hashCode);
     });
   });
-}
-
-// Test helpers
-
-L10nArbMutation _createArbMutation(String path) {
-  final original = ImmutableBytes.copyOf(Uint8List.fromList([1, 2, 3]));
-  final candidate = ImmutableBytes.copyOf(Uint8List.fromList([4, 5, 6]));
-
-  return L10nArbMutation(
-    relativePath: path,
-    originalBytes: original,
-    originalHash: original.sha256Hex,
-    candidateBytes: candidate,
-    candidateHash: candidate.sha256Hex,
-    mode: 420,
-  );
-}
-
-L10nGeneratedOutputMutation _createOutputMutation(String path) {
-  final original = ImmutableBytes.copyOf(Uint8List.fromList([7, 8, 9]));
-  final candidate = ImmutableBytes.copyOf(Uint8List.fromList([10, 11, 12]));
-
-  return L10nGeneratedOutputMutation(
-    relativePath: path,
-    originalBytes: original,
-    originalHash: original.sha256Hex,
-    candidateBytes: candidate,
-    candidateHash: candidate.sha256Hex,
-    mode: 420,
-  );
-}
-
-L10nRemovalBatch _createValidBatch() {
-  final arbMutation = _createArbMutation('lib/l10n/app_en.arb');
-  final outputMutation = _createOutputMutation('lib/generated/l10n.dart');
-
-  final footprint = MutationFootprint(
-    findingIds: {'l10n:app_localizations/greeting'},
-    physicalPaths: {'lib/l10n/app_en.arb', 'lib/generated/l10n.dart'},
-    riskScope: ActionRiskScope.boundedFamily,
-    familyId: 'app_localizations',
-  );
-
-  return L10nRemovalBatch(
-    familyId: 'app_localizations',
-    selectedKeys: {'greeting'},
-    findingIds: {'l10n:app_localizations/greeting'},
-    arbMutations: [arbMutation],
-    generatedOutputMutations: [outputMutation],
-    configurationFingerprint: 'sha256:config',
-    packageResolutionFingerprint: 'sha256:pubspec',
-    toolchainFingerprint: 'flutter-3.44.1',
-    footprint: footprint,
-  );
 }

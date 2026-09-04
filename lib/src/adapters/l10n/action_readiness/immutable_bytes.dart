@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
@@ -29,6 +30,10 @@ final class ImmutableBytes {
   /// Makes a defensive copy of [source].
   factory ImmutableBytes.copyOf(List<int> source) =>
       ImmutableBytes._(Uint8List.fromList(source));
+
+  /// Creates from UTF-8 encoded string.
+  factory ImmutableBytes.fromString(String source) =>
+      ImmutableBytes._(Uint8List.fromList(utf8.encode(source)));
 
   final Uint8List _bytes;
 
@@ -69,4 +74,14 @@ final class ImmutableBytes {
     }
     return true;
   }
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ImmutableBytes &&
+          runtimeType == other.runtimeType &&
+          contentEquals(other);
+
+  @override
+  int get hashCode => _sha256Hex.hashCode;
 }
