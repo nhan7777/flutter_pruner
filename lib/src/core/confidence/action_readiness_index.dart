@@ -23,7 +23,10 @@ enum DeterministicInverseKind {
   /// The action has no reliable inverse operation.
   ///
   /// Example: Deleting a hand-written file with no backup.
-  none,
+  none;
+
+  /// Whether this inverse kind is deterministic (proven or generative).
+  bool get isDeterministic => this != DeterministicInverseKind.none;
 }
 
 /// Per-node action readiness metadata computed during static analysis.
