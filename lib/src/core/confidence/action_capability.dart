@@ -18,6 +18,7 @@ class ActionCapability {
     required this.deterministicInverse,
     required this.scope,
     this.proposedAction,
+    this.actionDescriptor,
   });
 
   /// Resolves the core-owned action allowlist for one finding identity.
@@ -80,4 +81,10 @@ class ActionCapability {
 
   /// User-facing operation, present only for supported actions.
   final String? proposedAction;
+
+  /// Adapter-specific action descriptor with mutation details.
+  ///
+  /// Present for adapter-specific actions that need custom metadata
+  /// (e.g., L10nActionDescriptor for l10n family-level mutations).
+  final Object? actionDescriptor;
 }
