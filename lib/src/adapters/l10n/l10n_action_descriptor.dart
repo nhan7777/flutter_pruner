@@ -3,11 +3,7 @@ import 'package:meta/meta.dart';
 import '../../core/confidence/action_risk_scope.dart';
 import '../../core/confidence/mutation_footprint.dart';
 
-/// L10n-specific action descriptor for family-level mutations.
-///
-/// Captures the l10n family identity, selected keys, and mutation footprint
-/// for one atomic l10n removal batch. Always operates at family scope with
-/// deterministic inverse proof.
+/// L10n-specific action descriptor with family-level metadata.
 @immutable
 final class L10nActionDescriptor {
   const L10nActionDescriptor({
@@ -17,23 +13,11 @@ final class L10nActionDescriptor {
     required this.hasExternalConsumerExposure,
   });
 
-  /// L10n family identifier (e.g., 'app_localizations').
   final String familyId;
-
-  /// Localization keys being removed in this action.
   final Set<String> selectedKeys;
-
-  /// Complete mutation footprint (ARB files + generated outputs).
   final MutationFootprint footprint;
-
-  /// Whether external consumers might depend on these keys.
-  ///
-  /// - Application mode: always false (closed world)
-  /// - Package-internal mode: true if package has external dependents
-  /// - Package mode: true (open world, scan-only)
   final bool hasExternalConsumerExposure;
 
-  /// L10n actions are always family-level bounded scope.
   ActionRiskScope get riskScope => ActionRiskScope.boundedFamily;
 
   @override
@@ -49,24 +33,13 @@ final class L10nActionDescriptor {
   @override
   int get hashCode => Object.hash(
         familyId,
-        _setHashCode(selectedKeys),
+        Object.hashAll(selectedKeys),
         footprint,
         hasExternalConsumerExposure,
       );
 
-  @override
-  String toString() => 'L10nActionDescriptor('
-      'family: $familyId, '
-      'keys: ${selectedKeys.length}, '
-      'externalExposure: $hasExternalConsumerExposure'
-      ')';
-
   static bool _setEquals<T>(Set<T> a, Set<T> b) {
     if (a.length != b.length) return false;
-    return a.containsAll(b);
-  }
-
-  static int _setHashCode<T>(Set<T> set) {
-    return set.fold(0, (hash, element) => hash ^ element.hashCode);
+    return a.every(b.contains);
   }
 }

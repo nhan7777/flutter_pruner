@@ -1,5 +1,8 @@
+import '../../adapters/l10n/l10n_action_capability.dart';
 import '../graph/node.dart';
+import '../project/project_context.dart';
 import 'action_readiness_index.dart';
+import 'action_risk_scope.dart';
 
 /// Physical scope of the edit required to apply a finding.
 enum ActionScope {
@@ -30,13 +33,46 @@ class ActionCapability {
   /// If [actionReadinessIndex] is provided and contains an entry for this node,
   /// adapter-specific capability logic may be invoked (e.g., l10n family-level
   /// actions). If null or empty, falls back to the core allowlist.
+  ///
+  /// [project] is required when [actionReadinessIndex] is provided, as
+  /// adapter-specific capabilities need project context (e.g., analysis mode).
   factory ActionCapability.forFinding({
     required String adapterId,
     required GraphNode node,
     ActionReadinessIndex? actionReadinessIndex,
+    ProjectContext? project,
   }) {
-    // TODO(Task 8): Delegate to adapter-specific capability when index present
-    // For now, preserve existing behavior regardless of index
+    // Check ActionReadinessIndex first for adapter-specific capabilities
+    if (actionReadinessIndex != null) {
+      final entry = actionReadinessIndex[node.id];
+      if (entry != null) {
+        // Delegate to adapter-specific capability logic
+        if (adapterId == 'l10n' && node.kind == NodeKind.localizationKey) {
+          if (project == null) {
+            throw ArgumentError(
+              'project is required for l10n action capability resolution',
+            );
+          }
+          return L10nActionCapability.forLocalizationKey(
+            node: node,
+            readinessEntry: entry,
+            project: project,
+          );
+        }
+
+        // Generic adapter-specific capability (no custom logic)
+        return ActionCapability(
+          supported: true,
+          deterministicInverse: entry.inverseKind.isDeterministic,
+          scope: entry.riskScope == ActionRiskScope.boundedSingle
+              ? ActionScope.narrow
+              : ActionScope.broad,
+          proposedAction: _actionDescriptionForAdapter(adapterId, node.kind),
+        );
+      }
+    }
+
+    // Fall back to core allowlist for built-in adapters
     return switch ((adapterId, node.kind)) {
       ('assets', NodeKind.asset)
           when node.metadata['removalSupported'] != false =>
@@ -67,6 +103,19 @@ class ActionCapability {
         deterministicInverse: false,
         scope: ActionScope.broad,
       ),
+    };
+  }
+
+  static String? _actionDescriptionForAdapter(
+    String adapterId,
+    NodeKind kind,
+  ) {
+    return switch ((adapterId, kind)) {
+      ('l10n', NodeKind.localizationKey) => 'Remove l10n key',
+      ('assets', NodeKind.asset) => 'Move to quarantine',
+      ('dart', NodeKind.declaration) => 'Remove declaration',
+      ('dart', NodeKind.dartLibrary) => 'Remove empty library',
+      _ => null,
     };
   }
 

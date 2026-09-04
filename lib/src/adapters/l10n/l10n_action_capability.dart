@@ -1,52 +1,51 @@
+import 'package:meta/meta.dart';
+
 import '../../core/confidence/action_capability.dart';
 import '../../core/confidence/action_readiness_index.dart';
+import '../../core/confidence/action_risk_scope.dart';
 import '../../core/graph/node.dart';
 import '../../core/project/analysis_mode.dart';
 import '../../core/project/project_context.dart';
 import 'l10n_action_descriptor.dart';
 
-/// Factory for creating l10n-specific action capabilities.
-///
-/// Determines action support and proposed action based on project mode,
-/// blockers, and external consumer exposure. Returns updated ActionCapability
-/// with l10n-specific metadata.
+/// Factory for l10n-specific action capabilities.
+@immutable
 final class L10nActionCapability {
   const L10nActionCapability._();
 
-  /// Creates action capability for a localization key node.
+  /// Creates an ActionCapability for a localization key node.
   ///
-  /// Returns null if:
-  /// - Node is not a localization key
-  /// - No readiness entry exists
-  /// - Scoped blockers prevent action
-  /// - Package mode (scan-only)
-  ///
-  /// Supported actions:
-  /// - Application mode: supported with deterministic inverse
-  /// - Package-internal mode: supported with deterministic inverse
-  /// - Package mode: not supported (scan-only)
-  static ActionCapability? forLocalizationKey({
+  /// Confidence rules:
+  /// - **Application mode**: SAFE when complete closure + no blockers + action supported
+  /// - **Package-internal mode**: HIGH max, externalConsumersNotScanned manual risk
+  /// - **Package mode**: unsupported (scan-only)
+  static ActionCapability forLocalizationKey({
     required GraphNode node,
     required ActionReadinessEntry readinessEntry,
     required ProjectContext project,
   }) {
-    // Verify node is localization key
+    // Validate node kind
     if (node.kind != NodeKind.localizationKey) {
-      return null;
+      throw ArgumentError('Node must be localizationKey, got ${node.kind}');
     }
 
-    // Verify adapter ownership
-    if (readinessEntry.adapterId != 'l10n') {
-      return null;
+    // Check for scoped blockers (other than externalConsumersNotScanned)
+    final scopedBlockers = (node.metadata['scopedBlockers'] as List<dynamic>?)
+        ?.cast<String>() ?? <String>[];
+    final hasNonExternalBlockers = scopedBlockers.any(
+      (blocker) => blocker != 'externalConsumersNotScanned',
+    );
+
+    if (hasNonExternalBlockers) {
+      // Other scoped blockers → unsupported
+      return const ActionCapability(
+        supported: false,
+        deterministicInverse: false,
+        scope: ActionScope.broad,
+      );
     }
 
-    // Check for scoped blockers in metadata
-    final scopedBlockers = node.metadata['scopedBlockers'] as List<Object?>?;
-    if (scopedBlockers != null && scopedBlockers.isNotEmpty) {
-      return null;
-    }
-
-    // Package mode is scan-only
+    // Package mode → scan-only, unsupported
     if (project.analysisMode == AnalysisMode.package) {
       return const ActionCapability(
         supported: false,
@@ -55,33 +54,35 @@ final class L10nActionCapability {
       );
     }
 
-    // Create l10n descriptor for supported modes
+    // Create descriptor
     final descriptor = L10nActionDescriptor(
       familyId: readinessEntry.familyId,
-      selectedKeys: {_extractKeyFromNodeId(node.id)},
+      selectedKeys: {node.id}, // Single key for now
       footprint: readinessEntry.mutationFootprint,
       hasExternalConsumerExposure: readinessEntry.hasExternalConsumerExposure,
     );
 
-    // L10n actions are supported in application and package-internal modes
-    // Family-level mutations use ActionScope.broad since they touch multiple files
+    // Application mode → SAFE if conditions met
+    if (project.analysisMode == AnalysisMode.application) {
+      return ActionCapability(
+        supported: true,
+        deterministicInverse: readinessEntry.inverseKind.isDeterministic,
+        scope: readinessEntry.riskScope == ActionRiskScope.boundedSingle
+            ? ActionScope.narrow
+            : ActionScope.broad,
+        proposedAction: 'Remove l10n key',
+        actionDescriptor: descriptor,
+      );
+    }
+
+    // Package-internal mode → HIGH max with manual risk
+    // (externalConsumersNotScanned preserved as manual risk)
     return ActionCapability(
       supported: true,
-      deterministicInverse: true,
-      scope: ActionScope.broad,
-      proposedAction: 'Remove localization key from ARB family',
+      deterministicInverse: readinessEntry.inverseKind.isDeterministic,
+      scope: ActionScope.broad, // Broad to signal manual review needed
+      proposedAction: 'Remove l10n key (external consumers not scanned)',
       actionDescriptor: descriptor,
     );
-  }
-
-  /// Extracts the key name from a localization key node ID.
-  ///
-  /// Node IDs follow format: 'l10n:familyId/keyName'
-  static String _extractKeyFromNodeId(String nodeId) {
-    final parts = nodeId.split('/');
-    if (parts.length != 2) {
-      throw ArgumentError('Invalid localization key node ID: $nodeId');
-    }
-    return parts[1];
   }
 }

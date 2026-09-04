@@ -9,111 +9,78 @@ import 'package:flutter_pruner/src/core/confidence/mutation_footprint.dart';
 import 'package:flutter_pruner/src/core/graph/node.dart';
 import 'package:flutter_pruner/src/core/project/analysis_mode.dart';
 import 'package:flutter_pruner/src/core/project/project_context.dart';
+import 'package:flutter_pruner/src/core/project/target_matrix.dart';
 import 'package:test/test.dart';
 
 void main() {
   group('L10nActionCapability', () {
-    test('returns null for non-localization key node', () {
-      final node = _createNode(kind: NodeKind.declaration);
-      final entry = _createReadinessEntry();
-      final project = _createProjectContext();
-
-      final capability = L10nActionCapability.forLocalizationKey(
-        node: node,
-        readinessEntry: entry,
-        project: project,
+    ProjectContext createProject(AnalysisMode mode) {
+      return ProjectContext(
+        root: Directory('/test/project'),
+        pubspec: {'name': 'test_package'},
+        packageName: 'test_package',
+        analysisMode: mode,
+        targetMatrix: TargetMatrix.declared([]),
       );
+    }
 
-      expect(capability, isNull);
-    });
-
-    test('returns null for wrong adapter', () {
-      final node = _createNode(kind: NodeKind.localizationKey);
-      final entry = _createReadinessEntry(adapterId: 'other');
-      final project = _createProjectContext();
-
-      final capability = L10nActionCapability.forLocalizationKey(
-        node: node,
-        readinessEntry: entry,
-        project: project,
+    GraphNode createNode({
+      NodeKind kind = NodeKind.localizationKey,
+      Map<String, dynamic>? metadata,
+    }) {
+      return GraphNode(
+        id: 'l10n:app.key1',
+        kind: kind,
+        origin: Uri.parse('package:test_package/l10n/app_en.arb'),
+        metadata: metadata ?? {},
       );
+    }
 
-      expect(capability, isNull);
-    });
-
-    test('returns null when scoped blockers present', () {
-      final node = _createNode(
-        kind: NodeKind.localizationKey,
-        metadata: {
-          'scopedBlockers': ['test-blocker'],
-        },
+    ActionReadinessEntry createEntry({
+      bool hasExternalConsumerExposure = false,
+      ActionRiskScope riskScope = ActionRiskScope.boundedFamily,
+      DeterministicInverseKind inverseKind = DeterministicInverseKind.proven,
+    }) {
+      return ActionReadinessEntry(
+        adapterId: 'l10n',
+        nodeKind: NodeKind.localizationKey,
+        familyId: 'family1',
+        configurationFingerprint: 'config-fp',
+        mutationFootprint: MutationFootprint(
+          findingIds: {'finding1'},
+          physicalPaths: {'lib/l10n/app_en.arb'},
+          riskScope: riskScope,
+          familyId: 'family1',
+        ),
+        inverseKind: inverseKind,
+        riskScope: riskScope,
+        hasExternalConsumerExposure: hasExternalConsumerExposure,
       );
-      final entry = _createReadinessEntry();
-      final project = _createProjectContext();
+    }
 
-      final capability = L10nActionCapability.forLocalizationKey(
-        node: node,
-        readinessEntry: entry,
-        project: project,
-      );
+    test('throws when node is not localizationKey', () {
+      final project = createProject(AnalysisMode.application);
+      final node = createNode(kind: NodeKind.asset);
+      final entry = createEntry();
 
-      expect(capability, isNull);
-    });
-
-    test('returns unsupported for package mode', () {
-      final node = _createNode(kind: NodeKind.localizationKey);
-      final entry = _createReadinessEntry();
-      final project = _createProjectContext(mode: AnalysisMode.package);
-
-      final capability = L10nActionCapability.forLocalizationKey(
-        node: node,
-        readinessEntry: entry,
-        project: project,
-      );
-
-      expect(capability, isNotNull);
-      expect(capability!.supported, isFalse);
-      expect(capability.deterministicInverse, isFalse);
-      expect(capability.scope, equals(ActionScope.broad));
-    });
-
-    test('application mode creates supported capability', () {
-      final node = _createNode(
-        kind: NodeKind.localizationKey,
-        nodeId: 'l10n:app_localizations/greeting',
-      );
-      final entry = _createReadinessEntry(
-        familyId: 'app_localizations',
-        hasExternalConsumerExposure: false,
-      );
-      final project = _createProjectContext(mode: AnalysisMode.application);
-
-      final capability = L10nActionCapability.forLocalizationKey(
-        node: node,
-        readinessEntry: entry,
-        project: project,
-      );
-
-      expect(capability, isNotNull);
-      expect(capability!.supported, isTrue);
-      expect(capability.deterministicInverse, isTrue);
-      expect(capability.scope, equals(ActionScope.broad));
       expect(
-        capability.proposedAction,
-        equals('Remove localization key from ARB family'),
+        () => L10nActionCapability.forLocalizationKey(
+          node: node,
+          readinessEntry: entry,
+          project: project,
+        ),
+        throwsA(isA<ArgumentError>().having(
+          (e) => e.message,
+          'message',
+          contains('Node must be localizationKey'),
+        )),
       );
     });
 
-    test('package-internal mode creates supported capability', () {
-      final node = _createNode(
-        kind: NodeKind.localizationKey,
-        nodeId: 'l10n:app_localizations/greeting',
-      );
-      final entry = _createReadinessEntry(
-        familyId: 'app_localizations',
-        hasExternalConsumerExposure: true,
-      );
-      final project = _createProjectContext(mode: AnalysisMode.packageInternal);
+    test('application mode returns SAFE capability', () {
+      final project = createProject(AnalysisMode.application);
+      final node = createNode();
+      final entry = createEntry();
 
       final capability = L10nActionCapability.forLocalizationKey(
         node: node,
@@ -121,41 +88,22 @@ void main() {
         project: project,
       );
 
-      expect(capability, isNotNull);
-      expect(capability!.supported, isTrue);
+      expect(capability.supported, isTrue);
       expect(capability.deterministicInverse, isTrue);
-      expect(capability.scope, equals(ActionScope.broad));
-    });
-
-    test('capability includes l10n descriptor', () {
-      final node = _createNode(
-        kind: NodeKind.localizationKey,
-        nodeId: 'l10n:app_localizations/greeting',
-      );
-      final entry = _createReadinessEntry(familyId: 'app_localizations');
-      final project = _createProjectContext();
-
-      final capability = L10nActionCapability.forLocalizationKey(
-        node: node,
-        readinessEntry: entry,
-        project: project,
-      );
-
-      expect(capability!.actionDescriptor, isNotNull);
+      expect(capability.scope, ActionScope.broad);
+      expect(capability.proposedAction, 'Remove l10n key');
       expect(capability.actionDescriptor, isA<L10nActionDescriptor>());
 
       final descriptor = capability.actionDescriptor as L10nActionDescriptor;
-      expect(descriptor.familyId, equals('app_localizations'));
-      expect(descriptor.selectedKeys, equals({'greeting'}));
+      expect(descriptor.familyId, 'family1');
+      expect(descriptor.selectedKeys, {'l10n:app.key1'});
+      expect(descriptor.hasExternalConsumerExposure, isFalse);
     });
 
-    test('extracts key name from node ID', () {
-      final node = _createNode(
-        kind: NodeKind.localizationKey,
-        nodeId: 'l10n:app_localizations/farewell',
-      );
-      final entry = _createReadinessEntry(familyId: 'app_localizations');
-      final project = _createProjectContext();
+    test('application mode with boundedSingle has narrow scope', () {
+      final project = createProject(AnalysisMode.application);
+      final node = createNode();
+      final entry = createEntry(riskScope: ActionRiskScope.boundedSingle);
 
       final capability = L10nActionCapability.forLocalizationKey(
         node: node,
@@ -163,20 +111,15 @@ void main() {
         project: project,
       );
 
-      final descriptor = capability!.actionDescriptor as L10nActionDescriptor;
-      expect(descriptor.selectedKeys, equals({'farewell'}));
+      expect(capability.scope, ActionScope.narrow);
     });
 
-    test('external exposure propagates to descriptor', () {
-      final node = _createNode(
-        kind: NodeKind.localizationKey,
-        nodeId: 'l10n:app_localizations/greeting',
-      );
-      final entry = _createReadinessEntry(
-        familyId: 'app_localizations',
-        hasExternalConsumerExposure: true,
-      );
-      final project = _createProjectContext(mode: AnalysisMode.packageInternal);
+    test('package-internal mode returns HIGH capability with manual risk', () {
+      final project = createProject(AnalysisMode.packageInternal);
+      final node = createNode(metadata: {
+        'scopedBlockers': ['externalConsumersNotScanned'],
+      });
+      final entry = createEntry(hasExternalConsumerExposure: true);
 
       final capability = L10nActionCapability.forLocalizationKey(
         node: node,
@@ -184,59 +127,108 @@ void main() {
         project: project,
       );
 
-      final descriptor = capability!.actionDescriptor as L10nActionDescriptor;
+      expect(capability.supported, isTrue);
+      expect(capability.deterministicInverse, isTrue);
+      expect(capability.scope, ActionScope.broad);
+      expect(
+        capability.proposedAction,
+        'Remove l10n key (external consumers not scanned)',
+      );
+
+      final descriptor = capability.actionDescriptor as L10nActionDescriptor;
       expect(descriptor.hasExternalConsumerExposure, isTrue);
     });
+
+    test('package mode returns unsupported', () {
+      final project = createProject(AnalysisMode.package);
+      final node = createNode();
+      final entry = createEntry();
+
+      final capability = L10nActionCapability.forLocalizationKey(
+        node: node,
+        readinessEntry: entry,
+        project: project,
+      );
+
+      expect(capability.supported, isFalse);
+      expect(capability.deterministicInverse, isFalse);
+      expect(capability.scope, ActionScope.broad);
+    });
+
+    test('scoped blocker present returns unsupported', () {
+      final project = createProject(AnalysisMode.application);
+      final node = createNode(metadata: {
+        'scopedBlockers': ['someOtherBlocker', 'externalConsumersNotScanned'],
+      });
+      final entry = createEntry();
+
+      final capability = L10nActionCapability.forLocalizationKey(
+        node: node,
+        readinessEntry: entry,
+        project: project,
+      );
+
+      expect(capability.supported, isFalse);
+      expect(capability.deterministicInverse, isFalse);
+      expect(capability.scope, ActionScope.broad);
+    });
+
+    test('externalConsumersNotScanned alone does not block application mode', () {
+      final project = createProject(AnalysisMode.application);
+      final node = createNode(metadata: {
+        'scopedBlockers': ['externalConsumersNotScanned'],
+      });
+      final entry = createEntry(hasExternalConsumerExposure: true);
+
+      final capability = L10nActionCapability.forLocalizationKey(
+        node: node,
+        readinessEntry: entry,
+        project: project,
+      );
+
+      expect(capability.supported, isTrue);
+    });
+
+    test('no scopedBlockers metadata is treated as empty list', () {
+      final project = createProject(AnalysisMode.application);
+      final node = createNode(); // No metadata
+      final entry = createEntry();
+
+      final capability = L10nActionCapability.forLocalizationKey(
+        node: node,
+        readinessEntry: entry,
+        project: project,
+      );
+
+      expect(capability.supported, isTrue);
+    });
+
+    test('generative inverse kind is preserved', () {
+      final project = createProject(AnalysisMode.application);
+      final node = createNode();
+      final entry = createEntry(inverseKind: DeterministicInverseKind.generative);
+
+      final capability = L10nActionCapability.forLocalizationKey(
+        node: node,
+        readinessEntry: entry,
+        project: project,
+      );
+
+      expect(capability.deterministicInverse, isTrue);
+    });
+
+    test('none inverse kind returns non-deterministic', () {
+      final project = createProject(AnalysisMode.application);
+      final node = createNode();
+      final entry = createEntry(inverseKind: DeterministicInverseKind.none);
+
+      final capability = L10nActionCapability.forLocalizationKey(
+        node: node,
+        readinessEntry: entry,
+        project: project,
+      );
+
+      expect(capability.deterministicInverse, isFalse);
+    });
   });
-}
-
-// Test helpers
-
-GraphNode _createNode({
-  required NodeKind kind,
-  String nodeId = 'l10n:app_localizations/greeting',
-  Map<String, Object?> metadata = const {},
-}) {
-  return GraphNode(
-    id: nodeId,
-    kind: kind,
-    origin: Uri.parse('file:///test/lib/l10n/app_en.arb'),
-    metadata: metadata,
-  );
-}
-
-ActionReadinessEntry _createReadinessEntry({
-  String adapterId = 'l10n',
-  String familyId = 'app_localizations',
-  bool hasExternalConsumerExposure = false,
-}) {
-  final footprint = MutationFootprint(
-    findingIds: {'l10n:$familyId/greeting'},
-    physicalPaths: {'lib/l10n/app_en.arb', 'lib/generated/l10n.dart'},
-    riskScope: ActionRiskScope.boundedFamily,
-    familyId: familyId,
-  );
-
-  return ActionReadinessEntry(
-    adapterId: adapterId,
-    nodeKind: NodeKind.localizationKey,
-    familyId: familyId,
-    configurationFingerprint: 'sha256:test',
-    mutationFootprint: footprint,
-    inverseKind: DeterministicInverseKind.proven,
-    riskScope: ActionRiskScope.boundedFamily,
-    hasExternalConsumerExposure: hasExternalConsumerExposure,
-  );
-}
-
-ProjectContext _createProjectContext({
-  AnalysisMode mode = AnalysisMode.application,
-}) {
-  return ProjectContext(
-    root: Directory.current,
-    pubspec: {'name': 'test_app'},
-    packageName: 'test_app',
-    analysisMode: mode,
-    targets: [],
-  );
 }

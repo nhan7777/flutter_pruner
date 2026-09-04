@@ -5,179 +5,199 @@ import 'package:test/test.dart';
 
 void main() {
   group('L10nActionDescriptor', () {
-    test('constructs with all required fields', () {
-      final footprint = MutationFootprint(
-        findingIds: {'l10n:app_localizations/greeting'},
-        physicalPaths: {'lib/l10n/app_en.arb', 'lib/generated/l10n.dart'},
+    test('creates valid descriptor', () {
+      final footprint = const MutationFootprint(
+        findingIds: {'finding1'},
+        physicalPaths: {'lib/l10n/app_en.arb'},
         riskScope: ActionRiskScope.boundedFamily,
-        familyId: 'app_localizations',
+        familyId: 'family1',
       );
 
       final descriptor = L10nActionDescriptor(
-        familyId: 'app_localizations',
-        selectedKeys: {'greeting'},
+        familyId: 'family1',
+        selectedKeys: {'key1', 'key2'},
         footprint: footprint,
         hasExternalConsumerExposure: false,
       );
 
-      expect(descriptor.familyId, equals('app_localizations'));
-      expect(descriptor.selectedKeys, equals({'greeting'}));
-      expect(descriptor.footprint, equals(footprint));
+      expect(descriptor.familyId, 'family1');
+      expect(descriptor.selectedKeys, {'key1', 'key2'});
+      expect(descriptor.footprint, footprint);
       expect(descriptor.hasExternalConsumerExposure, isFalse);
     });
 
     test('riskScope is always boundedFamily', () {
-      final descriptor = _createDescriptor(
-        familyId: 'app_localizations',
-        keys: {'greeting'},
+      final descriptor = L10nActionDescriptor(
+        familyId: 'family1',
+        selectedKeys: {'key1'},
+        footprint: const MutationFootprint(
+          findingIds: {'finding1'},
+          physicalPaths: {'lib/l10n/app_en.arb'},
+          riskScope: ActionRiskScope.boundedFamily,
+          familyId: 'family1',
+        ),
+        hasExternalConsumerExposure: false,
       );
 
-      expect(descriptor.riskScope, equals(ActionRiskScope.boundedFamily));
+      expect(descriptor.riskScope, ActionRiskScope.boundedFamily);
     });
 
     test('equality works correctly', () {
-      final footprint = MutationFootprint(
-        findingIds: {'l10n:app_localizations/greeting'},
+      final footprint = const MutationFootprint(
+        findingIds: {'finding1'},
         physicalPaths: {'lib/l10n/app_en.arb'},
         riskScope: ActionRiskScope.boundedFamily,
-        familyId: 'app_localizations',
+        familyId: 'family1',
       );
 
       final descriptor1 = L10nActionDescriptor(
-        familyId: 'app_localizations',
-        selectedKeys: {'greeting'},
+        familyId: 'family1',
+        selectedKeys: {'key1', 'key2'},
         footprint: footprint,
         hasExternalConsumerExposure: false,
       );
 
       final descriptor2 = L10nActionDescriptor(
-        familyId: 'app_localizations',
-        selectedKeys: {'greeting'},
+        familyId: 'family1',
+        selectedKeys: {'key1', 'key2'},
         footprint: footprint,
         hasExternalConsumerExposure: false,
       );
 
-      expect(descriptor1, equals(descriptor2));
-      expect(descriptor1.hashCode, equals(descriptor2.hashCode));
+      expect(descriptor1, descriptor2);
+      expect(descriptor1.hashCode, descriptor2.hashCode);
     });
 
-    test('different familyId results in inequality', () {
-      final descriptor1 = _createDescriptor(
-        familyId: 'app_localizations',
-        keys: {'greeting'},
-      );
-
-      final descriptor2 = _createDescriptor(
-        familyId: 'other_localizations',
-        keys: {'greeting'},
-      );
-
-      expect(descriptor1, isNot(equals(descriptor2)));
-    });
-
-    test('different selectedKeys results in inequality', () {
-      final descriptor1 = _createDescriptor(
-        familyId: 'app_localizations',
-        keys: {'greeting'},
-      );
-
-      final descriptor2 = _createDescriptor(
-        familyId: 'app_localizations',
-        keys: {'farewell'},
-      );
-
-      expect(descriptor1, isNot(equals(descriptor2)));
-    });
-
-    test('different external exposure results in inequality', () {
-      final footprint = MutationFootprint(
-        findingIds: {'l10n:app_localizations/greeting'},
+    test('inequality when familyId differs', () {
+      final footprint1 = const MutationFootprint(
+        findingIds: {'finding1'},
         physicalPaths: {'lib/l10n/app_en.arb'},
         riskScope: ActionRiskScope.boundedFamily,
-        familyId: 'app_localizations',
+        familyId: 'family1',
+      );
+
+      final footprint2 = const MutationFootprint(
+        findingIds: {'finding1'},
+        physicalPaths: {'lib/l10n/app_en.arb'},
+        riskScope: ActionRiskScope.boundedFamily,
+        familyId: 'family2',
       );
 
       final descriptor1 = L10nActionDescriptor(
-        familyId: 'app_localizations',
-        selectedKeys: {'greeting'},
+        familyId: 'family1',
+        selectedKeys: {'key1'},
+        footprint: footprint1,
+        hasExternalConsumerExposure: false,
+      );
+
+      final descriptor2 = L10nActionDescriptor(
+        familyId: 'family2',
+        selectedKeys: {'key1'},
+        footprint: footprint2,
+        hasExternalConsumerExposure: false,
+      );
+
+      expect(descriptor1, isNot(descriptor2));
+    });
+
+    test('inequality when selectedKeys differ', () {
+      final footprint = const MutationFootprint(
+        findingIds: {'finding1'},
+        physicalPaths: {'lib/l10n/app_en.arb'},
+        riskScope: ActionRiskScope.boundedFamily,
+        familyId: 'family1',
+      );
+
+      final descriptor1 = L10nActionDescriptor(
+        familyId: 'family1',
+        selectedKeys: {'key1'},
         footprint: footprint,
         hasExternalConsumerExposure: false,
       );
 
       final descriptor2 = L10nActionDescriptor(
-        familyId: 'app_localizations',
-        selectedKeys: {'greeting'},
+        familyId: 'family1',
+        selectedKeys: {'key2'},
+        footprint: footprint,
+        hasExternalConsumerExposure: false,
+      );
+
+      expect(descriptor1, isNot(descriptor2));
+    });
+
+    test('inequality when hasExternalConsumerExposure differs', () {
+      final footprint = const MutationFootprint(
+        findingIds: {'finding1'},
+        physicalPaths: {'lib/l10n/app_en.arb'},
+        riskScope: ActionRiskScope.boundedFamily,
+        familyId: 'family1',
+      );
+
+      final descriptor1 = L10nActionDescriptor(
+        familyId: 'family1',
+        selectedKeys: {'key1'},
+        footprint: footprint,
+        hasExternalConsumerExposure: false,
+      );
+
+      final descriptor2 = L10nActionDescriptor(
+        familyId: 'family1',
+        selectedKeys: {'key1'},
         footprint: footprint,
         hasExternalConsumerExposure: true,
       );
 
-      expect(descriptor1, isNot(equals(descriptor2)));
+      expect(descriptor1, isNot(descriptor2));
     });
 
-    test('application mode has no external exposure', () {
-      final descriptor = _createDescriptor(
-        familyId: 'app_localizations',
-        keys: {'greeting'},
+    test('handles single key', () {
+      final descriptor = L10nActionDescriptor(
+        familyId: 'family1',
+        selectedKeys: {'singleKey'},
+        footprint: const MutationFootprint(
+          findingIds: {'finding1'},
+          physicalPaths: {'lib/l10n/app_en.arb'},
+          riskScope: ActionRiskScope.boundedFamily,
+          familyId: 'family1',
+        ),
         hasExternalConsumerExposure: false,
       );
 
-      expect(descriptor.hasExternalConsumerExposure, isFalse);
+      expect(descriptor.selectedKeys, {'singleKey'});
+      expect(descriptor.selectedKeys.length, 1);
     });
 
-    test('package-internal mode has external exposure', () {
-      final descriptor = _createDescriptor(
-        familyId: 'app_localizations',
-        keys: {'greeting'},
+    test('handles multiple keys', () {
+      final descriptor = L10nActionDescriptor(
+        familyId: 'family1',
+        selectedKeys: {'key1', 'key2', 'key3'},
+        footprint: const MutationFootprint(
+          findingIds: {'finding1', 'finding2', 'finding3'},
+          physicalPaths: {'lib/l10n/app_en.arb'},
+          riskScope: ActionRiskScope.boundedFamily,
+          familyId: 'family1',
+        ),
+        hasExternalConsumerExposure: false,
+      );
+
+      expect(descriptor.selectedKeys, {'key1', 'key2', 'key3'});
+      expect(descriptor.selectedKeys.length, 3);
+    });
+
+    test('handles external consumer exposure', () {
+      final descriptor = L10nActionDescriptor(
+        familyId: 'family1',
+        selectedKeys: {'key1'},
+        footprint: const MutationFootprint(
+          findingIds: {'finding1'},
+          physicalPaths: {'lib/l10n/app_en.arb'},
+          riskScope: ActionRiskScope.boundedFamily,
+          familyId: 'family1',
+        ),
         hasExternalConsumerExposure: true,
       );
 
       expect(descriptor.hasExternalConsumerExposure, isTrue);
     });
-
-    test('multiple keys in descriptor', () {
-      final descriptor = _createDescriptor(
-        familyId: 'app_localizations',
-        keys: {'greeting', 'farewell', 'welcome'},
-      );
-
-      expect(descriptor.selectedKeys, hasLength(3));
-      expect(descriptor.selectedKeys, containsAll(['greeting', 'farewell', 'welcome']));
-    });
-
-    test('toString includes key information', () {
-      final descriptor = _createDescriptor(
-        familyId: 'app_localizations',
-        keys: {'greeting', 'farewell'},
-        hasExternalConsumerExposure: true,
-      );
-
-      final str = descriptor.toString();
-
-      expect(str, contains('family: app_localizations'));
-      expect(str, contains('keys: 2'));
-      expect(str, contains('externalExposure: true'));
-    });
   });
-}
-
-// Test helpers
-
-L10nActionDescriptor _createDescriptor({
-  required String familyId,
-  required Set<String> keys,
-  bool hasExternalConsumerExposure = false,
-}) {
-  final footprint = MutationFootprint(
-    findingIds: keys.map((key) => 'l10n:$familyId/$key').toSet(),
-    physicalPaths: {'lib/l10n/app_en.arb', 'lib/generated/l10n.dart'},
-    riskScope: ActionRiskScope.boundedFamily,
-    familyId: familyId,
-  );
-
-  return L10nActionDescriptor(
-    familyId: familyId,
-    selectedKeys: keys,
-    footprint: footprint,
-    hasExternalConsumerExposure: hasExternalConsumerExposure,
-  );
 }
