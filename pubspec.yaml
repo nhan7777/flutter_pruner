@@ -19,6 +19,7 @@ dependencies:
   analyzer: '>=12.1.0 <15.0.0'
 
   args: ^2.5.0
+  characters: ^1.4.1
   collection: ^1.19.0
   crypto: ^3.0.5
   glob: ^2.1.2
@@ -26,7 +27,7 @@ dependencies:
   path: ^1.9.0
   pub_semver: ^2.1.4
   pubspec_parse: ^1.3.0
-  synchronized: ^3.1.0
+  string_width: ^0.1.5
   yaml: ^3.1.2
 
 dev_dependencies:

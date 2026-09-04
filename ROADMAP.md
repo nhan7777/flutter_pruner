@@ -101,6 +101,8 @@ filesystem boundaries.
 ### Release and operations
 
 - [x] Document a stable migration policy for future report schemas
+- [x] Gate recoverable quarantine clean on exact-SHA hosted Linux, macOS, and
+      Windows conformance evidence
 - [ ] Add release automation that verifies version, changelog, tag, archive,
       and hosted CI state without publishing automatically
 - [x] Add reproducible performance benchmarks using public synthetic fixtures

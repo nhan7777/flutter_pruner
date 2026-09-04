@@ -1,14 +1,57 @@
+import 'dart:io';
+
+import 'package:flutter_pruner/src/apply/finding_action_builder.dart';
+import 'package:flutter_pruner/src/apply/finding_selection.dart';
+import 'package:flutter_pruner/src/apply/removal_planner.dart';
 import 'package:flutter_pruner/src/cli/formatters/human_formatter.dart';
+import 'package:flutter_pruner/src/cli/terminal_text_metrics.dart';
 import 'package:flutter_pruner/src/core/confidence/confidence.dart';
 import 'package:flutter_pruner/src/core/confidence/finding.dart';
 import 'package:flutter_pruner/src/core/graph/build_condition.dart';
 import 'package:flutter_pruner/src/core/graph/node.dart';
 import 'package:flutter_pruner/src/core/project/target_matrix.dart';
 import 'package:flutter_pruner/src/reporting/run_report.dart';
+import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
 void main() {
   group('HumanFormatter apply presentation', () {
+    test('renders a pre-transaction command failure without success copy', () {
+      final output = _plain(
+        const HumanFormatter(lineWidth: 160).format(
+          _applyReport(
+            status: RunStatus.internalError,
+            exitCode: 70,
+            diagnostics: [
+              RunDiagnostic(
+                code: 'adapter_analysis_failed',
+                phase: 'analysis:adapter:dart',
+                message:
+                    'Analysis failed after adapter Dart declaration analyzer '
+                    '(dart) started.',
+              ),
+            ],
+          ),
+        ),
+      );
+
+      expect(output, contains('✕ APPLY FAILED'));
+      expect(output, contains('status internalError'));
+      expect(output, contains('exit 70'));
+      expect(output, contains('adapter_analysis_failed'));
+      expect(output, contains('analysis:adapter:dart'));
+      expect(
+        output,
+        contains(
+          'Analysis failed after adapter Dart declaration analyzer (dart) '
+          'started.',
+        ),
+      );
+      expect(output, isNot(contains('✓')));
+      expect(output, isNot(contains('APPLY COMPLETED')));
+      expect(output, isNot(contains('No finding outcomes')));
+    });
+
     test('labels every terminal state without claiming success', () {
       final cases = <RunStatus, String>{
         RunStatus.completed: 'APPLY COMPLETED',
@@ -24,7 +67,7 @@ void main() {
 
       for (final entry in cases.entries) {
         final output = _plain(
-          const HumanFormatter(lineWidth: 160).format(
+          const _PosixHumanFormatter(lineWidth: 160).format(
             _applyReport(
               status: entry.key,
               outcomes: entry.key == RunStatus.dryRun
@@ -218,7 +261,7 @@ void main() {
         const projectRoot = "/project's root";
         const quarantine = "/project's root/.flutter_pruner/quarantine/run-1";
         final output = _plain(
-          const HumanFormatter(lineWidth: 200).format(
+          const _PosixHumanFormatter(lineWidth: 200).format(
             _applyReport(
               projectRoot: projectRoot,
               quarantinePath: quarantine,
@@ -232,8 +275,8 @@ void main() {
         expect(
           output,
           contains(
-            "flutter_pruner rollback --project '/project'\"'\"'s root' "
-            "--quarantine '/project'\"'\"'s root/.flutter_pruner/quarantine' "
+            "flutter_pruner 'rollback' '--project' '/project'\"'\"'s root' "
+            "'--quarantine' '/project'\"'\"'s root/.flutter_pruner/quarantine' "
             "'apply-test'",
           ),
         );
@@ -353,7 +396,8 @@ void main() {
       expect(wideHeader, contains('RESTORED (1)'));
       expect(wideHeader, contains('READY / BLOCKED (1)'));
       expect(wideHeader, contains('RECOVERY (1)'));
-      expect(wide, contains('example_committed.dart'));
+      expect(wide, contains('example_com'));
+      expect(wide, contains('mitted.dart'));
       expect(wide, isNot(contains('/project/lib')));
       expect(
         medium.split('\n'),
@@ -377,10 +421,13 @@ void main() {
         80: narrow,
         50: compact,
       }.entries) {
+        const metrics = TerminalTextMetrics();
         expect(
           entry.value.split('\n').where((line) => line.isNotEmpty),
           everyElement(
-            predicate<String>((line) => line.runes.length <= entry.key),
+            predicate<String>(
+              (line) => metrics.visibleWidth(line) <= entry.key,
+            ),
           ),
           reason: 'width ${entry.key}',
         );
@@ -411,17 +458,221 @@ void main() {
       expect(output, contains('No actionable findings were found.'));
       expect(output, isNot(contains('┌')));
     });
+
+    test(
+      'renders the initial physical plan and exact preview next command',
+      () {
+        final plan = _initialPhysicalPlan(
+          canonicalProjectRoot: _posixProjectRoot,
+        );
+        final output = _plain(
+          const _PosixHumanFormatter(lineWidth: 200).format(
+            _applyReport(
+              projectRoot: _posixProjectRoot,
+              status: RunStatus.dryRun,
+              outcomes: [_outcome(ApplyFindingOutcomeStatus.remaining)],
+              selection: _exactSelection(plan),
+              initialPlan: plan,
+            ),
+          ),
+        );
+
+        expect(output, contains('INITIAL PHYSICAL PLAN'));
+        expect(output, contains('Complete exact selection'));
+        expect(output, contains('4 affected files'));
+        expect(output, contains('snapshotted before mutation'));
+        expect(output, contains('Unit 1 · unit-a'));
+        expect(output, contains('Unit 2 · unit-b'));
+        expect(
+          output.indexOf('Unit 1 · unit-a'),
+          lessThan(output.indexOf('Unit 2 · unit-b')),
+        );
+        expect(output, contains('Clean up import'));
+        expect(output, contains('lib/importer.dart'));
+        expect(output, contains('lib/dead.dart'));
+        expect(output, contains('Delete file'));
+        expect(output, contains('resolution variant assets/dead@2x.png'));
+        expect(output, contains('generated companion lib/dead.g.dart'));
+        expect(output, contains('Remove finding'));
+        expect(
+          output,
+          contains('edit the declaration or delete an empty file'),
+        );
+        expect(output, contains('BLOCKED · retainedConsumer'));
+        expect(
+          output,
+          contains(_exactSelection(plan).actualPreviewFingerprint!),
+        );
+        expect(
+          output,
+          contains(
+            "flutter_pruner 'apply' '--project' '$_posixProjectRoot' "
+            "'--finding-id' "
+            "'finding-a' '--finding-id' 'finding-b' "
+            "'--expect-preview-fingerprint' "
+            "'${_exactSelection(plan).actualPreviewFingerprint}'",
+          ),
+        );
+      },
+    );
+
+    test('marks all-eligible plans as initial-round-only without binding', () {
+      final plan = _initialPhysicalPlan(
+        canonicalProjectRoot: _posixProjectRoot,
+        scope: ApplyInitialPlanScope.initialRoundOnly,
+      );
+      final output = _plain(
+        const _PosixHumanFormatter(lineWidth: 200).format(
+          _applyReport(
+            projectRoot: _posixProjectRoot,
+            status: RunStatus.dryRun,
+            outcomes: [_outcome(ApplyFindingOutcomeStatus.remaining)],
+            selection: _allEligibleSelection(plan),
+            initialPlan: plan,
+          ),
+        ),
+      );
+
+      expect(output, contains('Initial round only'));
+      expect(output, contains('later rounds may discover additional work'));
+      expect(output, isNot(contains('--expect-preview-fingerprint')));
+    });
+
+    test('locks the complete initial physical plan transcript order', () {
+      final plan = _initialPhysicalPlan(
+        canonicalProjectRoot: _posixProjectRoot,
+      );
+      final output = _plain(
+        const _PosixHumanFormatter(lineWidth: 200).format(
+          _applyReport(
+            projectRoot: _posixProjectRoot,
+            status: RunStatus.dryRun,
+            outcomes: [_outcome(ApplyFindingOutcomeStatus.remaining)],
+            selection: _exactSelection(plan),
+            initialPlan: plan,
+          ),
+        ),
+      );
+
+      expect(
+        _initialPlanSection(output),
+        'INITIAL PHYSICAL PLAN\n'
+        'Complete exact selection · this plan covers the requested batch.\n'
+        '4 affected files · sources snapshotted before mutation.\n'
+        '\n'
+        'Unit 1 · unit-a\n'
+        'Clean up import · lib/importer.dart → lib/dead.dart · '
+        'stale import in lib/importer.dart\n'
+        '\n'
+        'Unit 2 · unit-b\n'
+        'Depends on unit-a.\n'
+        'Delete file · assets/dead@2x.png · '
+        'resolution variant assets/dead@2x.png\n'
+        'Remove finding · lib/dead.dart · edit the declaration or delete an '
+        'empty file only if no retained importer prevents deletion\n'
+        'Delete file · lib/dead.g.dart · generated companion lib/dead.g.dart\n'
+        '\n'
+        'BLOCKED\n'
+        'BLOCKED · retainedConsumer · finding-c ← dart:consumer\n'
+        'BLOCKED · blockedByRetainedDependency · finding-d ← '
+        'dart:lib/retained.dart#consumer\n'
+        '\n'
+        'PREVIEW FINGERPRINT\n'
+        '${plan.preview!.fingerprint}\n'
+        '\n'
+        'Apply this exact batch only after reviewing the fingerprint:\n'
+        'POSIX shell exact batch:\n'
+        "flutter_pruner 'apply' '--project' '$_posixProjectRoot' "
+        "'--finding-id' "
+        "'finding-a' '--finding-id' 'finding-b' "
+        "'--expect-preview-fingerprint' '${plan.preview!.fingerprint}'",
+      );
+    });
+
+    test('uses singular affected-file copy', () {
+      final plan = _singleFileInitialPlan(
+        canonicalProjectRoot: _posixProjectRoot,
+      );
+      final output = _plain(
+        const _PosixHumanFormatter(lineWidth: 200).format(
+          _applyReport(
+            projectRoot: _posixProjectRoot,
+            status: RunStatus.dryRun,
+            outcomes: [_outcome(ApplyFindingOutcomeStatus.remaining)],
+            selection: _singleFileSelection(plan),
+            initialPlan: plan,
+          ),
+        ),
+      );
+
+      expect(output, contains('1 affected file · sources snapshotted'));
+      expect(output, isNot(contains('1 affected files')));
+    });
+
+    test('labels and quotes hostile exact commands for POSIX shells', () {
+      final projectRoot = _posixHostileCanonicalProjectRoot;
+      final plan = _initialPhysicalPlan(canonicalProjectRoot: projectRoot);
+      final output = _plain(
+        const _PosixHumanFormatter(lineWidth: 200).format(
+          _applyReport(
+            projectRoot: projectRoot,
+            status: RunStatus.dryRun,
+            outcomes: [_outcome(ApplyFindingOutcomeStatus.remaining)],
+            selection: _exactSelection(plan),
+            initialPlan: plan,
+          ),
+        ),
+      );
+
+      expect(output, contains('POSIX shell exact batch:'));
+      expect(
+        output,
+        contains("'--project' '${projectRoot.replaceAll("'", "'\"'\"'")}'"),
+      );
+      expect(output, isNot(contains('PowerShell exact batch:')));
+    });
+
+    test('labels and quotes hostile exact commands for PowerShell', () {
+      final projectRoot = _windowsHostileCanonicalProjectRoot;
+      final plan = _initialPhysicalPlan(canonicalProjectRoot: projectRoot);
+      final output = _plain(
+        const _WindowsHumanFormatter(lineWidth: 200).format(
+          _applyReport(
+            projectRoot: projectRoot,
+            status: RunStatus.dryRun,
+            outcomes: [_outcome(ApplyFindingOutcomeStatus.remaining)],
+            selection: _exactSelection(plan),
+            initialPlan: plan,
+          ),
+        ),
+      );
+
+      expect(output, contains('PowerShell exact batch:'));
+      expect(
+        output,
+        contains("'--project' '${projectRoot.replaceAll("'", "''")}'"),
+      );
+      expect(output, isNot(contains('POSIX shell exact batch:')));
+    });
+
+    test('uses the real host shell semantics outside the test seam', () {
+      expect(const HumanFormatter().usesWindowsShell, Platform.isWindows);
+    });
   });
 }
 
 RunReport _applyReport({
   RunStatus status = RunStatus.completed,
+  int? exitCode,
   bool partialApplied = false,
-  String projectRoot = '/project',
+  String? projectRoot,
   List<ApplyFindingOutcome> outcomes = const [],
   ApplyStatistics? statistics,
   List<VerificationAttemptReport> attempts = const [],
   String? quarantinePath,
+  ApplySelectionReport? selection,
+  ApplyInitialPlanReport? initialPlan,
+  List<RunDiagnostic> diagnostics = const [],
 }) => RunReport(
   identity: RunIdentity(
     id: 'apply-test',
@@ -432,9 +683,10 @@ RunReport _applyReport({
     elapsedMicros: 1000000,
   ),
   status: status,
-  exitCode: status == RunStatus.completed ? 0 : 2,
+  exitCode: exitCode ?? (status == RunStatus.completed ? 0 : 2),
   partialApplied: partialApplied,
-  projectRoot: projectRoot,
+  projectRoot: projectRoot ?? _canonicalProjectRoot,
+  canonicalProjectRoot: initialPlan?.preview?.canonicalProjectRoot,
   packageName: 'test',
   requestedAdapters: const ['dart'],
   targetMatrix: TargetMatrix.declared([
@@ -447,50 +699,54 @@ RunReport _applyReport({
   rootCoverage: RootCoverage.applicationApi(),
   analysisPasses: const [],
   findings: outcomes.map((outcome) => outcome.finding).toList(),
-  diagnostics: const [],
+  diagnostics: diagnostics,
   verificationAttempts: attempts,
   applyFindingOutcomes: outcomes,
+  applySelection: selection,
+  applyInitialPlan: initialPlan,
   applyStatistics: statistics ?? ApplyStatistics.empty,
   quarantinePath: quarantinePath,
 );
 
-ApplyFindingOutcome _outcome(
-  ApplyFindingOutcomeStatus status,
-) => ApplyFindingOutcome(
-  finding: Finding(
-    ruleId: 'PRN-DART-001',
-    node: GraphNode(
-      id: 'dart:test/lib/src/features/very_long_folder/example.dart#${status.name}',
-      kind: NodeKind.declaration,
-      origin: Uri.file(
-        '/project/lib/src/features/very_long_folder/example_${status.name}.dart',
+ApplyFindingOutcome _outcome(ApplyFindingOutcomeStatus status) {
+  final originPath = _canonicalChild(
+    _canonicalProjectRoot,
+    'lib/src/features/very_long_folder/example_${status.name}.dart',
+  );
+  return ApplyFindingOutcome(
+    finding: Finding(
+      ruleId: 'PRN-DART-001',
+      node: GraphNode(
+        id: 'dart:test/lib/src/features/very_long_folder/example.dart#${status.name}',
+        kind: NodeKind.declaration,
+        origin: Uri.file(originPath, windows: Platform.isWindows),
+        displayName: 'example',
       ),
-      displayName: 'example',
+      confidence: Confidence.safe,
+      title: 'Example ${status.name}',
+      predicates: const SafetyPredicates(
+        ruleAllowsAutoFix: true,
+        unreachableAcrossAllTargets: true,
+        noDynamicBlockers: true,
+        notProtected: true,
+        noPublicApiRisk: true,
+        hasDeterministicInverse: true,
+      ),
     ),
-    confidence: Confidence.safe,
-    title: 'Example ${status.name}',
-    predicates: const SafetyPredicates(
-      ruleAllowsAutoFix: true,
-      unreachableAcrossAllTargets: true,
-      noDynamicBlockers: true,
-      notProtected: true,
-      noPublicApiRisk: true,
-      hasDeterministicInverse: true,
-    ),
-  ),
-  status: status,
-  reasonCode: status.name,
-  reason: 'Outcome reason for ${status.name}.',
-  transactionId: switch (status) {
-    ApplyFindingOutcomeStatus.committed ||
-    ApplyFindingOutcomeStatus.rejectedRecovered ||
-    ApplyFindingOutcomeStatus.recoveryRequired => 'transaction-1',
-    _ => null,
-  },
-  rollbackVerified: status == ApplyFindingOutcomeStatus.rejectedRecovered
-      ? true
-      : null,
-);
+    status: status,
+    reasonCode: status.name,
+    reason: 'Outcome reason for ${status.name}.',
+    transactionId: switch (status) {
+      ApplyFindingOutcomeStatus.committed ||
+      ApplyFindingOutcomeStatus.rejectedRecovered ||
+      ApplyFindingOutcomeStatus.recoveryRequired => 'transaction-1',
+      _ => null,
+    },
+    rollbackVerified: status == ApplyFindingOutcomeStatus.rejectedRecovered
+        ? true
+        : null,
+  );
+}
 
 ApplyStatistics _statistics({
   int committed = 0,
@@ -522,3 +778,243 @@ ApplyStatistics _statistics({
 );
 
 String _plain(String value) => value.replaceAll(RegExp(r'\x1B\[[0-9;]*m'), '');
+
+ApplySelectionReport _exactSelection([ApplyInitialPlanReport? plan]) {
+  final preview = (plan ?? _initialPhysicalPlan()).preview!;
+  return ApplySelectionReport(
+    mode: FindingSelectionMode.exact,
+    requestedFindingIds: const ['finding-a', 'finding-b'],
+    plannedFindingIds: const ['finding-a', 'finding-b'],
+    planFingerprint: 'a' * 64,
+    actualPreviewFingerprint: preview.fingerprint,
+  );
+}
+
+ApplySelectionReport _allEligibleSelection(ApplyInitialPlanReport plan) {
+  final preview = plan.preview!;
+  return ApplySelectionReport(
+    mode: FindingSelectionMode.allEligible,
+    requestedFindingIds: const [],
+    plannedFindingIds: const ['finding-a', 'finding-b'],
+    planFingerprint: 'a' * 64,
+    actualPreviewFingerprint: preview.fingerprint,
+  );
+}
+
+ApplyInitialPlanReport _initialPhysicalPlan({
+  ApplyInitialPlanScope scope = ApplyInitialPlanScope.completeExactSelection,
+  String? canonicalProjectRoot,
+}) => ApplyInitialPlanReport(
+  canonicalVersion: 1,
+  scope: scope,
+  planFingerprint: 'a' * 64,
+  units: [
+    ApplyPlanUnitReport(
+      order: 0,
+      id: 'unit-a',
+      findingIds: const ['finding-a'],
+      dependencyUnitIds: const [],
+      actions: [
+        ApplyPlanActionReport(
+          order: 0,
+          logicalFindingId: 'finding-a',
+          journalFindingId: 'finding-a@cleanup',
+          operation: FindingActionOperation.cleanupImports,
+          projectRelativePath: 'lib/importer.dart',
+          label: 'stale import in lib/importer.dart',
+          countsTowardSummary: false,
+          cleanupTargetPath: 'lib/dead.dart',
+        ),
+      ],
+    ),
+    ApplyPlanUnitReport(
+      order: 1,
+      id: 'unit-b',
+      findingIds: const ['finding-b'],
+      dependencyUnitIds: const ['unit-a'],
+      actions: [
+        ApplyPlanActionReport(
+          order: 0,
+          logicalFindingId: 'finding-b',
+          journalFindingId: 'finding-b@variant',
+          operation: FindingActionOperation.deleteFile,
+          projectRelativePath: 'assets/dead@2x.png',
+          label: 'resolution variant assets/dead@2x.png',
+          countsTowardSummary: false,
+        ),
+        ApplyPlanActionReport(
+          order: 1,
+          logicalFindingId: 'finding-b',
+          journalFindingId: 'finding-b',
+          operation: FindingActionOperation.removeFinding,
+          projectRelativePath: 'lib/dead.dart',
+          countsTowardSummary: true,
+        ),
+        ApplyPlanActionReport(
+          order: 2,
+          logicalFindingId: 'finding-b',
+          journalFindingId: 'finding-b@generated',
+          operation: FindingActionOperation.deleteFile,
+          projectRelativePath: 'lib/dead.g.dart',
+          label: 'generated companion lib/dead.g.dart',
+          countsTowardSummary: false,
+        ),
+      ],
+    ),
+  ],
+  blocked: [
+    ApplyPlanBlockReport(
+      findingId: 'finding-c',
+      reason: PlanBlockReason.retainedConsumer,
+      blockedBy: 'dart:consumer',
+    ),
+    ApplyPlanBlockReport(
+      findingId: 'finding-d',
+      reason: PlanBlockReason.blockedByRetainedDependency,
+      blockedBy: 'dart:lib/retained.dart#consumer',
+    ),
+  ],
+  preview: ApplyPreviewReport(
+    version: 1,
+    canonicalProjectRoot: canonicalProjectRoot ?? _canonicalProjectRoot,
+    planFingerprint: 'a' * 64,
+    sources: [
+      ApplySourceSnapshotReport(
+        projectRelativePath: 'assets/dead@2x.png',
+        canonicalPath: _canonicalChild(
+          canonicalProjectRoot ?? _canonicalProjectRoot,
+          'assets/dead@2x.png',
+        ),
+        sha256: '1' * 64,
+        sizeBytes: 3,
+        posixMode: 420,
+      ),
+      ApplySourceSnapshotReport(
+        projectRelativePath: 'lib/dead.dart',
+        canonicalPath: _canonicalChild(
+          canonicalProjectRoot ?? _canonicalProjectRoot,
+          'lib/dead.dart',
+        ),
+        sha256: '2' * 64,
+        sizeBytes: 0,
+        posixMode: null,
+      ),
+      ApplySourceSnapshotReport(
+        projectRelativePath: 'lib/dead.g.dart',
+        canonicalPath: _canonicalChild(
+          canonicalProjectRoot ?? _canonicalProjectRoot,
+          'lib/dead.g.dart',
+        ),
+        sha256: '3' * 64,
+        sizeBytes: 9,
+        posixMode: 384,
+      ),
+      ApplySourceSnapshotReport(
+        projectRelativePath: 'lib/importer.dart',
+        canonicalPath: _canonicalChild(
+          canonicalProjectRoot ?? _canonicalProjectRoot,
+          'lib/importer.dart',
+        ),
+        sha256: '4' * 64,
+        sizeBytes: 1,
+        posixMode: 420,
+      ),
+    ],
+  ),
+);
+
+ApplyInitialPlanReport _singleFileInitialPlan({String? canonicalProjectRoot}) =>
+    ApplyInitialPlanReport(
+      canonicalVersion: 1,
+      scope: ApplyInitialPlanScope.completeExactSelection,
+      planFingerprint: 'a' * 64,
+      units: [
+        ApplyPlanUnitReport(
+          order: 0,
+          id: 'unit-a',
+          findingIds: const ['finding-a'],
+          dependencyUnitIds: const [],
+          actions: [
+            ApplyPlanActionReport(
+              order: 0,
+              logicalFindingId: 'finding-a',
+              journalFindingId: 'finding-a',
+              operation: FindingActionOperation.removeFinding,
+              projectRelativePath: 'lib/a.dart',
+              countsTowardSummary: true,
+            ),
+          ],
+        ),
+      ],
+      blocked: const [],
+      preview: ApplyPreviewReport(
+        version: 1,
+        canonicalProjectRoot: canonicalProjectRoot ?? _canonicalProjectRoot,
+        planFingerprint: 'a' * 64,
+        sources: [
+          ApplySourceSnapshotReport(
+            projectRelativePath: 'lib/a.dart',
+            canonicalPath: _canonicalChild(
+              canonicalProjectRoot ?? _canonicalProjectRoot,
+              'lib/a.dart',
+            ),
+            sha256: '1' * 64,
+            sizeBytes: 0,
+            posixMode: null,
+          ),
+        ],
+      ),
+    );
+
+ApplySelectionReport _singleFileSelection(ApplyInitialPlanReport plan) =>
+    ApplySelectionReport(
+      mode: FindingSelectionMode.exact,
+      requestedFindingIds: const ['finding-a'],
+      plannedFindingIds: const ['finding-a'],
+      planFingerprint: 'a' * 64,
+      actualPreviewFingerprint: plan.preview!.fingerprint,
+    );
+
+String _initialPlanSection(String output) {
+  const heading = 'INITIAL PHYSICAL PLAN';
+  final start = output.indexOf(heading);
+  final end = output.indexOf('\nOUTCOMES', start);
+  return output.substring(start, end).trimRight();
+}
+
+String get _canonicalProjectRoot => Platform.isWindows
+    ? p.windows.normalize(r'C:\project')
+    : p.posix.normalize('/project');
+
+String get _posixProjectRoot => Platform.isWindows
+    ? p.windows.normalize(r'C:\p')
+    : p.posix.normalize('/project');
+
+String get _posixHostileCanonicalProjectRoot => Platform.isWindows
+    ? p.windows.normalize(r"C:\project & O'Reilly $HOME %PATH%")
+    : p.posix.normalize(r"/project & O'Reilly $HOME %PATH%");
+
+String get _windowsHostileCanonicalProjectRoot =>
+    p.windows.normalize(r"C:\project & O'Reilly $HOME %PATH%");
+
+String _canonicalChild(String root, String relativePath) {
+  final context =
+      RegExp(r'^[A-Za-z]:[\\/]').hasMatch(root) || root.contains(r'\')
+      ? p.windows
+      : p.posix;
+  return context.joinAll(<String>[root, ...p.posix.split(relativePath)]);
+}
+
+final class _WindowsHumanFormatter extends HumanFormatter {
+  const _WindowsHumanFormatter({super.lineWidth});
+
+  @override
+  bool get usesWindowsShell => true;
+}
+
+final class _PosixHumanFormatter extends HumanFormatter {
+  const _PosixHumanFormatter({super.lineWidth});
+
+  @override
+  bool get usesWindowsShell => false;
+}

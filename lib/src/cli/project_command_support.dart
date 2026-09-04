@@ -4,13 +4,15 @@ import 'package:args/args.dart';
 import 'package:path/path.dart' as p;
 
 import '../core/project/tool_workspace.dart';
+import 'formatters/quarantine_formatter.dart';
+import 'suggested_command.dart';
 
 /// Registers the project selector shared by every project lifecycle command.
 void addProjectOption(ArgParser parser) {
   parser.addOption(
     'project',
     abbr: 'p',
-    help: 'Dart or Flutter project root. Defaults to the current directory.',
+    help: 'Dart or Flutter project root; defaults to current directory',
   );
 }
 
@@ -47,11 +49,12 @@ ToolWorkspace resolveToolWorkspace(
 /// selections retain an explicit path so the suggestion works from here.
 String projectCommandFor(ToolWorkspace workspace, String command) {
   final current = p.normalize(p.absolute(Directory.current.path));
-  if (p.equals(current, workspace.projectRoot.path)) {
-    return 'flutter_pruner $command';
-  }
-  return 'flutter_pruner $command --project '
-      '${_shellQuote(workspace.projectRoot.path)}';
+  final arguments = p.equals(current, workspace.projectRoot.path)
+      ? [command]
+      : [command, '--project', workspace.projectRoot.path];
+  return SuggestedCommand.flutterPruner(
+    arguments,
+  ).renderForTerminal(ShellDialect.host);
 }
 
 /// Requires a real project configuration before analysis or mutation starts.
@@ -67,12 +70,11 @@ File requireProjectConfig(ToolWorkspace workspace, File? explicitConfig) {
     );
   }
   throw ProjectConfigPreflightException(
-    'Flutter Pruner is not initialized for ${workspace.projectRoot.path}. '
+    'Flutter Pruner is not initialized for '
+    '${QuarantineFormatter.terminalSafe(workspace.projectRoot.path)}. '
     'Run: ${projectCommandFor(workspace, 'init')}',
   );
 }
-
-String _shellQuote(String value) => "'${value.replaceAll("'", "'\"'\"'")}'";
 
 /// The CLI project selection is invalid.
 class ProjectSelectionException implements Exception {

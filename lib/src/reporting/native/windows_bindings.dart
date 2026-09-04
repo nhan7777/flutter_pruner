@@ -2,6 +2,8 @@ import 'dart:ffi';
 import 'dart:io';
 import 'dart:typed_data';
 
+import '../../quarantine/native/windows_clean_open_mode.dart';
+
 typedef _CreateFileNative =
     Pointer<Void> Function(
       Pointer<Uint16>,
@@ -48,6 +50,22 @@ typedef _NtCreateFileDart =
       int,
       int,
       Pointer<Void>,
+      int,
+    );
+typedef _NtSetInformationFileNative =
+    Int32 Function(
+      Pointer<Void>,
+      Pointer<_WindowsIoStatusBlock>,
+      Pointer<Void>,
+      Uint32,
+      Int32,
+    );
+typedef _NtSetInformationFileDart =
+    int Function(
+      Pointer<Void>,
+      Pointer<_WindowsIoStatusBlock>,
+      Pointer<Void>,
+      int,
       int,
     );
 typedef _TransferNative =
@@ -231,10 +249,11 @@ abstract interface class WindowsReportBindings {
   void release(Pointer<Void> pointer);
 }
 
-/// Direct Kernel32/Ntdll capabilities used by immutable report persistence.
+/// Direct Kernel32/Ntdll capabilities used by immutable report persistence and
+/// the Windows recoverable-clean adapter.
 ///
-/// No file deletion, movement, replacement, or directory removal symbol is
-/// loaded by this boundary.
+/// The report-facing [WindowsReportBindings] interface exposes no file
+/// deletion, movement, replacement, or directory-removal primitive.
 final class WindowsBindings implements WindowsReportBindings {
   /// Loads Windows system DLL capabilities.
   factory WindowsBindings.open() {
@@ -254,6 +273,11 @@ final class WindowsBindings implements WindowsReportBindings {
           .lookupFunction<_NtCreateFileNative, _NtCreateFileDart>(
             'NtCreateFile',
           ),
+      _ntSetInformationFile = ntdll
+          .lookupFunction<
+            _NtSetInformationFileNative,
+            _NtSetInformationFileDart
+          >('NtSetInformationFile'),
       _writeFile = kernel.lookupFunction<_TransferNative, _TransferDart>(
         'WriteFile',
       ),
@@ -302,11 +326,17 @@ final class WindowsBindings implements WindowsReportBindings {
   }
 
   static const _fileReadAttributes = 0x80;
+  static const _fileTraverse = 0x20;
+  static const _fileAddFile = 0x2;
+  static const _fileAddSubdirectory = 0x4;
+  static const _fileWriteAttributes = 0x100;
   static const _synchronize = 0x00100000;
   static const _genericRead = 0x80000000;
   static const _genericWrite = 0x40000000;
   static const _shareRead = 0x1;
   static const _shareWrite = 0x2;
+  static const _shareDelete = 0x4;
+  static const _delete = 0x00010000;
   static const _openExisting = 3;
   static const _backupSemantics = 0x02000000;
   static const _openReparsePoint = 0x00200000;
@@ -314,11 +344,13 @@ final class WindowsBindings implements WindowsReportBindings {
   static const _fileAttributeNormal = 0x80;
   static const _fileOpen = 1;
   static const _fileCreate = 2;
+  static const _fileOpenIf = 3;
   static const _synchronousIoNonAlert = 0x20;
   static const _directoryFile = 0x1;
   static const _nonDirectoryFile = 0x40;
   static const _moveBegin = 0;
   static const _fileStandardInfo = 1;
+  static const _fileRenameInformation = 10;
   static const _fileAttributeTagInfo = 9;
   static const _fileIdInfo = 18;
   static const _reparsePointAttribute = 0x400;
@@ -326,6 +358,7 @@ final class WindowsBindings implements WindowsReportBindings {
 
   final _CreateFileDart _createFile;
   final _NtCreateFileDart _ntCreateFile;
+  final _NtSetInformationFileDart _ntSetInformationFile;
   final _TransferDart _writeFile;
   final _TransferDart _readFile;
   final _HandleBoolDart _flushFileBuffers;
@@ -386,6 +419,137 @@ final class WindowsBindings implements WindowsReportBindings {
         options: _synchronousIoNonAlert | _directoryFile | _openReparsePoint,
         operation: 'open-directory-relative',
       );
+
+  /// Opens one absolute directory for recoverable clean mutation.
+  ///
+  /// The returned handle is retained by the clean backend and is opened with
+  /// write authority so its metadata can be flushed after a rename.
+  Pointer<Void> openDirectoryForClean(String path) =>
+      withWideString(path, (widePath) {
+        final handle = _createFile(
+          widePath,
+          _genericRead | _genericWrite,
+          _shareRead | _shareWrite | _shareDelete,
+          nullptr,
+          _openExisting,
+          _backupSemantics | _openReparsePoint,
+          nullptr,
+        );
+        if (_isInvalidHandle(handle)) {
+          throw WindowsNativeFailure('open-clean-directory', _getLastError());
+        }
+        return handle;
+      });
+
+  /// Opens or creates one directory relative to [parent] with [mode].
+  Pointer<Void> openRelativeDirectoryForClean(
+    Pointer<Void> parent,
+    String component, {
+    required WindowsCleanDirectoryOpenMode mode,
+  }) {
+    final writable = switch (mode) {
+      WindowsCleanDirectoryOpenMode.openWritable ||
+      WindowsCleanDirectoryOpenMode.ensureWritable ||
+      WindowsCleanDirectoryOpenMode.createExclusive => true,
+      WindowsCleanDirectoryOpenMode.inspect ||
+      WindowsCleanDirectoryOpenMode.renameSource => false,
+    };
+    final desiredAccess =
+        _fileReadAttributes |
+        _fileTraverse |
+        _synchronize |
+        (writable
+            ? _fileAddFile | _fileAddSubdirectory | _fileWriteAttributes
+            : 0) |
+        (mode == WindowsCleanDirectoryOpenMode.renameSource ? _delete : 0);
+    final disposition = switch (mode) {
+      WindowsCleanDirectoryOpenMode.ensureWritable => _fileOpenIf,
+      WindowsCleanDirectoryOpenMode.createExclusive => _fileCreate,
+      WindowsCleanDirectoryOpenMode.inspect ||
+      WindowsCleanDirectoryOpenMode.openWritable ||
+      WindowsCleanDirectoryOpenMode.renameSource => _fileOpen,
+    };
+    final operation = switch (mode) {
+      WindowsCleanDirectoryOpenMode.inspect => 'open-clean-directory-relative',
+      WindowsCleanDirectoryOpenMode.openWritable =>
+        'open-clean-writable-directory',
+      WindowsCleanDirectoryOpenMode.renameSource => 'open-clean-rename-source',
+      WindowsCleanDirectoryOpenMode.ensureWritable => 'ensure-clean-directory',
+      WindowsCleanDirectoryOpenMode.createExclusive => 'create-clean-directory',
+    };
+    return _openRelative(
+      parent,
+      component,
+      desiredAccess: desiredAccess,
+      shareAccess: _shareRead | _shareWrite | _shareDelete,
+      disposition: disposition,
+      options: _synchronousIoNonAlert | _directoryFile | _openReparsePoint,
+      operation: operation,
+    );
+  }
+
+  /// Renames the exact open [source] below [destinationParent].
+  ///
+  /// `ReplaceIfExists` is deliberately false, so an existing destination is
+  /// a hard native failure rather than an overwrite.
+  void renameDirectoryNoReplace(
+    Pointer<Void> source,
+    Pointer<Void> destinationParent,
+    String destinationLeaf,
+  ) {
+    if (destinationLeaf.isEmpty || destinationLeaf.codeUnits.contains(0)) {
+      throw ArgumentError.value(destinationLeaf, 'destinationLeaf');
+    }
+    final nameBytes = destinationLeaf.codeUnits.length * 2;
+    final is64Bit = sizeOf<IntPtr>() == 8;
+    final nameOffset = is64Bit ? 20 : 12;
+    // FILE_RENAME_INFORMATION includes one WCHAR plus trailing ABI alignment.
+    // NtSetInformationFile accepts the retained destination-directory handle;
+    // SetFileInformationByHandle does not reliably preserve that relative
+    // RootDirectory contract and can reject it as an invalid parameter.
+    final structureSize = is64Bit ? 24 : 16;
+    final bufferSize = structureSize + nameBytes;
+    final status = allocateBytes(
+      sizeOf<_WindowsIoStatusBlock>(),
+    ).cast<_WindowsIoStatusBlock>();
+    try {
+      final buffer = allocateBytes(bufferSize);
+      try {
+        final bytes = buffer.asTypedList(bufferSize);
+        final data = bytes.buffer.asByteData();
+        bytes[0] = 0; // FILE_RENAME_INFORMATION.ReplaceIfExists = FALSE.
+        if (is64Bit) {
+          data.setUint64(8, destinationParent.address, Endian.host);
+          data.setUint32(16, nameBytes, Endian.host);
+        } else {
+          data.setUint32(4, destinationParent.address, Endian.host);
+          data.setUint32(8, nameBytes, Endian.host);
+        }
+        (buffer + nameOffset)
+            .cast<Uint16>()
+            .asTypedList(destinationLeaf.codeUnits.length)
+            .setAll(0, destinationLeaf.codeUnits);
+        final ntStatus = _ntSetInformationFile(
+          source,
+          status,
+          buffer.cast<Void>(),
+          bufferSize,
+          _fileRenameInformation,
+        );
+        if (ntStatus < 0) {
+          throw WindowsNativeFailure(
+            'rename-clean-directory',
+            ntStatus,
+            ntStatus: true,
+          );
+        }
+      } finally {
+        release(buffer.cast<Void>());
+      }
+    } finally {
+      release(status.cast<Void>());
+    }
+  }
 
   Pointer<Void> _openRelative(
     Pointer<Void> parent,

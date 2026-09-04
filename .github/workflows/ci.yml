@@ -75,7 +75,7 @@ jobs:
 
   test:
     name: Test (${{ matrix.os }}, Dart ${{ matrix.sdk }})
-    timeout-minutes: 25
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -90,10 +90,13 @@ jobs:
             sdk: '3.9'
           - os: ubuntu-latest
             sdk: stable
+            clean_evidence: true
           - os: macos-latest
             sdk: stable
+            clean_evidence: true
           - os: windows-latest
             sdk: stable
+            clean_evidence: true
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -108,7 +111,22 @@ jobs:
       - name: Run tests
         run: dart test --reporter expanded
 
-      - name: Verify resolved blocker evidence
+      - name: Generate hosted clean blocker evidence
+        if: matrix.clean_evidence == true
+        run: >-
+          dart run tool/generate_clean_blocker_evidence.dart
+          --output "${{ runner.temp }}/clean-blocker-evidence"
+          --commit "${{ github.sha }}"
+
+      - name: Upload hosted clean blocker evidence
+        if: matrix.clean_evidence == true
+        uses: actions/upload-artifact@v4
+        with:
+          name: clean-blocker-evidence-${{ matrix.os }}-${{ github.sha }}
+          path: ${{ runner.temp }}/clean-blocker-evidence
+          if-no-files-found: error
+
+      - name: Verify ordinary resolved blocker evidence
         run: dart run tool/verify_release_blockers.dart --run-tests
 
       - name: Generate hosted Windows blocker evidence
@@ -211,7 +229,14 @@ jobs:
           name: windows-blocker-evidence-${{ github.sha }}
           path: ${{ runner.temp }}/windows-blocker-evidence
 
-      - name: Enforce release blockers
+      - name: Download hosted clean blocker evidence
+        uses: actions/download-artifact@v4
+        with:
+          pattern: clean-blocker-evidence-*-${{ github.sha }}
+          path: ${{ runner.temp }}/windows-blocker-evidence
+          merge-multiple: true
+
+      - name: Enforce release admission
         run: >-
           dart run tool/verify_release_blockers.dart
           --hosted-evidence-dir "${{ runner.temp }}/windows-blocker-evidence"

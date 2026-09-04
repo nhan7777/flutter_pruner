@@ -1,4 +1,5 @@
 import 'package:flutter_pruner/src/cli/formatters/human_formatter.dart';
+import 'package:flutter_pruner/src/cli/terminal_text_metrics.dart';
 import 'package:flutter_pruner/src/core/confidence/classification_reason.dart';
 import 'package:flutter_pruner/src/core/confidence/confidence.dart';
 import 'package:flutter_pruner/src/core/confidence/finding.dart';
@@ -12,6 +13,28 @@ import 'package:test/test.dart';
 
 void main() {
   group('HumanFormatter', () {
+    test('renders a failed scan without empty-success copy', () {
+      final output = _stripAnsi(
+        const HumanFormatter(lineWidth: 160).format(_failedScanReport()),
+      );
+
+      expect(output, contains('✕ SCAN FAILED'));
+      expect(output, contains('status internalError'));
+      expect(output, contains('exit 70'));
+      expect(output, contains('adapter_analysis_failed'));
+      expect(output, contains('analysis:adapter:dart'));
+      expect(
+        output,
+        contains(
+          'Analysis failed after adapter Dart declaration analyzer (dart) '
+          'started.',
+        ),
+      );
+      expect(output, isNot(contains('✓')));
+      expect(output, isNot(contains('SCAN COMPLETED')));
+      expect(output, isNot(contains('No unused candidates')));
+    });
+
     test('renders four colored lanes in action-first order', () {
       final output = const HumanFormatter(lineWidth: 200).format(
         _report([
@@ -42,9 +65,12 @@ void main() {
       expect(headers.indexOf('REVIEW'), lessThan(headers.indexOf('PROTECTED')));
 
       final board = plain.substring(plain.indexOf('FINDINGS'));
+      const metrics = TerminalTextMetrics();
       expect(
         board.split('\n').where((line) => line.isNotEmpty),
-        everyElement(predicate<String>((line) => line.runes.length <= 200)),
+        everyElement(
+          predicate<String>((line) => metrics.visibleWidth(line) <= 200),
+        ),
       );
     });
 
@@ -89,32 +115,41 @@ void main() {
         const HumanFormatter(lineWidth: 50).format(_report(findings)),
       );
       final compactBoard = compact.substring(compact.indexOf('FINDINGS'));
+      const metrics = TerminalTextMetrics();
       expect(compactBoard, isNot(contains('┌')));
       expect(
         compactBoard.split('\n').where((line) => line.isNotEmpty),
-        everyElement(predicate<String>((line) => line.runes.length <= 50)),
+        everyElement(
+          predicate<String>((line) => metrics.visibleWidth(line) <= 50),
+        ),
       );
     });
 
-    test('uses project-relative segment-aware middle trimming', () {
-      final review = _finding(
-        Confidence.review,
-        'review.dart',
-        blockerLocation:
-            '/project/lib/src/features/order_confirm/presentation/views/'
+    test(
+      'keeps the complete project-relative blocker location across wrapping',
+      () {
+        final review = _finding(
+          Confidence.review,
+          'review.dart',
+          blockerLocation:
+              '/project/lib/src/features/order_confirm/presentation/views/'
+              'order_confirm_wrapper_page.dart:264:67',
+        );
+
+        final plain = _stripAnsi(
+          const HumanFormatter(lineWidth: 400).format(_report([review])),
+        );
+
+        expect(
+          _unwrapVisualLines(plain),
+          contains(
+            'lib/src/features/order_confirm/presentation/views/'
             'order_confirm_wrapper_page.dart:264:67',
-      );
-
-      final plain = _stripAnsi(
-        const HumanFormatter(lineWidth: 400).format(_report([review])),
-      );
-
-      expect(
-        plain,
-        contains('lib/src/.../views/order_confirm_wrapper_page.dart:264:67'),
-      );
-      expect(plain, isNot(contains('/project/lib/src/features')));
-    });
+          ),
+        );
+        expect(plain, isNot(contains('/project/lib/src/features')));
+      },
+    );
 
     test('highlights a written report after findings and diagnostics', () {
       const path =
@@ -128,8 +163,7 @@ void main() {
       final plain = _stripAnsi(output);
 
       expect(plain, contains('HTML REPORT READY'));
-      expect(output.split('\n'), contains(path));
-      expect(plain.split('\n'), contains(path));
+      expect(plain.replaceAll(RegExp(r'\s+'), ''), contains(path));
       expect(
         plain.indexOf('HTML REPORT READY'),
         greaterThan(plain.indexOf('SCAN COMPLETED')),
@@ -139,6 +173,69 @@ void main() {
         greaterThan(plain.indexOf('FINDINGS')),
       );
     });
+
+    test(
+      'wraps CJK, combining text, emoji, and report paths by terminal cells',
+      () {
+        const reportPath =
+            '/project/.flutter_pruner/reports/界e\u0301😀-very-long-report.json';
+        final finding = _finding(
+          Confidence.review,
+          '界e\u0301😀-very-long-finding.dart',
+          blockerLocation:
+              '/project/lib/界e\u0301😀/very-long-blocker-location.dart:12:34',
+        );
+        final output = _stripAnsi(
+          const HumanFormatter(
+            lineWidth: 32,
+            reportPath: reportPath,
+            reportFormat: 'json',
+          ).format(_report([finding])),
+        );
+
+        const metrics = TerminalTextMetrics();
+        expect(
+          output.split('\n').where((line) => line.isNotEmpty),
+          everyElement(
+            predicate<String>((line) => metrics.visibleWidth(line) <= 32),
+          ),
+        );
+        expect(output.replaceAll(RegExp(r'\s+'), ''), contains(reportPath));
+        expect(
+          output.replaceAll(RegExp(r'\s+'), ''),
+          contains('界e\u0301😀-very-long-finding.dart'),
+        );
+      },
+    );
+
+    test(
+      'renders hostile dynamic report values as visible terminal-safe text',
+      () {
+        const hostile = '\x1B[38;5;199m\x1B[2K\u009B31m\u202E\u2028\u2029';
+        final output =
+            const HumanFormatter(
+              lineWidth: 80,
+              reportPath: '/project/$hostile/report.json',
+              reportFormat: 'json',
+            ).format(
+              _report([
+                _finding(
+                  Confidence.review,
+                  'finding-$hostile.dart',
+                  blockerLocation: '/project/$hostile/blocker.dart:1:2',
+                ),
+              ]),
+            );
+
+        expect(output, contains(r'\x1B[38;5;199m\x1B[2K\u009B31m'));
+        expect(output, isNot(contains('\x1B[38;5;199m')));
+        expect(output, isNot(contains('\x1B[2K')));
+        expect(output, isNot(contains('\u009B')));
+        expect(output, isNot(contains('\u202E')));
+        expect(output, isNot(contains('\u2028')));
+        expect(output, isNot(contains('\u2029')));
+      },
+    );
 
     test('highlights a written report after a zero-finding verbose report', () {
       final plain = _stripAnsi(
@@ -306,10 +403,36 @@ void main() {
         output,
         contains('1 finding affected · manual inspection required'),
       );
-      expect(output, contains('flutter_pruner apply --dry-run'));
+      expect(
+        output,
+        contains("flutter_pruner 'apply' '--dry-run' '--project' '/project'"),
+      );
       expect(output, isNot(contains('dart-finding-source-bytes')));
       expect(output, isNot(contains('136 recorded')));
       expect(output, isNot(contains('policy v1')));
+    });
+
+    test('uses JSON argv rather than a terminal-unsafe scan next command', () {
+      const unsafeProject = '/project\n\$(touch forged)';
+      final output = _stripAnsi(
+        const HumanFormatter(lineWidth: 200).format(
+          _report([
+            _finding(Confidence.safe, 'safe.dart'),
+          ], projectRoot: unsafeProject),
+        ),
+      );
+
+      expect(
+        output,
+        contains('Exact action argv (JSON; invoke without a shell):'),
+      );
+      expect(
+        output,
+        contains(
+          '["flutter_pruner","apply","--dry-run","--project",'
+          '"/project\\n\$(touch forged)"]',
+        ),
+      );
     });
 
     test('warns clearly when graph coverage is incomplete', () {
@@ -510,6 +633,7 @@ RunReport _report(
   bool targetMatrixComplete = true,
   AnalysisMode analysisMode = AnalysisMode.application,
   RootCoverage? rootCoverage,
+  String projectRoot = '/project',
 }) {
   final statistics = FindingStatistics.fromFindings(findings);
   final pass = AnalysisPassReport(
@@ -548,7 +672,7 @@ RunReport _report(
     status: RunStatus.completed,
     exitCode: 0,
     partialApplied: false,
-    projectRoot: '/project',
+    projectRoot: projectRoot,
     packageName: 'test',
     analysisMode: analysisMode,
     requestedAdapters: const ['dart'],
@@ -577,3 +701,42 @@ RunReport _report(
 
 String _stripAnsi(String value) =>
     value.replaceAll(RegExp(r'\x1B\[[0-9;]*m'), '');
+
+String _unwrapVisualLines(String value) =>
+    value.replaceAll(RegExp(r'[\s│]'), '');
+
+RunReport _failedScanReport() => RunReport(
+  identity: RunIdentity(
+    id: 'failed-scan-test',
+    command: RunCommand.scan,
+    toolVersion: 'test',
+    startedAtUtc: DateTime.utc(2026, 8, 27),
+    finishedAtUtc: DateTime.utc(2026, 8, 27, 0, 0, 1),
+    elapsedMicros: 1000000,
+  ),
+  status: RunStatus.internalError,
+  exitCode: 70,
+  partialApplied: false,
+  projectRoot: '/project',
+  packageName: 'test',
+  requestedAdapters: const ['dart'],
+  targetMatrix: TargetMatrix.declared([
+    BuildTarget(
+      name: 'android',
+      platform: 'android',
+      entrypoint: 'lib/main.dart',
+    ),
+  ]),
+  rootCoverage: RootCoverage.applicationApi(),
+  analysisPasses: const [],
+  findings: const [],
+  diagnostics: const [
+    RunDiagnostic(
+      code: 'adapter_analysis_failed',
+      phase: 'analysis:adapter:dart',
+      message:
+          'Analysis failed after adapter Dart declaration analyzer (dart) '
+          'started.',
+    ),
+  ],
+);

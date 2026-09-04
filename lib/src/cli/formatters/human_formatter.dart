@@ -1,11 +1,18 @@
+import 'dart:io';
+
 import 'package:path/path.dart' as p;
 
+import '../../apply/finding_action_builder.dart';
+import '../../apply/finding_selection.dart';
 import '../../core/confidence/classification_reason.dart';
 import '../../core/confidence/confidence.dart';
 import '../../core/confidence/finding.dart';
 import '../../core/graph/node.dart';
 import '../../core/project/analysis_mode.dart';
 import '../../reporting/run_report.dart';
+import '../suggested_command.dart';
+import '../terminal_text_metrics.dart';
+import 'quarantine_formatter.dart';
 import 'report_formatter.dart';
 
 /// Formats a complete run as concise human-readable text.
@@ -30,8 +37,17 @@ class HumanFormatter extends ReportFormatter {
   /// Format of the report at [reportPath].
   final String? reportFormat;
 
+  static const _metrics = TerminalTextMetrics();
+
+  /// Whether the actual host uses Windows shell semantics for preview commands.
+  ///
+  /// The getter is intentionally overridable by formatter tests so they can
+  /// verify the Windows copy without claiming it applies to POSIX shells.
+  bool get usesWindowsShell => Platform.isWindows;
+
   @override
   String format(RunReport report) {
+    if (_isCommandFailure(report)) return _formatCommandFailure(report);
     if (report.identity.command == RunCommand.apply) {
       return _formatApply(report);
     }
@@ -70,7 +86,7 @@ class HumanFormatter extends ReportFormatter {
       );
       if (verbose && pass != null) _writeDiagnostics(buffer, report, pass);
       _writeReportNoticeAtEnd(buffer);
-      return buffer.toString().trimRight();
+      return _wrapRendered(buffer.toString().trimRight());
     }
 
     if (pass != null) {
@@ -96,7 +112,54 @@ class HumanFormatter extends ReportFormatter {
     _writeFindingsBoard(buffer, report, byConfidence);
     if (verbose && pass != null) _writeDiagnostics(buffer, report, pass);
     _writeReportNoticeAtEnd(buffer);
-    return buffer.toString().trimRight();
+    return _wrapRendered(buffer.toString().trimRight());
+  }
+
+  bool _isCommandFailure(RunReport report) {
+    if (report.exitCode == 0 || report.diagnostics.isEmpty) return false;
+    if (report.identity.command == RunCommand.scan) {
+      return report.status != RunStatus.completed &&
+          report.status != RunStatus.noChanges &&
+          report.status != RunStatus.dryRun;
+    }
+    final statistics = report.applyStatistics;
+    return report.status == RunStatus.internalError &&
+        !report.partialApplied &&
+        report.quarantinePath == null &&
+        report.applyFindingOutcomes.isEmpty &&
+        (statistics == null || statistics.transactionsBegun == 0);
+  }
+
+  String _formatCommandFailure(RunReport report) {
+    final buffer = StringBuffer();
+    final command = report.identity.command.name.toUpperCase();
+    buffer.writeln(_style('FLUTTER PRUNER', '${_Ansi.bold}${_Ansi.cyan}'));
+    _writeWrapped(
+      buffer,
+      '✕ $command FAILED · status ${report.status.name} · '
+      'exit ${report.exitCode}',
+      style: '${_Ansi.bold}${_Ansi.red}',
+    );
+    buffer.writeln();
+    buffer.writeln(_style('FAILURE DIAGNOSTICS', '${_Ansi.bold}${_Ansi.red}'));
+    for (final diagnostic in report.diagnostics) {
+      buffer.writeln();
+      _writeWrapped(
+        buffer,
+        '${diagnostic.code} · ${diagnostic.phase ?? 'command'}',
+        style: '${_Ansi.bold}${_Ansi.red}',
+      );
+      _writeWrapped(buffer, diagnostic.message, indent: '  ');
+    }
+    if (reportPath != null) {
+      buffer.writeln();
+      final format = (reportFormat ?? 'text').toUpperCase();
+      buffer.writeln(
+        _style('! $format FAILURE REPORT SAVED', '${_Ansi.bold}${_Ansi.red}'),
+      );
+      _writeWrapped(buffer, reportPath!);
+    }
+    return _wrapRendered(buffer.toString().trimRight());
   }
 
   String _formatApply(RunReport report) {
@@ -118,6 +181,12 @@ class HumanFormatter extends ReportFormatter {
       style: '${_Ansi.bold}${status.color}',
     );
     _writeApplyMetrics(buffer, report);
+
+    final initialPlan = report.applyInitialPlan;
+    if (initialPlan != null) {
+      buffer.writeln();
+      _writeInitialPhysicalPlan(buffer, report, initialPlan);
+    }
 
     buffer.writeln();
     buffer.writeln(_style('OUTCOMES', '${_Ansi.bold}${_Ansi.cyan}'));
@@ -152,8 +221,129 @@ class HumanFormatter extends ReportFormatter {
       verificationUnavailable: verificationUnavailable,
     );
     _writeReportNoticeAtEnd(buffer);
-    return buffer.toString().trimRight();
+    return _wrapRendered(buffer.toString().trimRight());
   }
+
+  void _writeInitialPhysicalPlan(
+    StringBuffer buffer,
+    RunReport report,
+    ApplyInitialPlanReport plan,
+  ) {
+    buffer.writeln(
+      _style('INITIAL PHYSICAL PLAN', '${_Ansi.bold}${_Ansi.cyan}'),
+    );
+    final scope = switch (plan.scope) {
+      ApplyInitialPlanScope.completeExactSelection =>
+        'Complete exact selection · this plan covers the requested batch.',
+      ApplyInitialPlanScope.initialRoundOnly =>
+        'Initial round only · later rounds may discover additional work.',
+    };
+    _writeWrapped(buffer, scope, style: _Ansi.dim);
+
+    final preview = plan.preview;
+    if (preview != null) {
+      final fileLabel = preview.sources.length == 1 ? 'file' : 'files';
+      buffer.writeln(
+        '${preview.sources.length} affected $fileLabel · sources snapshotted before '
+        'mutation.',
+      );
+    }
+
+    for (final unit in plan.units) {
+      buffer.writeln();
+      buffer.writeln(_style('Unit ${unit.order + 1} · ${unit.id}', _Ansi.bold));
+      if (unit.dependencyUnitIds.isNotEmpty) {
+        _writeWrapped(
+          buffer,
+          'Depends on ${unit.dependencyUnitIds.join(', ')}.',
+          style: _Ansi.dim,
+        );
+      }
+      for (final action in unit.actions) {
+        _writeInitialPlanAction(buffer, action);
+      }
+    }
+
+    if (plan.blocked.isNotEmpty) {
+      buffer.writeln();
+      buffer.writeln(_style('BLOCKED', '${_Ansi.bold}${_Ansi.yellow}'));
+      for (final block in plan.blocked) {
+        _writeWrapped(
+          buffer,
+          'BLOCKED · ${block.reason.name} · ${block.findingId} '
+          '← ${block.blockedBy}',
+          style: _Ansi.yellow,
+        );
+      }
+    }
+
+    if (preview == null) return;
+    buffer.writeln();
+    buffer.writeln(_style('PREVIEW FINGERPRINT', '${_Ansi.bold}${_Ansi.cyan}'));
+    buffer.writeln(preview.fingerprint);
+    final selection = report.applySelection;
+    if (selection?.mode != FindingSelectionMode.exact) return;
+    buffer.writeln();
+    _writeWrapped(
+      buffer,
+      'Apply this exact batch only after reviewing the fingerprint:',
+      style: _Ansi.dim,
+    );
+    buffer.writeln(
+      _style(
+        usesWindowsShell
+            ? 'PowerShell exact batch:'
+            : 'POSIX shell exact batch:',
+        _Ansi.dim,
+      ),
+    );
+    buffer.writeln(
+      _style(
+        _exactPreviewCommand(report, selection!, preview.fingerprint),
+        '${_Ansi.bold}${_Ansi.cyan}',
+      ),
+    );
+  }
+
+  void _writeInitialPlanAction(
+    StringBuffer buffer,
+    ApplyPlanActionReport action,
+  ) {
+    final detail = switch (action.operation) {
+      FindingActionOperation.cleanupImports =>
+        'Clean up import · ${action.projectRelativePath} → '
+            '${action.cleanupTargetPath}',
+      FindingActionOperation.deleteFile =>
+        'Delete file · ${action.projectRelativePath}',
+      FindingActionOperation.removeFinding =>
+        'Remove finding · ${action.projectRelativePath} · edit the declaration '
+            'or delete an empty file only if no retained importer prevents deletion',
+    };
+    final label = action.label;
+    _writeWrapped(
+      buffer,
+      label == null ? detail : '$detail · $label',
+      style: action.countsTowardSummary ? '' : _Ansi.dim,
+    );
+  }
+
+  String _exactPreviewCommand(
+    RunReport report,
+    ApplySelectionReport selection,
+    String fingerprint,
+  ) => _renderSuggestedCommand(
+    SuggestedCommand.flutterPruner([
+      'apply',
+      '--project',
+      report.projectRoot,
+      for (final findingId in selection.requestedFindingIds) ...[
+        '--finding-id',
+        findingId,
+      ],
+      '--expect-preview-fingerprint',
+      fingerprint,
+    ]),
+  );
 
   void _writeApplyMetrics(StringBuffer buffer, RunReport report) {
     final outcomes = report.applyFindingOutcomes;
@@ -383,10 +573,9 @@ class HumanFormatter extends ReportFormatter {
     required int? showLimit,
   }) {
     final contentWidth = totalWidth - 2;
-    final innerWidth = contentWidth - 2;
     final lines = <String>[
       _border('┌', '┐', contentWidth),
-      _laneLine(
+      ..._laneLines(
         '${_applyLaneIcon(lane)} ${_applyLaneLabel(lane, report)} '
         '(${outcomes.length}) · ${_applyLaneQualifier(lane, report, outcomes)}',
         contentWidth,
@@ -396,7 +585,7 @@ class HumanFormatter extends ReportFormatter {
     ];
     if (outcomes.isEmpty) {
       lines
-        ..add(_laneLine('No findings', contentWidth, style: _Ansi.dim))
+        ..addAll(_laneLines('No findings', contentWidth, style: _Ansi.dim))
         ..add(_border('└', '┘', contentWidth));
       return lines;
     }
@@ -407,28 +596,30 @@ class HumanFormatter extends ReportFormatter {
       if (index > 0) lines.add(_border('├', '┤', contentWidth));
       final outcome = shown[index];
       lines
-        ..add(_laneLine(outcome.finding.title, contentWidth, style: _Ansi.bold))
-        ..add(
-          _laneLine(
-            _displayOrigin(outcome.finding, report.projectRoot, innerWidth),
+        ..addAll(
+          _laneLines(outcome.finding.title, contentWidth, style: _Ansi.bold),
+        )
+        ..addAll(
+          _laneLines(
+            _displayOrigin(outcome.finding, report.projectRoot),
             contentWidth,
             style: _Ansi.dim,
           ),
         )
-        ..add(
-          _laneLine(
+        ..addAll(
+          _laneLines(
             _applyOutcomeStatusLabel(outcome, report),
             contentWidth,
             style: _applyLaneColor(lane),
           ),
         )
-        ..add(_laneLine(_fitEnd(outcome.reason, innerWidth), contentWidth));
+        ..addAll(_laneLines(outcome.reason, contentWidth));
     }
     if (showLimit != null && outcomes.length > showLimit) {
       lines
         ..add(_border('├', '┤', contentWidth))
-        ..add(
-          _laneLine(
+        ..addAll(
+          _laneLines(
             '... +${outcomes.length - showLimit} more · use --verbose',
             contentWidth,
             style: _Ansi.dim,
@@ -448,37 +639,40 @@ class HumanFormatter extends ReportFormatter {
   ) {
     buffer.writeln(
       _style(
-        _fitEnd(
-          '${_applyLaneIcon(lane)} ${_applyLaneLabel(lane, report)} '
-          '(${outcomes.length}) · ${_applyLaneQualifier(lane, report, outcomes)}',
-          width,
-        ),
+        '${_applyLaneIcon(lane)} ${_applyLaneLabel(lane, report)} '
+            '(${outcomes.length}) · ${_applyLaneQualifier(lane, report, outcomes)}',
         '${_Ansi.bold}${_applyLaneColor(lane)}',
       ),
     );
     if (outcomes.isEmpty) {
-      buffer.writeln(_style('  No findings', _Ansi.dim));
+      _writeWrapped(buffer, 'No findings', indent: '  ', style: _Ansi.dim);
     }
     final shown = verbose ? outcomes : outcomes.take(10);
     for (final outcome in shown) {
-      buffer.writeln(
-        '  ${_style(_fitEnd(outcome.finding.title, width - 2), _Ansi.bold)}',
+      _writeWrapped(
+        buffer,
+        outcome.finding.title,
+        indent: '  ',
+        style: _Ansi.bold,
       );
-      buffer.writeln(
-        _style(
-          '    ${_displayOrigin(outcome.finding, report.projectRoot, width - 4)}',
-          _Ansi.dim,
-        ),
+      _writeWrapped(
+        buffer,
+        _displayOrigin(outcome.finding, report.projectRoot),
+        indent: '    ',
+        style: _Ansi.dim,
       );
-      buffer.writeln(
-        '    ${_style(_fitEnd(_applyOutcomeStatusLabel(outcome, report), width - 4), _applyLaneColor(lane))}',
+      _writeWrapped(
+        buffer,
+        _applyOutcomeStatusLabel(outcome, report),
+        indent: '    ',
+        style: _applyLaneColor(lane),
       );
-      buffer.writeln('    ${_fitEnd(outcome.reason, width - 4)}');
+      _writeWrapped(buffer, outcome.reason, indent: '    ');
     }
     if (!verbose && outcomes.length > 10) {
       buffer.writeln(
         _style(
-          '  ${_fitEnd('... +${outcomes.length - 10} more · use --verbose', width - 2)}',
+          '  ... +${outcomes.length - 10} more · use --verbose',
           _Ansi.dim,
         ),
       );
@@ -673,7 +867,6 @@ class HumanFormatter extends ReportFormatter {
           value: _displayLocation(
             p.join(report.quarantinePath!, 'manifest.json'),
             report.projectRoot,
-            lineWidth - 16,
           ),
           color: _Ansi.magenta,
         );
@@ -696,7 +889,6 @@ class HumanFormatter extends ReportFormatter {
           value: _displayLocation(
             p.join(report.quarantinePath!, 'manifest.json'),
             report.projectRoot,
-            lineWidth - 16,
           ),
           color: _Ansi.cyan,
         );
@@ -718,21 +910,21 @@ class HumanFormatter extends ReportFormatter {
       buffer,
       icon: '↺',
       label: 'Quarantine',
-      value: _displayLocation(
-        report.quarantinePath!,
-        report.projectRoot,
-        lineWidth - 16,
-      ),
+      value: _displayLocation(report.quarantinePath!, report.projectRoot),
       color: _Ansi.cyan,
     );
     _writeWrapped(buffer, 'Rollback command:', style: _Ansi.dim);
-    buffer.writeln(
-      _style(
-        'flutter_pruner rollback --project ${_shellQuote(report.projectRoot)} '
-            '--quarantine ${_shellQuote(p.dirname(report.quarantinePath!))} '
-            '${_shellQuote(report.identity.id)}',
-        '${_Ansi.bold}${_Ansi.cyan}',
-      ),
+    _writeSuggestedCommand(
+      buffer,
+      SuggestedCommand.flutterPruner([
+        'rollback',
+        '--project',
+        report.projectRoot,
+        '--quarantine',
+        p.dirname(report.quarantinePath!),
+        report.identity.id,
+      ]),
+      style: '${_Ansi.bold}${_Ansi.cyan}',
     );
   }
 
@@ -783,8 +975,6 @@ class HumanFormatter extends ReportFormatter {
     );
   }
 
-  String _shellQuote(String value) => "'${value.replaceAll("'", "'\"'\"'")}'";
-
   void _writeReportNoticeAtEnd(StringBuffer buffer) {
     if (reportPath == null) return;
     buffer.writeln();
@@ -798,7 +988,7 @@ class HumanFormatter extends ReportFormatter {
       _ => 'TEXT REPORT READY',
     };
     buffer.writeln(_style('✓ $label', '${_Ansi.bold}${_Ansi.green}'));
-    buffer.writeln(path);
+    _writeWrapped(buffer, path);
   }
 
   void _writeDecisionSummary(
@@ -1007,19 +1197,28 @@ class HumanFormatter extends ReportFormatter {
 
   void _writeNextAction(StringBuffer buffer, RunReport report) {
     final stats = report.finalFindingStatistics.byTier;
-    final project = _quotedProject(report.projectRoot);
     final String label;
-    final String? command;
+    final SuggestedCommand? command;
     if (report.analysisMode == AnalysisMode.package ||
         !report.targetMatrix.isComplete ||
         !report.rootCoverage.internalBoundaryComplete) {
       return;
     } else if ((stats['SAFE'] ?? 0) > 0) {
       label = 'Preview SAFE changes';
-      command = 'flutter_pruner apply --dry-run --project $project';
+      command = SuggestedCommand.flutterPruner([
+        'apply',
+        '--dry-run',
+        '--project',
+        report.projectRoot,
+      ]);
     } else if ((stats['HIGH'] ?? 0) > 0) {
       label = 'Preview eligible HIGH findings';
-      command = 'flutter_pruner apply --dry-run --project $project';
+      command = SuggestedCommand.flutterPruner([
+        'apply',
+        '--dry-run',
+        '--project',
+        report.projectRoot,
+      ]);
     } else if ((stats['REVIEW'] ?? 0) > 0) {
       label = 'Inspect REVIEW findings and resolve the reasons below';
       command = null;
@@ -1037,7 +1236,7 @@ class HumanFormatter extends ReportFormatter {
       color: _Ansi.green,
     );
     if (command != null) {
-      _writeWrapped(
+      _writeSuggestedCommand(
         buffer,
         command,
         indent: '    ',
@@ -1046,7 +1245,29 @@ class HumanFormatter extends ReportFormatter {
     }
   }
 
-  String _quotedProject(String path) => '"${path.replaceAll('"', r'\"')}"';
+  String _renderSuggestedCommand(SuggestedCommand command) =>
+      command.renderForTerminal(
+        usesWindowsShell ? ShellDialect.powerShell : ShellDialect.posix,
+      );
+
+  void _writeSuggestedCommand(
+    StringBuffer buffer,
+    SuggestedCommand command, {
+    String indent = '',
+    String style = '',
+  }) {
+    final text = _renderSuggestedCommand(command);
+    for (final line in text.split('\n')) {
+      for (final wrapped in _metrics.wrap(
+        _terminalSafe(line),
+        width: _width,
+        firstIndent: indent,
+        continuationIndent: indent,
+      )) {
+        buffer.writeln(_style(wrapped, style));
+      }
+    }
+  }
 
   void _writeAdapterMatrix(StringBuffer buffer, AnalysisPassReport pass) {
     buffer.writeln(
@@ -1230,10 +1451,9 @@ class HumanFormatter extends ReportFormatter {
     required int? showLimit,
   }) {
     final contentWidth = totalWidth - 2;
-    final innerWidth = contentWidth - 2;
     final lines = <String>[
       _border('┌', '┐', contentWidth),
-      _laneLine(
+      ..._laneLines(
         '${_tierIcon(confidence)} ${confidence.label} (${findings.length}) · '
         '${_tierQualifier(confidence)}',
         contentWidth,
@@ -1243,7 +1463,7 @@ class HumanFormatter extends ReportFormatter {
     ];
     if (findings.isEmpty) {
       lines
-        ..add(_laneLine('No findings', contentWidth, style: _Ansi.dim))
+        ..addAll(_laneLines('No findings', contentWidth, style: _Ansi.dim))
         ..add(_border('└', '┘', contentWidth));
       return lines;
     }
@@ -1255,18 +1475,18 @@ class HumanFormatter extends ReportFormatter {
       if (index > 0) lines.add(_border('├', '┤', contentWidth));
       final finding = shown[index];
       lines
-        ..add(_laneLine(finding.title, contentWidth, style: _Ansi.bold))
-        ..add(
-          _laneLine(
-            _displayOrigin(finding, report.projectRoot, innerWidth),
+        ..addAll(_laneLines(finding.title, contentWidth, style: _Ansi.bold))
+        ..addAll(
+          _laneLines(
+            _displayOrigin(finding, report.projectRoot),
             contentWidth,
             style: _Ansi.dim,
           ),
         );
       final metadata = _findingMetadata(finding);
       if (metadata != null) {
-        lines.add(
-          _laneLine(metadata, contentWidth, style: _tierColor(confidence)),
+        lines.addAll(
+          _laneLines(metadata, contentWidth, style: _tierColor(confidence)),
         );
       }
 
@@ -1277,17 +1497,17 @@ class HumanFormatter extends ReportFormatter {
                 .toList();
         final pathLimit = verbose ? paths.length : 5;
         for (final duplicatePath in paths.take(pathLimit)) {
-          lines.add(
-            _laneLine(
-              '- ${_displayLocation(duplicatePath, report.projectRoot, innerWidth - 2)}',
+          lines.addAll(
+            _laneLines(
+              '- ${_displayLocation(duplicatePath, report.projectRoot)}',
               contentWidth,
               style: _Ansi.dim,
             ),
           );
         }
         if (paths.length > pathLimit) {
-          lines.add(
-            _laneLine(
+          lines.addAll(
+            _laneLines(
               '... ${paths.length - pathLimit} more paths',
               contentWidth,
               style: _Ansi.dim,
@@ -1296,18 +1516,14 @@ class HumanFormatter extends ReportFormatter {
         }
       }
 
-      final details = _findingDetails(
-        finding,
-        report.projectRoot,
-        innerWidth - 2,
-      );
+      final details = _findingDetails(finding, report.projectRoot);
       final shownDetails = verbose ? details : details.take(1);
       for (final detail in shownDetails) {
         final remaining = !verbose && details.length > 1
             ? ' · +${details.length - 1} more'
             : '';
-        lines.add(
-          _laneLine(
+        lines.addAll(
+          _laneLines(
             '${finding.confidence == Confidence.safe ? '→' : '↳'} '
             '$detail$remaining',
             contentWidth,
@@ -1318,8 +1534,8 @@ class HumanFormatter extends ReportFormatter {
     if (showLimit != null && findings.length > showLimit) {
       lines
         ..add(_border('├', '┤', contentWidth))
-        ..add(
-          _laneLine(
+        ..addAll(
+          _laneLines(
             '... +${findings.length - showLimit} more · use --verbose',
             contentWidth,
             style: _Ansi.dim,
@@ -1339,43 +1555,36 @@ class HumanFormatter extends ReportFormatter {
   ) {
     buffer.writeln(
       _style(
-        _fitEnd(
-          '${_tierIcon(confidence)} ${confidence.label} (${findings.length}) · '
-          '${_tierQualifier(confidence)}',
-          width,
-        ),
+        '${_tierIcon(confidence)} ${confidence.label} (${findings.length}) · '
+            '${_tierQualifier(confidence)}',
         '${_Ansi.bold}${_tierColor(confidence)}',
       ),
     );
     if (findings.isEmpty) {
-      buffer.writeln(
-        _style('  ${_fitEnd('No findings', width - 2)}', _Ansi.dim),
-      );
+      buffer.writeln(_style('  No findings', _Ansi.dim));
     }
     final showLimit = verbose ? findings.length : 10;
     for (final finding in findings.take(showLimit)) {
-      buffer.writeln(
-        '  ${_style(_fitEnd(finding.title, width - 2), _Ansi.bold)}',
+      _writeWrapped(buffer, finding.title, indent: '  ', style: _Ansi.bold);
+      _writeWrapped(
+        buffer,
+        _displayOrigin(finding, report.projectRoot),
+        indent: '    ',
+        style: _Ansi.dim,
       );
-      buffer.writeln(
-        _style(
-          '    ${_displayOrigin(finding, report.projectRoot, width - 4)}',
-          _Ansi.dim,
-        ),
-      );
-      final details = _findingDetails(finding, report.projectRoot, width - 6);
+      final details = _findingDetails(finding, report.projectRoot);
       final shownDetails = verbose ? details : details.take(1);
       for (final detail in shownDetails) {
         final remaining = !verbose && details.length > 1
             ? ' · +${details.length - 1} more'
             : '';
-        buffer.writeln('    ↳ ${_fitEnd('$detail$remaining', width - 6)}');
+        _writeWrapped(buffer, '↳ $detail$remaining', indent: '    ');
       }
     }
     if (findings.length > showLimit) {
       buffer.writeln(
         _style(
-          '  ${_fitEnd('... +${findings.length - showLimit} more · use --verbose', width - 2)}',
+          '  ... +${findings.length - showLimit} more · use --verbose',
           _Ansi.dim,
         ),
       );
@@ -1383,15 +1592,11 @@ class HumanFormatter extends ReportFormatter {
     if (confidence != _presentationOrder.last) buffer.writeln();
   }
 
-  List<String> _findingDetails(
-    Finding finding,
-    String projectRoot,
-    int maxWidth,
-  ) {
+  List<String> _findingDetails(Finding finding, String projectRoot) {
     if (finding.confidence == Confidence.safe) {
       return finding.proposedAction == null
           ? const []
-          : [_fitEnd(finding.proposedAction!, maxWidth)];
+          : [finding.proposedAction!];
     }
     final details = <String>[];
     if (finding.confidence == Confidence.protected) {
@@ -1402,13 +1607,9 @@ class HumanFormatter extends ReportFormatter {
         details.add(blocker.reason);
         continue;
       }
-      final prefix = '${blocker.reason} at ';
-      var locationWidth = maxWidth - _runeLength(prefix);
-      if (locationWidth < 12) locationWidth = maxWidth ~/ 2;
-      final prefixWidth = maxWidth - locationWidth;
       details.add(
-        '${_fitEnd(prefix, prefixWidth)}'
-        '${_displayLocation(blocker.location!, projectRoot, locationWidth)}',
+        '${blocker.reason} at '
+        '${_displayLocation(blocker.location!, projectRoot)}',
       );
     }
     for (final reason in finding.classificationReasons) {
@@ -1437,7 +1638,7 @@ class HumanFormatter extends ReportFormatter {
     if (details.isEmpty && finding.confidence == Confidence.protected) {
       details.add('Protected from automatic changes');
     }
-    return details.map((detail) => _fitEnd(detail, maxWidth)).toSet().toList();
+    return details.toSet().toList();
   }
 
   String? _findingMetadata(Finding finding) {
@@ -1459,22 +1660,21 @@ class HumanFormatter extends ReportFormatter {
     };
   }
 
-  String _displayOrigin(Finding finding, String projectRoot, int maxWidth) {
+  String _displayOrigin(Finding finding, String projectRoot) {
     final origin = finding.node.origin;
-    final value = origin.scheme == 'file'
+    return origin.scheme == 'file'
         ? _relativeFilePath(origin.toFilePath(), projectRoot)
         : origin.toString();
-    return _middleTrimPath(value, maxWidth);
   }
 
-  String _displayLocation(String location, String projectRoot, int maxWidth) {
+  String _displayLocation(String location, String projectRoot) {
     final match = _sourceLocationPattern.firstMatch(location);
     final path = match?.group(1) ?? location;
     final suffix = match?.group(2) ?? '';
     final value = path.startsWith('file:')
         ? _relativeFileUri(path, projectRoot)
         : _relativeFilePath(path, projectRoot);
-    return _middleTrimPath('$value$suffix', maxWidth);
+    return '$value$suffix';
   }
 
   String _relativeFileUri(String value, String projectRoot) {
@@ -1496,71 +1696,18 @@ class HumanFormatter extends ReportFormatter {
     return normalizedValue.replaceAll(r'\', '/');
   }
 
-  String _middleTrimPath(String value, int maxWidth) {
-    if (_runeLength(value) <= maxWidth) return value;
-    if (maxWidth <= 3) return _takeStart(value, maxWidth);
-
-    final match = _sourceLocationPattern.firstMatch(value);
-    final path = match?.group(1) ?? value;
-    final suffix = match?.group(2) ?? '';
-    final normalized = path.replaceAll(r'\', '/');
-    final parts = normalized
-        .split('/')
-        .where((part) => part.isNotEmpty)
-        .toList();
-    if (parts.length >= 5) {
-      final candidates = <String>[
-        '${parts.take(2).join('/')}/.../${parts.skip(parts.length - 2).join('/')}$suffix',
-        '${parts.first}/.../${parts.skip(parts.length - 2).join('/')}$suffix',
-        '.../${parts.skip(parts.length - 2).join('/')}$suffix',
-      ];
-      for (final candidate in candidates) {
-        if (_runeLength(candidate) <= maxWidth) return candidate;
-      }
-    }
-
-    final basename = parts.isEmpty ? normalized : parts.last;
-    final compactPrefix = parts.length > 1 ? '.../' : '';
-    final available =
-        maxWidth - _runeLength(compactPrefix) - _runeLength(suffix);
-    if (available > 0) {
-      return '$compactPrefix${_trimFileName(basename, available)}$suffix';
-    }
-    return _middleTrimText(value, maxWidth);
-  }
-
-  String _trimFileName(String value, int maxWidth) {
-    if (_runeLength(value) <= maxWidth) return value;
-    final dot = value.lastIndexOf('.');
-    if (dot <= 0) return _middleTrimText(value, maxWidth);
-    final extension = value.substring(dot);
-    final stem = value.substring(0, dot);
-    final stemWidth = maxWidth - _runeLength(extension);
-    if (stemWidth < 4) return _middleTrimText(value, maxWidth);
-    return '${_middleTrimText(stem, stemWidth)}$extension';
-  }
-
-  String _middleTrimText(String value, int maxWidth) {
-    if (_runeLength(value) <= maxWidth) return value;
-    if (maxWidth <= 3) return _takeStart(value, maxWidth);
-    final available = maxWidth - 3;
-    final left = (available + 1) ~/ 2;
-    final right = available - left;
-    return '${_takeStart(value, left)}...${_takeEnd(value, right)}';
-  }
-
-  String _fitEnd(String value, int maxWidth) {
-    if (_runeLength(value) <= maxWidth) return value;
-    if (maxWidth <= 3) return _takeStart(value, maxWidth);
-    return '${_takeStart(value, maxWidth - 3)}...';
-  }
-
-  String _laneLine(String value, int width, {String style = ''}) {
+  List<String> _laneLines(String value, int width, {String style = ''}) {
+    value = _terminalSafe(value);
     final innerWidth = width - 2;
-    final fitted = _fitEnd(value, innerWidth);
-    final padded = '$fitted${_fill(' ', innerWidth - _runeLength(fitted))}';
-    return '${_style('│', _Ansi.dim)} ${_style(padded, style)} '
-        '${_style('│', _Ansi.dim)}';
+    return _metrics
+        .wrap(value, width: innerWidth)
+        .map(
+          (line) =>
+              '${_style('│', _Ansi.dim)} '
+              '${_style(_padToWidth(line, innerWidth), style)} '
+              '${_style('│', _Ansi.dim)}',
+        )
+        .toList(growable: false);
   }
 
   String _border(String left, String right, int width) =>
@@ -1608,16 +1755,25 @@ class HumanFormatter extends ReportFormatter {
     required String color,
     String? detail,
   }) {
+    label = _terminalSafe(label);
+    value = _terminalSafe(value);
+    detail = detail == null ? null : _terminalSafe(detail);
     const labelWidth = 12;
-    final paddedLabel = label.padRight(labelWidth);
+    final paddedLabel = _padToWidth(label, labelWidth);
     final visiblePrefix = '  $icon $paddedLabel ';
     final styledPrefix =
         '  ${_style(icon, color)} '
         '${_style(paddedLabel, '${_Ansi.bold}$color')} ';
-    if (_runeLength(visiblePrefix) + _runeLength(value) <= lineWidth) {
+    if (_metrics.visibleWidth(visiblePrefix) + _metrics.visibleWidth(value) <=
+        _width) {
       buffer.writeln('$styledPrefix$value');
     } else {
-      buffer.writeln(styledPrefix.trimRight());
+      for (final line in _metrics.wrap(
+        styledPrefix.trimRight(),
+        width: _width,
+      )) {
+        buffer.writeln(line);
+      }
       _writeWrapped(buffer, value, indent: '    ');
     }
     if (detail != null) {
@@ -1631,35 +1787,36 @@ class HumanFormatter extends ReportFormatter {
     String indent = '',
     String style = '',
   }) {
-    final remainingWidth = lineWidth - _runeLength(indent);
-    final available = remainingWidth > 0 ? remainingWidth : 1;
-    final words = value.split(RegExp(r'\s+'));
-    var line = '';
-    for (final word in words) {
-      final candidate = line.isEmpty ? word : '$line $word';
-      if (_runeLength(candidate) <= available) {
-        line = candidate;
-        continue;
-      }
-      if (line.isNotEmpty) buffer.writeln(_style('$indent$line', style));
-      line = _runeLength(word) <= available ? word : _fitEnd(word, available);
+    value = _terminalSafe(value);
+    for (final line in _metrics.wrap(
+      value,
+      width: _width,
+      firstIndent: indent,
+      continuationIndent: indent,
+    )) {
+      buffer.writeln(_style(line, style));
     }
-    if (line.isNotEmpty) buffer.writeln(_style('$indent$line', style));
   }
 
   String _fill(String value, int count) =>
       count <= 0 ? '' : List.filled(count, value).join();
 
-  int _runeLength(String value) => value.runes.length;
+  String _wrapRendered(String value) => value
+      .split('\n')
+      .expand(
+        (line) =>
+            line.isEmpty ? const [''] : _metrics.wrap(line, width: _width),
+      )
+      .join('\n');
 
-  String _takeStart(String value, int count) =>
-      String.fromCharCodes(value.runes.take(count));
+  int get _width => lineWidth < 12 ? 12 : lineWidth;
 
-  String _takeEnd(String value, int count) {
-    if (count <= 0) return '';
-    final runes = value.runes.toList();
-    return String.fromCharCodes(runes.skip(runes.length - count));
+  String _padToWidth(String value, int width) {
+    final spaces = width - _metrics.visibleWidth(value);
+    return spaces > 0 ? '$value${_fill(' ', spaces)}' : value;
   }
+
+  String _terminalSafe(String value) => QuarantineFormatter.terminalSafe(value);
 
   String _formatBytes(int bytes) {
     if (bytes < 1024) return '$bytes B';
@@ -1769,6 +1926,7 @@ abstract final class _Ansi {
   static const String reset = '\x1B[0m';
   static const String bold = '\x1B[1m';
   static const String dim = '\x1B[2m';
+  static const String red = '\x1B[31m';
   static const String green = '\x1B[32m';
   static const String yellow = '\x1B[33m';
   static const String cyan = '\x1B[36m';

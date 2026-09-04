@@ -67,7 +67,7 @@ class InitQuestions {
       if (normalized.isEmpty) return defaultValue;
       if (normalized == 'y' || normalized == 'yes') return true;
       if (normalized == 'n' || normalized == 'no') return false;
-      _writeError('Please answer yes or no.');
+      _writeError('Answer yes or no.');
     }
   }
 
