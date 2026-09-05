@@ -1,7 +1,7 @@
 import '../../adapters/l10n/l10n_action_capability.dart';
 import '../graph/node.dart';
 import '../project/project_context.dart';
-import 'action_readiness_index.dart';
+import 'promotion_index.dart';
 import 'action_risk_scope.dart';
 
 /// Physical scope of the edit required to apply a finding.

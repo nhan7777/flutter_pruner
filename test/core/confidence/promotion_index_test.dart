@@ -1,4 +1,4 @@
-import 'package:flutter_pruner/src/core/confidence/action_readiness_index.dart';
+import 'package:flutter_pruner/src/core/confidence/promotion_index.dart';
 import 'package:flutter_pruner/src/core/confidence/action_risk_scope.dart';
 import 'package:flutter_pruner/src/core/confidence/mutation_footprint.dart';
 import 'package:flutter_pruner/src/core/graph/node.dart';

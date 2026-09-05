@@ -1,7 +1,7 @@
 import 'package:meta/meta.dart';
 
 import '../../core/confidence/action_capability.dart';
-import '../../core/confidence/action_readiness_index.dart';
+import '../../core/confidence/promotion_index.dart';
 import '../../core/confidence/action_risk_scope.dart';
 import '../../core/graph/node.dart';
 import '../../core/project/analysis_mode.dart';

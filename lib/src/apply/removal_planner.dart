@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:crypto/crypto.dart';
 
 import '../core/confidence/action_capability.dart';
+import '../core/confidence/promotion_index.dart';
 import '../core/confidence/finding.dart';
 import '../core/graph/edge.dart';
 import '../core/graph/node.dart';
@@ -75,14 +76,19 @@ class RemovalPlanner {
   const RemovalPlanner();
 
   /// Builds a deterministic plan from [findings] and [graph].
+  ///
+  /// When [actionReadinessIndex] is provided, findings with family-level
+  /// readiness entries are grouped by familyId into atomic units.
   RemovalPlan build({
     required List<Finding> findings,
     required ReachabilityGraph graph,
     required ProjectContext project,
+    ActionReadinessIndex? actionReadinessIndex,
   }) {
     final selected = <String, Finding>{
       for (final finding in findings)
-        if (_isSelected(finding, project)) finding.node.id: finding,
+        if (_isSelected(finding, project, actionReadinessIndex))
+          finding.node.id: finding,
     };
     if (selected.isEmpty) {
       return const RemovalPlan(units: [], blocked: []);
@@ -102,6 +108,7 @@ class RemovalPlanner {
     }
 
     _joinSharedPaths(selected, outgoing);
+    _joinFamilyFindings(selected, outgoing, actionReadinessIndex);
 
     final blockedBy = <String, String>{};
     final pending = <String>[];
@@ -210,12 +217,18 @@ class RemovalPlanner {
     return RemovalPlan(units: units, blocked: blocked);
   }
 
-  bool _isSelected(Finding finding, ProjectContext project) {
+  bool _isSelected(
+    Finding finding,
+    ProjectContext project,
+    ActionReadinessIndex? actionReadinessIndex,
+  ) {
     final adapterId = finding.reportingAdapterId;
     if (adapterId == null) return false;
     final capability = ActionCapability.forFinding(
       adapterId: adapterId,
       node: finding.node,
+      actionReadinessIndex: actionReadinessIndex,
+      project: project,
     );
     if (!capability.supported) return false;
     return ModeApplyPolicy.allows(project.analysisMode, finding);
@@ -247,6 +260,43 @@ class RemovalPlanner {
       if (ids.length < 2) continue;
       for (final from in ids) {
         outgoing[from]!.addAll(ids.where((to) => to != from));
+      }
+    }
+  }
+
+  /// Joins findings belonging to the same l10n family into atomic units.
+  ///
+  /// When [actionReadinessIndex] contains family-level entries, findings with
+  /// the same familyId are connected via edges so Tarjan SCC treats them as
+  /// a single strongly connected component.
+  void _joinFamilyFindings(
+    Map<String, Finding> selected,
+    Map<String, Set<String>> outgoing,
+    ActionReadinessIndex? actionReadinessIndex,
+  ) {
+    if (actionReadinessIndex == null || actionReadinessIndex.isEmpty) {
+      return;
+    }
+
+    final byFamily = <String, List<String>>{};
+    for (final entry in selected.entries) {
+      final nodeId = entry.key;
+      final readinessEntry = actionReadinessIndex[nodeId];
+      if (readinessEntry == null) continue;
+
+      // Only join findings with family-level scope
+      if (readinessEntry.riskScope.isFamily) {
+        byFamily
+            .putIfAbsent(readinessEntry.familyId, () => [])
+            .add(nodeId);
+      }
+    }
+
+    // Add edges to form complete subgraph within each family
+    for (final familyNodeIds in byFamily.values) {
+      if (familyNodeIds.length < 2) continue;
+      for (final from in familyNodeIds) {
+        outgoing[from]!.addAll(familyNodeIds.where((to) => to != from));
       }
     }
   }

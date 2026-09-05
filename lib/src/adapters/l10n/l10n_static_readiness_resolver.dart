@@ -1,9 +1,9 @@
 import 'package:path/path.dart' as p;
 
-import '../../core/confidence/action_readiness_index.dart';
+import '../internal/resolver.dart';
+import '../../core/confidence/promotion_index.dart';
 import '../../core/confidence/action_risk_scope.dart';
 import '../../core/confidence/mutation_footprint.dart';
-import '../../core/confidence/static_action_readiness_resolver.dart';
 import '../../core/graph/node.dart';
 import '../../core/graph/reachability_graph.dart';
 import '../../core/graph/root.dart';
@@ -11,8 +11,7 @@ import '../../core/project/analysis_mode.dart';
 import '../../core/project/project_context.dart';
 
 /// L10n static action readiness resolver performing bounded static analysis.
-final class L10nStaticReadinessResolver
-    implements StaticActionReadinessResolver {
+final class L10nStaticReadinessResolver implements ActionReadinessResolver {
   const L10nStaticReadinessResolver();
 
   @override

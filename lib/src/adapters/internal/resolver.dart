@@ -1,19 +1,18 @@
-import '../graph/reachability_graph.dart';
-import '../graph/root.dart';
-import '../project/project_context.dart';
-import 'action_readiness_index.dart';
+import '../../core/confidence/promotion_index.dart';
+import '../../core/graph/reachability_graph.dart';
+import '../../core/graph/root.dart';
+import '../../core/project/project_context.dart';
 
-/// Resolves action readiness after adapters finish, before finding generation.
+/// Internal-only resolver for action readiness after adapters finish.
+///
+/// This interface lives in adapters/internal to maintain Stage 1 public
+/// boundary constraints. Action readiness infrastructure is V3 Stage 2
+/// implementation detail and must not leak into public production paths.
 ///
 /// Implementations perform bounded static analysis to determine which graph
 /// nodes are ready for safe actionable removal. Must NOT execute Flutter,
 /// run staging pipelines, or perform unbounded filesystem traversal.
-///
-/// The resolver runs as a core-owned step in [ProjectAnalyzer], after all
-/// adapters complete but before [FindingGenerator] runs. This allows adapters
-/// to remain pure graph builders while action readiness becomes a separate
-/// concern.
-abstract interface class StaticActionReadinessResolver {
+abstract interface class ActionReadinessResolver {
   /// Resolve action readiness for all actionable nodes in the graph.
   ///
   /// Returns an [ActionReadinessIndex] keyed by canonical node ID. Only nodes
@@ -37,10 +36,8 @@ abstract interface class StaticActionReadinessResolver {
 /// No-op resolver that returns an empty index.
 ///
 /// Used as the default when no action readiness resolution is configured.
-/// Ensures that projects without actionable adapters (or with resolution
-/// disabled) can still analyze successfully.
-final class NoOpActionReadinessResolver
-    implements StaticActionReadinessResolver {
+/// Ensures that projects without actionable adapters can still analyze.
+final class NoOpActionReadinessResolver implements ActionReadinessResolver {
   /// Creates a no-op resolver.
   const NoOpActionReadinessResolver();
 

@@ -7,7 +7,7 @@ import '../graph/root.dart';
 import '../project/analysis_mode.dart';
 import '../project/project_context.dart';
 import 'action_capability.dart';
-import 'action_readiness_index.dart';
+import 'promotion_index.dart';
 import 'classification_reason.dart';
 import 'confidence.dart';
 import 'confidence_classifier.dart';

@@ -83,10 +83,6 @@ class VerificationRunner {
           '$executable\u0000${result.exitCode}\u0000'
           '${result.stdout.text}\u0000${result.stderr.text}',
         );
-      } on ProcessCancellationBeforeLaunchException {
-        rethrow;
-      } on ProcessCancellationConfirmedException {
-        rethrow;
       } on ProcessTerminationUnconfirmedException {
         rethrow;
       } catch (error) {
@@ -130,10 +126,6 @@ class VerificationRunner {
             : result.stderr.text,
         duration: stopwatch.elapsed,
       );
-    } on ProcessCancellationBeforeLaunchException {
-      rethrow;
-    } on ProcessCancellationConfirmedException {
-      rethrow;
     } on ProcessTerminationUnconfirmedException {
       rethrow;
     } catch (e) {
@@ -158,10 +150,6 @@ class VerificationRunner {
       return !result.timedOut &&
           !result.outputTruncated &&
           result.exitCode == 0;
-    } on ProcessCancellationBeforeLaunchException {
-      rethrow;
-    } on ProcessCancellationConfirmedException {
-      rethrow;
     } on ProcessTerminationUnconfirmedException {
       rethrow;
     } catch (e) {

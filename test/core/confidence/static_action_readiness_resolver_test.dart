@@ -1,7 +1,7 @@
 import 'dart:io';
 
-import 'package:flutter_pruner/src/core/confidence/action_readiness_index.dart';
-import 'package:flutter_pruner/src/core/confidence/static_action_readiness_resolver.dart';
+import 'package:flutter_pruner/src/adapters/internal/resolver.dart';
+import 'package:flutter_pruner/src/core/confidence/promotion_index.dart';
 import 'package:flutter_pruner/src/core/graph/reachability_graph.dart';
 import 'package:flutter_pruner/src/core/graph/root.dart';
 import 'package:flutter_pruner/src/core/project/analysis_mode.dart';
@@ -35,7 +35,7 @@ void main() {
     });
   });
 
-  group('StaticActionReadinessResolver interface', () {
+  group('ActionReadinessResolver interface', () {
     test('can be implemented by custom resolvers', () async {
       final resolver = _FakeResolver();
       final graph = ReachabilityGraph();
@@ -74,7 +74,7 @@ GraphIntegrity _createIntegrity() {
 }
 
 /// Fake resolver for interface verification.
-final class _FakeResolver implements StaticActionReadinessResolver {
+final class _FakeResolver implements ActionReadinessResolver {
   @override
   Future<ActionReadinessIndex> resolve({
     required ReachabilityGraph graph,

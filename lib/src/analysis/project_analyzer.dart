@@ -4,9 +4,9 @@ import '../adapters/dart/dart_adapter_profile.dart';
 import '../adapters/dart/dart_analysis_workspace.dart';
 import '../adapters/dart/dart_execution_context_service.dart';
 import '../adapters/dart/dart_execution_reachability_service.dart';
+import '../adapters/internal/resolver.dart';
 import '../adapters/registry.dart';
 import '../core/confidence/finding_generator.dart';
-import '../core/confidence/static_action_readiness_resolver.dart';
 import '../core/graph/reachability_graph.dart';
 import '../core/project/project_context.dart';
 import '../reporting/run_report.dart';
@@ -20,7 +20,7 @@ class ProjectAnalyzer {
     Set<String>? only,
     this.dartProfile,
     List<AnalyzerAdapter>? adapterCatalog,
-    StaticActionReadinessResolver? actionReadinessResolver,
+    ActionReadinessResolver? actionReadinessResolver,
   }) : _requestedAdapterIds = only,
        _reportingNodeSchemes = _reportingSchemes(only, adapterCatalog),
        adapters = _resolveAdapters(only, adapterCatalog),
@@ -49,7 +49,7 @@ class ProjectAnalyzer {
   final Set<String>? _requestedAdapterIds;
 
   /// Resolver for static action readiness, called after adapters complete.
-  final StaticActionReadinessResolver _actionReadinessResolver;
+  final ActionReadinessResolver _actionReadinessResolver;
 
   /// Runs every applicable adapter and classifies the resulting graph.
   Future<AnalysisSnapshot> analyze({
