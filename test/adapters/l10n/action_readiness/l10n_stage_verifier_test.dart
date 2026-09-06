@@ -15,6 +15,7 @@ import 'package:flutter_pruner/src/adapters/l10n/action_readiness/l10n_stage_ver
 import 'package:flutter_pruner/src/adapters/l10n/action_readiness/l10n_toolchain.dart';
 import 'package:flutter_pruner/src/adapters/l10n/arb_inventory.dart';
 import 'package:flutter_pruner/src/analysis/analysis_snapshot.dart';
+import 'package:flutter_pruner/src/core/confidence/promotion_index.dart';
 import 'package:flutter_pruner/src/core/graph/build_condition.dart';
 import 'package:flutter_pruner/src/core/graph/edge.dart';
 import 'package:flutter_pruner/src/core/graph/evidence.dart';
@@ -1630,6 +1631,7 @@ AnalysisSnapshot _analysisFor(
     adapterRuns: const [],
     elapsedMicros: 1,
     exclusions: project.pathPolicy.snapshot(),
+    actionReadinessIndex: ActionReadinessIndex.empty,
   );
 }
 

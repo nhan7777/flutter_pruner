@@ -5,6 +5,7 @@ import 'package:args/command_runner.dart';
 import 'package:crypto/crypto.dart';
 import 'package:path/path.dart' as p;
 
+import '../../adapters/l10n/l10n_mutation_executor.dart';
 import '../../analysis/analysis_snapshot.dart';
 import '../../analysis/project_analyzer.dart';
 import '../../apply/apply_action_plan.dart';
@@ -697,12 +698,24 @@ Apply, including --dry-run, may persist tool state and reports
         );
       }
     }
-    var actionPlan = const ApplyActionPlanBuilder().build(
-      removalPlan: plan,
-      graph: snapshot.graph,
-      project: project,
-      selection: findingSelection,
-    );
+    // Preview expectations must be validated before constructing the
+    // caller-provided quarantine manager. A default manager is sufficient for
+    // planning because action projection only needs its presence for l10n
+    // family actions; the injected manager is created below, after the exact
+    // preview has matched.
+    final planningQuarantineManager = expectedPreviewFingerprint == null
+        ? quarantineManager
+        : QuarantineManager(project.root);
+    var actionPlan =
+        ApplyActionPlanBuilder(
+          quarantine: planningQuarantineManager,
+          actionReadinessIndex: snapshot.actionReadinessIndex,
+        ).build(
+          removalPlan: plan,
+          graph: snapshot.graph,
+          project: project,
+          selection: findingSelection,
+        );
     recorder.recordApplySelection(
       ApplySelectionReport(
         mode: findingSelection.mode,
@@ -1902,8 +1915,111 @@ Apply, including --dry-run, may persist tool state and reports
           final transactionId =
               'tx-r${roundCount.toString().padLeft(3, '0')}-'
               '${unit.id.substring('unit:'.length)}';
+          final actions = actionPlan.actionsFor(unit.id);
+
+          // Check if this is an l10n family unit (empty actions + all localizationKey)
+          if (actions.isEmpty &&
+              unit.findings.every(
+                (f) => f.node.kind == NodeKind.localizationKey,
+              )) {
+            // L10n family mutation - handled by L10nMutationExecutor
+            final executor = L10nMutationExecutor(
+              quarantine: quarantineManager,
+            );
+
+            final results = await executor.executeAll(
+              findings: unit.findings,
+              readinessIndex: snapshot.actionReadinessIndex,
+              project: project,
+            );
+
+            // Process results per family
+            for (final entry in results.entries) {
+              final familyId = entry.key;
+              final result = entry.value;
+
+              if (result is MutationApplied) {
+                // Build _AppliedFinding instances for verification
+                final appliedFindings = <_AppliedFinding>[];
+                for (final affectedPath in result.affectedFiles) {
+                  final file = File(p.join(project.root.path, affectedPath));
+                  // Create minimal _FindingCase for l10n family
+                  final finding = unit.findings.first;
+                  final fakeCaseForL10n = _FindingCase(
+                    index: nextCaseIndex,
+                    finding: finding,
+                    file: file,
+                    operation: _ApplyOperation.removeFinding,
+                    transactionId: result.transactionId,
+                    label: 'l10n family $familyId',
+                    findingId: familyId,
+                  );
+                  nextCaseIndex++;
+
+                  appliedFindings.add(
+                    _AppliedFinding(
+                      item: fakeCaseForL10n,
+                      file: file,
+                      appliedSha256: file.existsSync()
+                          ? sha256.convert(file.readAsBytesSync()).toString()
+                          : null,
+                    ),
+                  );
+                }
+
+                // Run verification for this family
+                final attempt = await verifyApplied(
+                  appliedFindings,
+                  'l10n family $familyId',
+                  verificationWaveId,
+                  [result.transactionId],
+                );
+
+                if (attempt.accepted) {
+                  // Verification passed - commit transaction
+                  await quarantineManager.commitTransaction(
+                    quarantineDir: result.quarantineDir,
+                    transactionId: result.transactionId,
+                  );
+                  actionsDeclaredCount += result.affectedFiles.length;
+                } else {
+                  // Verification failed - rollback
+                  await quarantineManager.rollbackCasesAtomically(
+                    quarantineDir: result.quarantineDir,
+                    caseIds: unit.findings
+                        .map((f) => 'case-${f.node.id}')
+                        .toList(),
+                    reason: 'L10n family $familyId verification failed',
+                  );
+                  throw _ApplyRunAbort(
+                    reason: attempt.unavailable
+                        ? 'Verification became unavailable for l10n family $familyId.'
+                        : 'L10n family $familyId verification was rejected.',
+                    reasonCode: attempt.unavailable
+                        ? 'verification_unavailable'
+                        : 'verification_regression',
+                    status: attempt.unavailable
+                        ? RunStatus.infrastructureFailure
+                        : RunStatus.safeStopped,
+                    exitCode: attempt.unavailable ? 1 : 2,
+                  );
+                }
+              } else if (result is MutationFailed) {
+                // Mutation execution failed - already rolled back in executor
+                throw _ApplyRunAbort(
+                  reason:
+                      'L10n family $familyId mutation failed: ${result.error}',
+                  reasonCode: 'l10n_mutation_failed',
+                  status: RunStatus.safeStopped,
+                  exitCode: 2,
+                );
+              }
+            }
+            continue;
+          }
+
           final cases = _buildCases(
-            actionPlan.actionsFor(unit.id),
+            actions,
             startIndex: nextCaseIndex,
             transactionId: transactionId,
           );
@@ -2025,12 +2141,16 @@ Apply, including --dry-run, may persist tool state and reports
           graph: currentGraph,
           project: project,
         );
-        actionPlan = const ApplyActionPlanBuilder().build(
-          removalPlan: plan,
-          graph: currentGraph,
-          project: project,
-          selection: findingSelection,
-        );
+        actionPlan =
+            ApplyActionPlanBuilder(
+              quarantine: _quarantineManagerFactory(project.root),
+              actionReadinessIndex: snapshot.actionReadinessIndex,
+            ).build(
+              removalPlan: plan,
+              graph: currentGraph,
+              project: project,
+              selection: findingSelection,
+            );
         activeRoundFileSnapshots = _capturePlanFileSnapshots(
           actionPlan,
           project: project,

@@ -8,10 +8,9 @@
 ///     --sdk /path/to/flutter-3.10.0 \
 ///     --sdk /path/to/flutter-3.19.0 \
 ///     --sdk /path/to/flutter-3.24.0
+library;
 
 import 'dart:io';
-
-import 'package:path/path.dart' as p;
 
 import 'l10n_mutation_readiness.dart';
 import 'src/l10n_readiness_production.dart';

@@ -2198,6 +2198,7 @@ AnalysisSnapshot _copyAnalysis(
     elapsedMicros: source.elapsedMicros,
     findingElapsedMicros: source.findingElapsedMicros,
     exclusions: source.exclusions,
+    actionReadinessIndex: source.actionReadinessIndex,
   );
 }
 

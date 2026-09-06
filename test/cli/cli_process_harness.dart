@@ -1252,7 +1252,7 @@ Future<PosixProcessTableSnapshot?> _readPosixProcessTable() async {
   try {
     final result = await Process.run('ps', const [
       '-axo',
-      'pid=,ppid=,lstart=,state=',
+      'pid=,ppid=,lstart=,state=,rss=',
     ]).timeout(const Duration(seconds: 2));
     if (result.exitCode != 0) return null;
     return PosixProcessTableSnapshot.parse(result.stdout as String);

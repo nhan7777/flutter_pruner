@@ -1,6 +1,6 @@
-import 'package:flutter_pruner/src/core/confidence/promotion_index.dart';
 import 'package:flutter_pruner/src/core/confidence/action_risk_scope.dart';
 import 'package:flutter_pruner/src/core/confidence/mutation_footprint.dart';
+import 'package:flutter_pruner/src/core/confidence/promotion_index.dart';
 import 'package:flutter_pruner/src/core/graph/node.dart';
 import 'package:test/test.dart';
 
@@ -152,9 +152,7 @@ void main() {
         hasExternalConsumerExposure: false,
       );
 
-      final index = ActionReadinessIndex({
-        'l10n:family1/key1': entry,
-      });
+      final index = ActionReadinessIndex({'l10n:family1/key1': entry});
 
       expect(index.isEmpty, isFalse);
       expect(index.isNotEmpty, isTrue);
@@ -180,9 +178,7 @@ void main() {
         hasExternalConsumerExposure: false,
       );
 
-      final index = ActionReadinessIndex({
-        'l10n:family1/key1': entry,
-      });
+      final index = ActionReadinessIndex({'l10n:family1/key1': entry});
 
       expect(index['l10n:family1/key1'], equals(entry));
       expect(index.containsNode('l10n:family1/key1'), isTrue);
@@ -287,13 +283,9 @@ void main() {
         hasExternalConsumerExposure: false,
       );
 
-      final index1 = ActionReadinessIndex({
-        'l10n:family1/key1': entry,
-      });
+      final index1 = ActionReadinessIndex({'l10n:family1/key1': entry});
 
-      final index2 = ActionReadinessIndex({
-        'l10n:family1/key1': entry,
-      });
+      final index2 = ActionReadinessIndex({'l10n:family1/key1': entry});
 
       final index3 = ActionReadinessIndex.empty;
 

@@ -4275,44 +4275,40 @@ void main() {
     skip: Platform.isMacOS ? 'non-Darwin production assertion' : false,
   );
 
-  test(
-    'testing generation-root identity supports GNU stat on Linux',
-    () async {
-      final runner = _FakeProcessRunner([
-        _ProcessReply.result(
-          _successfulProbe(_fixtureBytes('machine/flutter_3_38_7.json')),
-        ),
-      ]);
-      final resolution = await _resolve38(
-        project,
-        flutter38,
-        runner,
-        resolver: _testResolver(runner),
-      );
-      if (resolution case L10nToolchainRejected(:final failure)) {
-        fail('unexpected fixture rejection: ${failure.detailCode}');
+  test('testing generation-root identity supports GNU stat on Linux', () async {
+    final runner = _FakeProcessRunner([
+      _ProcessReply.result(
+        _successfulProbe(_fixtureBytes('machine/flutter_3_38_7.json')),
+      ),
+    ]);
+    final resolution = await _resolve38(
+      project,
+      flutter38,
+      runner,
+      resolver: _testResolver(runner),
+    );
+    if (resolution case L10nToolchainRejected(:final failure)) {
+      fail('unexpected fixture rejection: ${failure.detailCode}');
+    }
+    final lease = (resolution as L10nToolchainResolved).launch
+        .createGenerationRootLease();
+    addTearDown(() {
+      if (lease.directory.existsSync() && lease.safeToDelete) {
+        lease.cleanup();
       }
-      final lease = (resolution as L10nToolchainResolved).launch
-          .createGenerationRootLease();
-      addTearDown(() {
-        if (lease.directory.existsSync() && lease.safeToDelete) {
-          lease.cleanup();
-        }
-      });
-      File(p.join(lease.directory.path, 'empty.yaml')).createSync();
-      File(
-        p.join(lease.directory.path, 'messages.arb'),
-      ).writeAsStringSync('{}\n');
+    });
+    File(p.join(lease.directory.path, 'empty.yaml')).createSync();
+    File(
+      p.join(lease.directory.path, 'messages.arb'),
+    ).writeAsStringSync('{}\n');
 
-      final workingRoot = lease.seal();
+    final workingRoot = lease.seal();
 
-      expect(workingRoot.directory.path, lease.directory.path);
-      expect(lease.safeToDelete, isTrue);
-      lease.cleanup();
-      expect(lease.directory.existsSync(), isFalse);
-    },
-    skip: Platform.isLinux ? false : 'GNU stat integration',
-  );
+    expect(workingRoot.directory.path, lease.directory.path);
+    expect(lease.safeToDelete, isTrue);
+    lease.cleanup();
+    expect(lease.directory.existsSync(), isFalse);
+  }, skip: Platform.isLinux ? false : 'GNU stat integration');
 }
 
 final _identity41 = FlutterMachineIdentity(

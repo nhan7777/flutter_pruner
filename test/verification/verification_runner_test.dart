@@ -830,6 +830,8 @@ class _ThrowingRunner implements ProcessExecutionRunner {
     required String workingDirectory,
     required Duration timeout,
     required int maxOutputBytesPerStream,
+    Map<String, String> environmentOverrides = const {},
+    bool includeParentEnvironment = true,
   }) async {
     throw error;
   }
@@ -851,18 +853,19 @@ class _PhaseCancellationRunner implements ProcessExecutionRunner {
     required String workingDirectory,
     required Duration timeout,
     required int maxOutputBytesPerStream,
+    Map<String, String> environmentOverrides = const {},
+    bool includeParentEnvironment = true,
   }) async {
     final isVersionProbe =
         arguments.length == 1 && arguments.single == '--version';
     if (isVersionProbe == cancelVersionProbe) throw error;
-    return const ManagedProcessResult(
+    return ManagedProcessResult(
       exitCode: 0,
       stdout: BoundedProcessOutput(
-        text: 'No issues found!',
-        capturedBytes: 16,
+        capturedPayload: 'No issues found!'.codeUnits,
         omittedBytes: 0,
       ),
-      stderr: BoundedProcessOutput(text: '', capturedBytes: 0, omittedBytes: 0),
+      stderr: BoundedProcessOutput(capturedPayload: const [], omittedBytes: 0),
     );
   }
 }

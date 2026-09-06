@@ -27,7 +27,7 @@ class SharedViewManager {
   final L10nReadinessViewProvisioner _provisionView;
 
   SharedViewManager({required L10nReadinessViewProvisioner provisionView})
-      : _provisionView = provisionView;
+    : _provisionView = provisionView;
 
   Future<SharedViewEntry> getSharedView(String projectId) async {
     return _cacheLock.synchronized(() async {
@@ -50,10 +50,12 @@ class SharedViewManager {
       try {
         final entry = await loadFuture;
         _cache[projectId] = entry;
-        print('[SharedViewManager] Cached $projectId (total cached: ${_cache.length})');
+        print(
+          '[SharedViewManager] Cached $projectId (total cached: ${_cache.length})',
+        );
         return entry;
       } finally {
-        _pendingLoads.remove(projectId);
+        unawaited(_pendingLoads.remove(projectId));
       }
     });
   }

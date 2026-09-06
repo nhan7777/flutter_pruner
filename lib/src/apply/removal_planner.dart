@@ -3,8 +3,8 @@ import 'dart:convert';
 import 'package:crypto/crypto.dart';
 
 import '../core/confidence/action_capability.dart';
-import '../core/confidence/promotion_index.dart';
 import '../core/confidence/finding.dart';
+import '../core/confidence/promotion_index.dart';
 import '../core/graph/edge.dart';
 import '../core/graph/node.dart';
 import '../core/graph/reachability_graph.dart';
@@ -286,9 +286,7 @@ class RemovalPlanner {
 
       // Only join findings with family-level scope
       if (readinessEntry.riskScope.isFamily) {
-        byFamily
-            .putIfAbsent(readinessEntry.familyId, () => [])
-            .add(nodeId);
+        byFamily.putIfAbsent(readinessEntry.familyId, () => []).add(nodeId);
       }
     }
 

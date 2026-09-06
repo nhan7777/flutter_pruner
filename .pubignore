@@ -24,6 +24,8 @@ AGENTS.md
 .github/
 doc/superpowers/
 docs/superpowers/
+# Repository-only V3 planning and status documents.
+docs/
 doc/plans/
 
 # Internal release/accuracy validation inputs are retained in the repository,

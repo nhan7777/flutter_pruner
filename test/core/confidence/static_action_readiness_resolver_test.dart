@@ -80,6 +80,5 @@ final class _FakeResolver implements ActionReadinessResolver {
     required ReachabilityGraph graph,
     required ProjectContext project,
     required GraphIntegrity integrity,
-  }) async =>
-      ActionReadinessIndex.empty;
+  }) async => ActionReadinessIndex.empty;
 }

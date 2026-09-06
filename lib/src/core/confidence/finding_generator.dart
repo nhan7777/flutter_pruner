@@ -7,12 +7,12 @@ import '../graph/root.dart';
 import '../project/analysis_mode.dart';
 import '../project/project_context.dart';
 import 'action_capability.dart';
-import 'promotion_index.dart';
 import 'classification_reason.dart';
 import 'confidence.dart';
 import 'confidence_classifier.dart';
 import 'finding.dart';
 import 'finding_assessment.dart';
+import 'promotion_index.dart';
 
 /// Converts graph reachability results into actionable findings.
 ///

@@ -1,8 +1,8 @@
 import '../../adapters/l10n/l10n_action_capability.dart';
 import '../graph/node.dart';
 import '../project/project_context.dart';
-import 'promotion_index.dart';
 import 'action_risk_scope.dart';
+import 'promotion_index.dart';
 
 /// Physical scope of the edit required to apply a finding.
 enum ActionScope {
@@ -106,10 +106,7 @@ class ActionCapability {
     };
   }
 
-  static String? _actionDescriptionForAdapter(
-    String adapterId,
-    NodeKind kind,
-  ) {
+  static String? _actionDescriptionForAdapter(String adapterId, NodeKind kind) {
     return switch ((adapterId, kind)) {
       ('l10n', NodeKind.localizationKey) => 'Remove l10n key',
       ('assets', NodeKind.asset) => 'Move to quarantine',

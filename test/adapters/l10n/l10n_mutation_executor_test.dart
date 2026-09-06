@@ -193,19 +193,21 @@ output-localization-file: app_localizations.dart
 
       final readinessIndex = ActionReadinessIndex(
         Map.fromEntries(
-          findings.map((f) => MapEntry(
-            f.node.id,
-            ActionReadinessEntry(
-              adapterId: 'l10n-adapter',
-              nodeKind: NodeKind.localizationKey,
-              familyId: 'app_localizations',
-              configurationFingerprint: 'test-config-fp',
-              mutationFootprint: footprint,
-              inverseKind: DeterministicInverseKind.proven,
-              riskScope: ActionRiskScope.boundedFamily,
-              hasExternalConsumerExposure: false,
+          findings.map(
+            (f) => MapEntry(
+              f.node.id,
+              ActionReadinessEntry(
+                adapterId: 'l10n-adapter',
+                nodeKind: NodeKind.localizationKey,
+                familyId: 'app_localizations',
+                configurationFingerprint: 'test-config-fp',
+                mutationFootprint: footprint,
+                inverseKind: DeterministicInverseKind.proven,
+                riskScope: ActionRiskScope.boundedFamily,
+                hasExternalConsumerExposure: false,
+              ),
             ),
-          )),
+          ),
         ),
       );
 
@@ -465,47 +467,50 @@ output-localization-file: app_localizations.dart
         // This is expected - the test documents the failure mode
       });
 
-      test('exception during execution is caught and returned as MutationFailed', () async {
-        // Invalid config triggers exception handling path
-        final finding = _createL10nFinding(
-          nodeId: 'l10n:test_project/lib/l10n/app_en.arb#key',
-          key: 'key',
-        );
+      test(
+        'exception during execution is caught and returned as MutationFailed',
+        () async {
+          // Invalid config triggers exception handling path
+          final finding = _createL10nFinding(
+            nodeId: 'l10n:test_project/lib/l10n/app_en.arb#key',
+            key: 'key',
+          );
 
-        // Remove l10n.yaml to force config load failure
-        final l10nYaml = File('${tempDir.path}/l10n.yaml');
-        await l10nYaml.delete();
+          // Remove l10n.yaml to force config load failure
+          final l10nYaml = File('${tempDir.path}/l10n.yaml');
+          await l10nYaml.delete();
 
-        final readinessIndex = ActionReadinessIndex({
-          finding.node.id: ActionReadinessEntry(
-            adapterId: 'l10n-adapter',
-            nodeKind: NodeKind.localizationKey,
-            familyId: 'app_localizations',
-            configurationFingerprint: 'test-config-fp',
-            mutationFootprint: MutationFootprint(
+          final readinessIndex = ActionReadinessIndex({
+            finding.node.id: ActionReadinessEntry(
+              adapterId: 'l10n-adapter',
+              nodeKind: NodeKind.localizationKey,
               familyId: 'app_localizations',
-              findingIds: {finding.node.id},
-              physicalPaths: {'lib/l10n/app_en.arb'},
+              configurationFingerprint: 'test-config-fp',
+              mutationFootprint: MutationFootprint(
+                familyId: 'app_localizations',
+                findingIds: {finding.node.id},
+                physicalPaths: {'lib/l10n/app_en.arb'},
+                riskScope: ActionRiskScope.boundedFamily,
+              ),
+              inverseKind: DeterministicInverseKind.proven,
               riskScope: ActionRiskScope.boundedFamily,
+              hasExternalConsumerExposure: false,
             ),
-            inverseKind: DeterministicInverseKind.proven,
-            riskScope: ActionRiskScope.boundedFamily,
-            hasExternalConsumerExposure: false,
-          ),
-        });
+          });
 
-        final results = await executor.executeAll(
-          findings: [finding],
-          readinessIndex: readinessIndex,
-          project: project,
-        );
+          final results = await executor.executeAll(
+            findings: [finding],
+            readinessIndex: readinessIndex,
+            project: project,
+          );
 
-        expect(results, hasLength(1));
-        final result = results['app_localizations'];
-        expect(result, isA<MutationFailed>());
-        final failed = result as MutationFailed;
-        expect(failed.error, contains('config'));
-      });
+          expect(results, hasLength(1));
+          final result = results['app_localizations'];
+          expect(result, isA<MutationFailed>());
+          final failed = result as MutationFailed;
+          expect(failed.error, contains('config'));
+        },
+      );
     });
 
     group('Phase E.5: Regression checks', () {
@@ -552,10 +557,7 @@ output-localization-file: app_localizations.dart
 }
 
 /// Helper to create a minimal l10n Finding for testing.
-Finding _createL10nFinding({
-  required String nodeId,
-  required String key,
-}) {
+Finding _createL10nFinding({required String nodeId, required String key}) {
   return Finding(
     ruleId: 'PRN-L10N-001',
     node: GraphNode(

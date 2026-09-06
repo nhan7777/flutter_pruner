@@ -914,10 +914,13 @@ final class ProductionL10nReadinessComposition {
       retainedRepositoriesByProject: authorities.retainedRepositoriesByProject,
       sdkFlutterByVersion: options.sdkFlutterByVersion,
     );
-    final provisionView = (String projectId) async {
+    Future<ProductionL10nReadinessProjectView> provisionView(
+      String projectId,
+    ) async {
       await loader.revalidateProject(options, authorities, projectId);
       return viewFactory.provision(projectId);
-    };
+    }
+
     final dependencies = L10nMutationReadinessDependencies(
       loadPlan: (runtimeOptions) async {
         if (_optionsIdentity(runtimeOptions) != optionsIdentity) {
@@ -1142,7 +1145,9 @@ Future<String> _fileSetIdentity(
         stderr.writeln('Canonical check failed for: $relativePath');
         stderr.writeln('  Root: ${root.path}');
         stderr.writeln('  File: ${file.path}');
-        stderr.writeln('  Type: $fileType (expected: ${FileSystemEntityType.file})');
+        stderr.writeln(
+          '  Type: $fileType (expected: ${FileSystemEntityType.file})',
+        );
         stderr.writeln('  IsWithin: $isWithin');
       }
       throw StateError('Production identity source is not canonical.');

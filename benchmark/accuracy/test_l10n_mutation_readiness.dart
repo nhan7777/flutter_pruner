@@ -1,4 +1,5 @@
 #!/usr/bin/env dart
+
 // Test harness that bypasses GSY fixture validation for partial validation
 
 import 'dart:io';
@@ -11,25 +12,23 @@ class TestAuthorityLoader implements ProductionL10nAuthorityLoaderBase {
   final ProductionL10nAuthorityLoader _delegate;
 
   TestAuthorityLoader()
-      : _delegate = ProductionL10nAuthorityLoader.testing(
-          processRunner: const ManagedProcessRunner(),
-          gitExecutable: Platform.isWindows ? 'git.exe' : '/usr/bin/git',
-          enforceRetainedProbeHash: false, // Bypass probe hash check
-        );
+    : _delegate = ProductionL10nAuthorityLoader.testing(
+        processRunner: const ManagedProcessRunner(),
+        gitExecutable: Platform.isWindows ? 'git.exe' : '/usr/bin/git',
+        enforceRetainedProbeHash: false, // Bypass probe hash check
+      );
 
   @override
   Future<ProductionL10nAuthoritySnapshot> load(
     L10nMutationReadinessOptions options,
-  ) =>
-      _delegate.load(options);
+  ) => _delegate.load(options);
 
   @override
   Future<void> revalidateProject(
     L10nMutationReadinessOptions options,
     ProductionL10nAuthoritySnapshot snapshot,
     String projectId,
-  ) =>
-      _delegate.revalidateProject(options, snapshot, projectId);
+  ) => _delegate.revalidateProject(options, snapshot, projectId);
 }
 
 Future<void> main(List<String> arguments) async {

@@ -115,8 +115,7 @@ class ManagedProcessRunner implements ProcessExecutionRunner {
     this.cancellationController,
     ManagedProcessStarter? processStarter,
     ManagedProcessTreeTerminator? processTreeTerminator,
-    ProcessIdentityInspector processIdentityInspector =
-        const ManagedProcessIdentityInspector(),
+    ProcessIdentityInspector? processIdentityInspector,
     String posixProcessTableExecutable = '/bin/ps',
   }) : _processStarter = processStarter,
        _processTreeTerminator = processTreeTerminator,
@@ -129,7 +128,12 @@ class ManagedProcessRunner implements ProcessExecutionRunner {
 
   final ManagedProcessStarter? _processStarter;
   final ManagedProcessTreeTerminator? _processTreeTerminator;
-  final ProcessIdentityInspector _processIdentityInspector;
+  final ProcessIdentityInspector? _processIdentityInspector;
+  ProcessIdentityInspector get _resolvedProcessIdentityInspector =>
+      _processIdentityInspector ??
+      ManagedProcessIdentityInspector(
+        posixProcessTableExecutable: _posixProcessTableExecutable,
+      );
   final String _posixProcessTableExecutable;
 
   @override
@@ -196,7 +200,7 @@ class ManagedProcessRunner implements ProcessExecutionRunner {
     );
     final observer = _ProcessTreeObserver(
       process.pid,
-      identityInspector: _processIdentityInspector,
+      identityInspector: _resolvedProcessIdentityInspector,
       posixProcessTableExecutable: _posixProcessTableExecutable,
     );
 
@@ -247,7 +251,7 @@ class ManagedProcessRunner implements ProcessExecutionRunner {
                 exitCode,
                 observedProcesses: observer.observedProcesses,
                 observationReliable: observationReliable,
-                identityInspector: _processIdentityInspector,
+                identityInspector: _resolvedProcessIdentityInspector,
               ));
       final cancellationSignal =
           outcome.signal ??
@@ -448,8 +452,8 @@ class BoundedProcessOutput {
   BoundedProcessOutput({
     required List<int> capturedPayload,
     required this.omittedBytes,
-  })  : _capturedPayload = Uint8List.fromList(capturedPayload),
-        capturedBytes = capturedPayload.length;
+  }) : _capturedPayload = Uint8List.fromList(capturedPayload),
+       capturedBytes = capturedPayload.length;
 
   final Uint8List _capturedPayload;
 
@@ -460,7 +464,7 @@ class BoundedProcessOutput {
   String get text {
     final decoded = utf8.decode(_capturedPayload, allowMalformed: true);
     if (omittedBytes > 0) {
-      return '$decoded\n[... ${omittedBytes} bytes omitted]';
+      return '$decoded\n...[output truncated; $omittedBytes bytes omitted]';
     }
     return decoded;
   }
@@ -671,9 +675,6 @@ class _ProcessTreeObserver {
         }
       }
 
-      _observedProcesses.removeWhere(
-        (pid, identity) => pid != rootPid && !processTable.containsIdentity(identity),
-      );
       final liveTrackedProcesses = _observedProcesses.values.where(
         processTable.containsIdentity,
       );
@@ -936,11 +937,13 @@ class _ProcessExitEvidence {
   final bool inspectionReliable;
 }
 
-Future<PosixProcessTableSnapshot?> _readPosixProcessTable() async {
+Future<PosixProcessTableSnapshot?> _readPosixProcessTable(
+  String executable,
+) async {
   try {
-    final result = await _runInspectionCommand('ps', const [
+    final result = await _runInspectionCommand(executable, const [
       '-axo',
-      'pid=,ppid=,lstart=,state=',
+      'pid=,ppid=,lstart=,state=,rss=',
     ]);
     if (result == null || result.exitCode != 0) return null;
     return PosixProcessTableSnapshot.parse(result.stdout);
@@ -961,10 +964,16 @@ abstract interface class ProcessIdentityInspector {
 final class ManagedProcessIdentityInspector
     implements ProcessIdentityInspector {
   /// Creates the system inspector.
-  const ManagedProcessIdentityInspector();
+  const ManagedProcessIdentityInspector({
+    this.posixProcessTableExecutable = '/bin/ps',
+  });
+
+  /// Executable used to read the POSIX process table.
+  final String posixProcessTableExecutable;
 
   @override
-  Future<PosixProcessTableSnapshot?> snapshot() => _readPosixProcessTable();
+  Future<PosixProcessTableSnapshot?> snapshot() =>
+      _readPosixProcessTable(posixProcessTableExecutable);
 }
 
 Future<_InspectionResult?> _runInspectionCommand(
@@ -973,7 +982,14 @@ Future<_InspectionResult?> _runInspectionCommand(
 ) async {
   Process process;
   try {
-    process = await Process.start(executable, arguments);
+    process = await (Platform.isLinux || Platform.isMacOS
+        ? Process.start(
+            executable,
+            arguments,
+            environment: const {'LANG': 'C', 'LC_ALL': 'C'},
+            includeParentEnvironment: false,
+          )
+        : Process.start(executable, arguments));
   } catch (_) {
     return null;
   }

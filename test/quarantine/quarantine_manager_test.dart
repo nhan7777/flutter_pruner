@@ -5089,6 +5089,8 @@ class _CancellationAtLink implements ProcessExecutionRunner {
     required String workingDirectory,
     required Duration timeout,
     required int maxOutputBytesPerStream,
+    Map<String, String> environmentOverrides = const {},
+    bool includeParentEnvironment = true,
   }) async {
     invocationCount++;
     if (invocationCount == failAt && !afterSuccessfulLink) {
@@ -5127,6 +5129,8 @@ class _CancellationAtPermission implements ProcessExecutionRunner {
     required String workingDirectory,
     required Duration timeout,
     required int maxOutputBytesPerStream,
+    Map<String, String> environmentOverrides = const {},
+    bool includeParentEnvironment = true,
   }) async {
     invocationCount++;
     final result = await _delegate.run(

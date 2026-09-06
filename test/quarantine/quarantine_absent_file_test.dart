@@ -1,7 +1,7 @@
 import 'dart:io';
 
-import 'package:flutter_pruner/src/quarantine/quarantine_manager.dart';
 import 'package:flutter_pruner/src/quarantine/manifest.dart';
+import 'package:flutter_pruner/src/quarantine/quarantine_manager.dart';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
@@ -55,7 +55,9 @@ void main() {
       expect(absentCase.entry.wasAbsentBeforeTransaction, isTrue);
       expect(
         absentCase.entry.sha256,
-        equals('e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'),
+        equals(
+          'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+        ),
       );
       expect(absentCase.entry.sizeBytes, equals(0));
       expect(absentCase.status, equals(QuarantineCaseStatus.backedUp));
@@ -152,7 +154,9 @@ void main() {
       );
 
       // Simulate file creation during transaction
-      final generatedFile = File(p.join(project.path, 'lib/generated/l10n.dart'));
+      final generatedFile = File(
+        p.join(project.path, 'lib/generated/l10n.dart'),
+      );
       generatedFile.createSync(recursive: true);
       generatedFile.writeAsStringSync('// Generated');
 
@@ -233,23 +237,27 @@ void main() {
       expect(existingFile.readAsStringSync(), equals('original'));
     });
 
-    test('QuarantineEntry serialization preserves wasAbsentBeforeTransaction', () {
-      final entry = QuarantineEntry(
-        originalPath: '/project/lib/generated/l10n.dart',
-        sha256: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
-        sizeBytes: 0,
-        wasAbsentBeforeTransaction: true,
-        operationType: QuarantineOperationType.file,
-      );
+    test(
+      'QuarantineEntry serialization preserves wasAbsentBeforeTransaction',
+      () {
+        final entry = QuarantineEntry(
+          originalPath: '/project/lib/generated/l10n.dart',
+          sha256:
+              'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+          sizeBytes: 0,
+          wasAbsentBeforeTransaction: true,
+          operationType: QuarantineOperationType.file,
+        );
 
-      final json = entry.toJson();
-      expect(json['wasAbsentBeforeTransaction'], isTrue);
+        final json = entry.toJson();
+        expect(json['wasAbsentBeforeTransaction'], isTrue);
 
-      final deserialized = QuarantineEntry.fromJson(json);
-      expect(deserialized.wasAbsentBeforeTransaction, isTrue);
-      expect(deserialized.sha256, equals(entry.sha256));
-      expect(deserialized.sizeBytes, equals(0));
-    });
+        final deserialized = QuarantineEntry.fromJson(json);
+        expect(deserialized.wasAbsentBeforeTransaction, isTrue);
+        expect(deserialized.sha256, equals(entry.sha256));
+        expect(deserialized.sizeBytes, equals(0));
+      },
+    );
 
     test('QuarantineEntry defaults wasAbsentBeforeTransaction to false', () {
       final entry = QuarantineEntry(

@@ -3045,18 +3045,14 @@ void _requireLaunchControlsCompatible(
     );
   }
 
-  final engineStampJson = _exactJsonObject(
-    manifest,
-    _engineStampJsonPath,
-    const {
-      'build_date',
-      'build_time_ms',
-      'git_revision',
-      'git_revision_date',
-      'content_hash',
-    },
-    detailCode: 'registry-sdk-engine-stamp-invalid',
-  );
+  final engineStampJson =
+      _exactJsonObject(manifest, _engineStampJsonPath, const {
+        'build_date',
+        'build_time_ms',
+        'git_revision',
+        'git_revision_date',
+        'content_hash',
+      }, detailCode: 'registry-sdk-engine-stamp-invalid');
   final buildDate = engineStampJson['build_date'];
   final buildTimeMs = engineStampJson['build_time_ms'];
   final gitRevision = engineStampJson['git_revision'];

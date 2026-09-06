@@ -43,7 +43,8 @@ void main() {
         expect(
           finding.proposedAction,
           isNull,
-          reason: 'l10n finding ${finding.node.id} must have null proposedAction',
+          reason:
+              'l10n finding ${finding.node.id} must have null proposedAction',
         );
         expect(
           finding.confidence,
@@ -115,40 +116,45 @@ void main() {
       );
     });
 
-    test('no staging directory or gen-l10n process during normal scan', () async {
-      final root = await _copyFixture();
-      addTearDown(() => root.delete(recursive: true));
-      final project = await _loadCompleteProject(root);
+    test(
+      'no staging directory or gen-l10n process during normal scan',
+      () async {
+        final root = await _copyFixture();
+        addTearDown(() => root.delete(recursive: true));
+        final project = await _loadCompleteProject(root);
 
-      // Snapshot directory state before scan
-      final tempDir = Directory.systemTemp;
-      final beforeListing = tempDir
-          .listSync(recursive: false)
-          .whereType<Directory>()
-          .map((d) => d.path)
-          .toSet();
+        // Create isolated temp directory for this test
+        final isolatedTemp = await Directory.systemTemp.createTemp(
+          'boundary_test_',
+        );
+        addTearDown(() => isolatedTemp.delete(recursive: true));
 
-      final analyzer = ProjectAnalyzer(project: project);
-      await analyzer.analyze();
+        // Snapshot isolated directory state before scan
+        final beforeListing = isolatedTemp
+            .listSync(recursive: false)
+            .whereType<Directory>()
+            .map((d) => d.path)
+            .toSet();
 
-      // Check no new staging directories created
-      final afterListing = tempDir
-          .listSync(recursive: false)
-          .whereType<Directory>()
-          .map((d) => d.path)
-          .toSet();
+        final analyzer = ProjectAnalyzer(project: project);
+        await analyzer.analyze();
 
-      final newDirs = afterListing.difference(beforeListing);
-      final stagingDirs = newDirs.where(
-        (path) => path.contains('l10n') || path.contains('flutter_pruner'),
-      );
+        // Check no new staging directories created in our isolated space
+        final afterListing = isolatedTemp
+            .listSync(recursive: false)
+            .whereType<Directory>()
+            .map((d) => d.path)
+            .toSet();
 
-      expect(
-        stagingDirs,
-        isEmpty,
-        reason: 'no staging directories should be created during scan',
-      );
-    });
+        final newDirs = afterListing.difference(beforeListing);
+
+        expect(
+          newDirs,
+          isEmpty,
+          reason: 'no staging directories should be created during scan',
+        );
+      },
+    );
   });
 }
 

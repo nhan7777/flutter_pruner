@@ -12,10 +12,7 @@ void main() {
     });
 
     test('has correct default test command', () {
-      expect(L10nVerificationPolicy.defaultTestCommand, [
-        'test',
-        '--no-pub',
-      ]);
+      expect(L10nVerificationPolicy.defaultTestCommand, ['test', '--no-pub']);
     });
 
     test('hasNoResolutionContract detects --no-pub', () {

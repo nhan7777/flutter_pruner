@@ -1844,10 +1844,10 @@ Future<void> main() async {
 
   test('harness: identity-reuse seam never signals a replaced PID', () {
     final observed = PosixProcessTableSnapshot.parse(
-      '42 1 Sun Aug 16 10:00:00 2026 S\n',
+      '42 1 Sun Aug 16 10:00:00 2026 S 0\n',
     ).identityFor(42)!;
     final reused = PosixProcessTableSnapshot.parse(
-      '42 1 Sun Aug 16 10:00:01 2026 S\n',
+      '42 1 Sun Aug 16 10:00:01 2026 S 0\n',
     );
     final signalled = <int>[];
 
@@ -2041,11 +2041,11 @@ Future<void> main(List<String> args) async {
                 .firstWhere((value) => value.contains(entrypoint.path));
             rootPid = int.parse(line.trim().split(RegExp(r'\s+')).first);
             return PosixProcessTableSnapshot.parse(
-              '$rootPid 1 Sun Aug 16 10:00:00 2026 S\n',
+              '$rootPid 1 Sun Aug 16 10:00:00 2026 S 0\n',
             );
           }
           return PosixProcessTableSnapshot.parse(
-            '$rootPid 1 Sun Aug 16 10:00:00 2026 Z\n',
+            '$rootPid 1 Sun Aug 16 10:00:00 2026 Z 0\n',
           );
         },
         posixIdentitySignalSender: (_, _) {},
@@ -2545,9 +2545,9 @@ Future<void> main() async { while (true) { await Future<void>.delayed(const Dura
 
   test('harness: signals grandchild before child before root', () {
     final table = PosixProcessTableSnapshot.parse('''
-1 0 Sun Aug 16 10:00:00 2026 S
-2 1 Sun Aug 16 10:00:00 2026 S
-3 2 Sun Aug 16 10:00:00 2026 S
+1 0 Sun Aug 16 10:00:00 2026 S 0
+2 1 Sun Aug 16 10:00:00 2026 S 0
+3 2 Sun Aug 16 10:00:00 2026 S 0
 ''');
 
     expect(
@@ -3007,7 +3007,7 @@ Future<bool> _waitForPidToDisappear(int pid) async {
 Future<PosixProcessTableSnapshot?> _readCurrentProcessTable() async {
   final result = await Process.run('ps', const [
     '-axo',
-    'pid=,ppid=,lstart=,state=',
+    'pid=,ppid=,lstart=,state=,rss=',
   ]);
   if (result.exitCode != 0) return null;
   return PosixProcessTableSnapshot.parse(result.stdout as String);

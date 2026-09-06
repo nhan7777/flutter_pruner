@@ -103,9 +103,8 @@ environment:
     final runner = _RecordingProcessRunner(
       result: ManagedProcessResult(
         exitCode: 0,
-        stdout: const BoundedProcessOutput(
-          text: 'partial analyzer output',
-          capturedBytes: 23,
+        stdout: BoundedProcessOutput(
+          capturedPayload: 'partial analyzer output'.codeUnits,
           omittedBytes: 7,
         ),
         stderr: _emptyOutput,
@@ -157,9 +156,8 @@ environment:
   }
 }
 
-const _emptyOutput = BoundedProcessOutput(
-  text: '',
-  capturedBytes: 0,
+final _emptyOutput = BoundedProcessOutput(
+  capturedPayload: const [],
   omittedBytes: 0,
 );
 
@@ -171,27 +169,25 @@ ManagedProcessResult _managedResult({
 }) => ManagedProcessResult(
   exitCode: exitCode,
   stdout: BoundedProcessOutput(
-    text: stdout,
-    capturedBytes: stdout.length,
+    capturedPayload: stdout.codeUnits,
     omittedBytes: 0,
   ),
   stderr: BoundedProcessOutput(
-    text: stderr,
-    capturedBytes: stderr.length,
+    capturedPayload: stderr.codeUnits,
     omittedBytes: 0,
   ),
   timedOut: timedOut,
 );
 
 final class _RecordingProcessRunner implements ProcessExecutionRunner {
-  _RecordingProcessRunner({
-    this.result = const ManagedProcessResult(
-      exitCode: 0,
-      stdout: _emptyOutput,
-      stderr: _emptyOutput,
-    ),
-    this.error,
-  });
+  _RecordingProcessRunner({ManagedProcessResult? result, this.error})
+    : result =
+          result ??
+          ManagedProcessResult(
+            exitCode: 0,
+            stdout: _emptyOutput,
+            stderr: _emptyOutput,
+          );
 
   final ManagedProcessResult result;
   final Exception? error;
@@ -209,6 +205,8 @@ final class _RecordingProcessRunner implements ProcessExecutionRunner {
     required String workingDirectory,
     required Duration timeout,
     required int maxOutputBytesPerStream,
+    Map<String, String> environmentOverrides = const {},
+    bool includeParentEnvironment = true,
   }) async {
     invocations++;
     this.executable = executable;

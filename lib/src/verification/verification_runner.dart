@@ -85,6 +85,10 @@ class VerificationRunner {
         );
       } on ProcessTerminationUnconfirmedException {
         rethrow;
+      } on ProcessCancellationBeforeLaunchException {
+        rethrow;
+      } on ProcessCancellationConfirmedException {
+        rethrow;
       } catch (error) {
         evidence.add('$executable\u0000unavailable\u0000$error');
       }
@@ -128,6 +132,10 @@ class VerificationRunner {
       );
     } on ProcessTerminationUnconfirmedException {
       rethrow;
+    } on ProcessCancellationBeforeLaunchException {
+      rethrow;
+    } on ProcessCancellationConfirmedException {
+      rethrow;
     } catch (e) {
       return VerificationStep(
         name: command.id,
@@ -151,6 +159,10 @@ class VerificationRunner {
           !result.outputTruncated &&
           result.exitCode == 0;
     } on ProcessTerminationUnconfirmedException {
+      rethrow;
+    } on ProcessCancellationBeforeLaunchException {
+      rethrow;
+    } on ProcessCancellationConfirmedException {
       rethrow;
     } catch (e) {
       return false;

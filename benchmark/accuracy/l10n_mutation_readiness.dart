@@ -8,15 +8,14 @@ import 'dart:math';
 
 import 'package:crypto/crypto.dart';
 import 'package:flutter_pruner/src/reporting/io_report_object_backend.dart';
-import 'package:synchronized/synchronized.dart';
-
-import 'src/shared_view_manager.dart';
 import 'package:flutter_pruner/src/reporting/recoverable_report_writer.dart';
 import 'package:flutter_pruner/src/reporting/report_object_backend.dart';
 import 'package:path/path.dart' as p;
+import 'package:synchronized/synchronized.dart';
 
 import 'src/l10n_mutation_manifest.dart';
 import 'src/l10n_readiness_production.dart';
+import 'src/shared_view_manager.dart';
 
 const _schemaVersion = 2;
 const _artifactKind = 'flutter-pruner-l10n-stage1-readiness';
@@ -1530,7 +1529,9 @@ Future<L10nStaticScanResult> _scanWithOptionalLock(
   Lock? scanLock,
 ) async {
   if (scanLock != null) {
-    return scanLock.synchronized(() => dependencies.scanner.scan(view, projectCases));
+    return scanLock.synchronized(
+      () => dependencies.scanner.scan(view, projectCases),
+    );
   }
   return dependencies.scanner.scan(view, projectCases);
 }

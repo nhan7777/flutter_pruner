@@ -88,7 +88,7 @@ void main() {
       final entry = await manager.getSharedView('project1');
       final initialTimestamp = entry.lastAccessed;
 
-      await Future.delayed(Duration(milliseconds: 10));
+      await Future<void>.delayed(Duration(milliseconds: 10));
       entry.touch();
 
       expect(entry.lastAccessed.isAfter(initialTimestamp), isTrue);
@@ -102,7 +102,7 @@ void main() {
         futures.add(
           manager.withScanLock('project1', () async {
             results.add(i);
-            await Future.delayed(Duration(milliseconds: 10));
+            await Future<void>.delayed(Duration(milliseconds: 10));
           }),
         );
       }
@@ -112,27 +112,34 @@ void main() {
       expect(results, equals([0, 1, 2, 3, 4]));
     });
 
-    test('withScanLock allows concurrent access to different projects',
-        () async {
-      final project1Start = <DateTime>[];
-      final project2Start = <DateTime>[];
+    test(
+      'withScanLock allows concurrent access to different projects',
+      () async {
+        final project1Start = <DateTime>[];
+        final project2Start = <DateTime>[];
 
-      await Future.wait([
-        manager.withScanLock('project1', () async {
-          project1Start.add(DateTime.now());
-          await Future.delayed(Duration(milliseconds: 50));
-        }),
-        manager.withScanLock('project2', () async {
-          project2Start.add(DateTime.now());
-          await Future.delayed(Duration(milliseconds: 50));
-        }),
-      ]);
+        await Future.wait([
+          manager.withScanLock('project1', () async {
+            project1Start.add(DateTime.now());
+            await Future<void>.delayed(Duration(milliseconds: 50));
+          }),
+          manager.withScanLock('project2', () async {
+            project2Start.add(DateTime.now());
+            await Future<void>.delayed(Duration(milliseconds: 50));
+          }),
+        ]);
 
-      final timeDiff =
-          project1Start.first.difference(project2Start.first).inMilliseconds.abs();
-      expect(timeDiff < 30, isTrue,
-          reason: 'Projects should start concurrently');
-    });
+        final timeDiff = project1Start.first
+            .difference(project2Start.first)
+            .inMilliseconds
+            .abs();
+        expect(
+          timeDiff < 30,
+          isTrue,
+          reason: 'Projects should start concurrently',
+        );
+      },
+    );
 
     test('disposeAll cleans up all views', () async {
       await manager.getSharedView('project1');

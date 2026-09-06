@@ -2334,6 +2334,8 @@ class _UnconfirmedAfterSuccessfulRollbackHelper
     required String workingDirectory,
     required Duration timeout,
     required int maxOutputBytesPerStream,
+    Map<String, String> environmentOverrides = const {},
+    bool includeParentEnvironment = true,
   }) async {
     invocationCount++;
     await _delegate.run(

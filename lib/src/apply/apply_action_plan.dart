@@ -3,8 +3,10 @@ import 'dart:convert';
 import 'package:crypto/crypto.dart';
 import 'package:path/path.dart' as p;
 
+import '../core/confidence/promotion_index.dart';
 import '../core/graph/reachability_graph.dart';
 import '../core/project/project_context.dart';
+import '../quarantine/quarantine_manager.dart';
 import 'finding_action_builder.dart';
 import 'finding_selection.dart';
 import 'removal_planner.dart';
@@ -16,14 +18,25 @@ import 'removal_planner.dart';
 /// already-authorized physical actions.
 final class ApplyActionPlanBuilder {
   /// Creates an action-plan builder with the core physical action expander.
-  const ApplyActionPlanBuilder()
-    : _actionBuilder = const FindingActionBuilder(),
+  const ApplyActionPlanBuilder({this.quarantine, this.actionReadinessIndex})
+    : _actionBuilder = null,
       _validateCoreProjection = false;
 
   /// Creates a checked internal seam for action-projection tests.
   const ApplyActionPlanBuilder.forTesting(FindingActionBuilder actionBuilder)
     : _actionBuilder = actionBuilder,
+      quarantine = null,
+      actionReadinessIndex = null,
       _validateCoreProjection = true;
+
+  final FindingActionBuilder? _actionBuilder;
+  final bool _validateCoreProjection;
+
+  /// Optional quarantine manager for l10n mutations.
+  final QuarantineManager? quarantine;
+
+  /// Optional readiness index for l10n family-level mutations.
+  final ActionReadinessIndex? actionReadinessIndex;
 
   /// Expands one already-decided removal plan without revisiting actionability.
   ApplyActionPlan build({
@@ -32,13 +45,19 @@ final class ApplyActionPlanBuilder {
     required ProjectContext project,
     required FindingSelection selection,
   }) {
+    final actionBuilder =
+        _actionBuilder ??
+        FindingActionBuilder(
+          quarantine: quarantine,
+          actionReadinessIndex: actionReadinessIndex,
+        );
     final rawActionsByUnitId = <String, List<FindingActionDescriptor>>{};
     final coreActionsByUnitId = <String, List<FindingActionDescriptor>>{};
     for (final unit in removalPlan.units) {
       if (rawActionsByUnitId.containsKey(unit.id)) {
         throw StateError('Removal plan repeated atomic unit ID ${unit.id}.');
       }
-      rawActionsByUnitId[unit.id] = _actionBuilder.build(
+      rawActionsByUnitId[unit.id] = actionBuilder.build(
         findings: unit.findings,
         graph: graph,
         project: project,
@@ -188,11 +207,6 @@ final class ApplyActionPlanBuilder {
       blocked: blocked,
     );
   }
-
-  // Alternate expanders are an internal test seam. Production always uses the
-  // core builder; overrides must match that builder's physical provenance.
-  final FindingActionBuilder _actionBuilder;
-  final bool _validateCoreProjection;
 }
 
 /// Immutable initial or rescan action projection used by apply execution.

@@ -508,10 +508,14 @@ final class L10nMutationManifest {
     final isV2 = actualSha == _v2ManifestSha256;
     final isPartial = actualSha == _partialManifestSha256;
     final isGsyPatched = actualSha == _gsyPatchedManifestSha256;
-    if (actualSha != _rootManifestSha256 && !isV1 && !isV2 && !isPartial && !isGsyPatched) {
+    if (actualSha != _rootManifestSha256 &&
+        !isV1 &&
+        !isV2 &&
+        !isPartial &&
+        !isGsyPatched) {
       throw FormatException(
         'mutation root manifest SHA-256 drift: expected $_rootManifestSha256 '
-        'or $_v1ManifestSha256 or $_v2ManifestSha256 or $_partialManifestSha256 or $_gsyPatchedManifestSha256, got $actualSha'
+        'or $_v1ManifestSha256 or $_v2ManifestSha256 or $_partialManifestSha256 or $_gsyPatchedManifestSha256, got $actualSha',
       );
     }
     final decoded = jsonDecode(utf8.decode(bytes));
@@ -521,6 +525,7 @@ final class L10nMutationManifest {
       normalizationLoader: (name, project) =>
           _readNormalizationManifest(file.parent, name, project),
       isPartialManifest: isPartial,
+      fixtureOverlayAuthority: _fixtureOverlayAuthorityForSha(actualSha),
     ).parse();
   }
 
@@ -536,6 +541,7 @@ final class L10nMutationManifest {
       normalizationLoader: (name, project) =>
           _readNormalizationManifest(file.parent, name, project),
       isPartialManifest: isPartial,
+      fixtureOverlayAuthority: _fixtureOverlayAuthorityForSha(actualSha),
     ).parse();
   }
 
@@ -585,16 +591,32 @@ typedef _NormalizationLoader =
       L10nMutationProjectManifest project,
     );
 
+enum _FixtureOverlayAuthority {
+  canonicalV2,
+  rootV2Patched,
+  gsyPatchedV2,
+  partialV2,
+}
+
+typedef _FrozenFixtureOverlay = ({
+  String relativePath,
+  String sourceIdentity,
+  String purpose,
+  String sha256,
+});
+
 final class _L10nMutationManifestParser {
   _L10nMutationManifestParser(
     this.json, {
     this.normalizationLoader,
     this.isPartialManifest = false,
+    this.fixtureOverlayAuthority = _FixtureOverlayAuthority.canonicalV2,
   });
 
   final Map<String, Object?> json;
   final _NormalizationLoader? normalizationLoader;
   final bool isPartialManifest;
+  final _FixtureOverlayAuthority fixtureOverlayAuthority;
 
   L10nMutationManifest parse() {
     _requireExactKeys(json, _topLevelKeys, 'manifest');
@@ -950,6 +972,7 @@ final class _L10nMutationManifestParser {
       project,
       overlays,
       allowPartialManifest: isPartialManifest,
+      authority: fixtureOverlayAuthority,
     );
     return overlays;
   }
@@ -1469,18 +1492,29 @@ String _commandIdentity(String workingDirectory, List<String> arguments) {
   return sha256.convert(utf8.encode(canonical)).toString();
 }
 
+_FixtureOverlayAuthority _fixtureOverlayAuthorityForSha(String sha256) {
+  return switch (sha256) {
+    _v2ManifestSha256 => _FixtureOverlayAuthority.canonicalV2,
+    _rootManifestSha256 => _FixtureOverlayAuthority.rootV2Patched,
+    _gsyPatchedManifestSha256 => _FixtureOverlayAuthority.gsyPatchedV2,
+    _partialManifestSha256 => _FixtureOverlayAuthority.partialV2,
+    _ => _FixtureOverlayAuthority.canonicalV2,
+  };
+}
+
 void _validateFrozenFixtureOverlays(
   String project,
   List<L10nFixtureOverlay> overlays, {
   bool allowPartialManifest = false,
+  _FixtureOverlayAuthority authority = _FixtureOverlayAuthority.canonicalV2,
 }) {
   // Skip GSY validation when using partial manifest (gitjournal + smooth only)
   if (allowPartialManifest && project == 'gsy') {
     return;
   }
 
-  final expected = switch (project) {
-    'gitjournal' => const [
+  final List<_FrozenFixtureOverlay> expected = switch (project) {
+    'gitjournal' => const <_FrozenFixtureOverlay>[
       (
         relativePath: 'flutter_pruner_v2_accuracy.yaml',
         sourceIdentity:
@@ -1498,25 +1532,64 @@ void _validateFrozenFixtureOverlays(
             'a4aee8e49b8ae44f874ae182b464cbba1d00ba3045eaf37c14d745849da98b33',
       ),
     ],
-    'gsy' => const [
-      (
-        relativePath: 'flutter_pruner_v2_accuracy.yaml',
-        sourceIdentity:
-            'worktrees/v2-natural-accuracy/gsy/flutter_pruner_v2_accuracy.yaml',
-        purpose: 'scanner coverage authority',
-        sha256:
-            '59dc83948c3ef90c91199af0e520c487c8cac801e1cad46adad6fc3a4c53256d',
-      ),
-      (
-        relativePath: 'lib/common/config/ignoreConfig.dart',
-        sourceIdentity:
-            'worktrees/v2-natural-accuracy/gsy/lib/common/config/ignoreConfig.dart',
-        purpose: 'non-secret ignored configuration stub',
-        sha256:
-            '92233829f2dc725d4a19ba0bae13d9d185a555cdb57c8adb890f9367c3034686',
-      ),
-    ],
-    'smooth' => const [
+    'gsy' => switch (authority) {
+      _FixtureOverlayAuthority.canonicalV2 => const <_FrozenFixtureOverlay>[
+        (
+          relativePath: 'flutter_pruner_v2_accuracy.yaml',
+          sourceIdentity:
+              'worktrees/v2-natural-accuracy/gsy/flutter_pruner_v2_accuracy.yaml',
+          purpose: 'scanner coverage authority',
+          sha256:
+              '088014c7fc747e62ba52e705374da2e6fb12aea87fa4f0cdd9a0d3935d916beb',
+        ),
+        (
+          relativePath: 'lib/common/config/ignoreConfig.dart',
+          sourceIdentity:
+              'worktrees/v2-natural-accuracy/gsy/lib/common/config/ignoreConfig.dart',
+          purpose: 'non-secret ignored configuration stub',
+          sha256:
+              'cb2b8ad720d95f0f0c8e633c389a5ae0dc8876e274b7455d77bb6ed9350efbbe',
+        ),
+      ],
+      _FixtureOverlayAuthority.rootV2Patched => const <_FrozenFixtureOverlay>[
+        (
+          relativePath: 'flutter_pruner_v2_accuracy.yaml',
+          sourceIdentity:
+              'worktrees/v2-natural-accuracy/gsy/flutter_pruner_v2_accuracy.yaml',
+          purpose: 'scanner coverage authority',
+          sha256:
+              '59dc83948c3ef90c91199af0e520c487c8cac801e1cad46adad6fc3a4c53256d',
+        ),
+        (
+          relativePath: 'lib/common/config/ignoreConfig.dart',
+          sourceIdentity:
+              'worktrees/v2-natural-accuracy/gsy/lib/common/config/ignoreConfig.dart',
+          purpose: 'non-secret ignored configuration stub',
+          sha256:
+              'cb2b8ad720d95f0f0c8e633c389a5ae0dc8876e274b7455d77bb6ed9350efbbe',
+        ),
+      ],
+      _FixtureOverlayAuthority.gsyPatchedV2 => const <_FrozenFixtureOverlay>[
+        (
+          relativePath: 'flutter_pruner_v2_accuracy.yaml',
+          sourceIdentity:
+              'worktrees/v2-natural-accuracy/gsy/flutter_pruner_v2_accuracy.yaml',
+          purpose: 'scanner coverage authority',
+          sha256:
+              '59dc83948c3ef90c91199af0e520c487c8cac801e1cad46adad6fc3a4c53256d',
+        ),
+        (
+          relativePath: 'lib/common/config/ignoreConfig.dart',
+          sourceIdentity:
+              'worktrees/v2-natural-accuracy/gsy/lib/common/config/ignoreConfig.dart',
+          purpose: 'non-secret ignored configuration stub',
+          sha256:
+              '92233829f2dc725d4a19ba0bae13d9d185a555cdb57c8adb890f9367c3034686',
+        ),
+      ],
+      _FixtureOverlayAuthority.partialV2 => const <_FrozenFixtureOverlay>[],
+    },
+    'smooth' => const <_FrozenFixtureOverlay>[
       (
         relativePath: '.fvmrc',
         sourceIdentity: 'worktrees/v3-stage1/smooth/.fvmrc',

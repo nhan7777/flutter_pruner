@@ -46,6 +46,5 @@ final class NoOpActionReadinessResolver implements ActionReadinessResolver {
     required ReachabilityGraph graph,
     required ProjectContext project,
     required GraphIntegrity integrity,
-  }) async =>
-      ActionReadinessIndex.empty;
+  }) async => ActionReadinessIndex.empty;
 }

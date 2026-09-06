@@ -3,9 +3,9 @@ import 'dart:io';
 import 'package:flutter_pruner/src/adapters/l10n/l10n_action_capability.dart';
 import 'package:flutter_pruner/src/adapters/l10n/l10n_action_descriptor.dart';
 import 'package:flutter_pruner/src/core/confidence/action_capability.dart';
-import 'package:flutter_pruner/src/core/confidence/promotion_index.dart';
 import 'package:flutter_pruner/src/core/confidence/action_risk_scope.dart';
 import 'package:flutter_pruner/src/core/confidence/mutation_footprint.dart';
+import 'package:flutter_pruner/src/core/confidence/promotion_index.dart';
 import 'package:flutter_pruner/src/core/graph/node.dart';
 import 'package:flutter_pruner/src/core/project/analysis_mode.dart';
 import 'package:flutter_pruner/src/core/project/project_context.dart';
@@ -69,11 +69,13 @@ void main() {
           readinessEntry: entry,
           project: project,
         ),
-        throwsA(isA<ArgumentError>().having(
-          (e) => e.message,
-          'message',
-          contains('Node must be localizationKey'),
-        )),
+        throwsA(
+          isA<ArgumentError>().having(
+            (e) => e.message,
+            'message',
+            contains('Node must be localizationKey'),
+          ),
+        ),
       );
     });
 
@@ -116,9 +118,11 @@ void main() {
 
     test('package-internal mode returns HIGH capability with manual risk', () {
       final project = createProject(AnalysisMode.packageInternal);
-      final node = createNode(metadata: {
-        'scopedBlockers': ['externalConsumersNotScanned'],
-      });
+      final node = createNode(
+        metadata: {
+          'scopedBlockers': ['externalConsumersNotScanned'],
+        },
+      );
       final entry = createEntry(hasExternalConsumerExposure: true);
 
       final capability = L10nActionCapability.forLocalizationKey(
@@ -157,9 +161,11 @@ void main() {
 
     test('scoped blocker present returns unsupported', () {
       final project = createProject(AnalysisMode.application);
-      final node = createNode(metadata: {
-        'scopedBlockers': ['someOtherBlocker', 'externalConsumersNotScanned'],
-      });
+      final node = createNode(
+        metadata: {
+          'scopedBlockers': ['someOtherBlocker', 'externalConsumersNotScanned'],
+        },
+      );
       final entry = createEntry();
 
       final capability = L10nActionCapability.forLocalizationKey(
@@ -173,21 +179,26 @@ void main() {
       expect(capability.scope, ActionScope.broad);
     });
 
-    test('externalConsumersNotScanned alone does not block application mode', () {
-      final project = createProject(AnalysisMode.application);
-      final node = createNode(metadata: {
-        'scopedBlockers': ['externalConsumersNotScanned'],
-      });
-      final entry = createEntry(hasExternalConsumerExposure: true);
+    test(
+      'externalConsumersNotScanned alone does not block application mode',
+      () {
+        final project = createProject(AnalysisMode.application);
+        final node = createNode(
+          metadata: {
+            'scopedBlockers': ['externalConsumersNotScanned'],
+          },
+        );
+        final entry = createEntry(hasExternalConsumerExposure: true);
 
-      final capability = L10nActionCapability.forLocalizationKey(
-        node: node,
-        readinessEntry: entry,
-        project: project,
-      );
+        final capability = L10nActionCapability.forLocalizationKey(
+          node: node,
+          readinessEntry: entry,
+          project: project,
+        );
 
-      expect(capability.supported, isTrue);
-    });
+        expect(capability.supported, isTrue);
+      },
+    );
 
     test('no scopedBlockers metadata is treated as empty list', () {
       final project = createProject(AnalysisMode.application);
@@ -206,7 +217,9 @@ void main() {
     test('generative inverse kind is preserved', () {
       final project = createProject(AnalysisMode.application);
       final node = createNode();
-      final entry = createEntry(inverseKind: DeterministicInverseKind.generative);
+      final entry = createEntry(
+        inverseKind: DeterministicInverseKind.generative,
+      );
 
       final capability = L10nActionCapability.forLocalizationKey(
         node: node,

@@ -2,12 +2,12 @@ import 'dart:io';
 
 import 'package:flutter_pruner/src/adapters/adapter_report_definition.dart';
 import 'package:flutter_pruner/src/apply/removal_planner.dart';
-import 'package:flutter_pruner/src/core/confidence/promotion_index.dart';
 import 'package:flutter_pruner/src/core/confidence/action_risk_scope.dart';
 import 'package:flutter_pruner/src/core/confidence/classification_reason.dart';
 import 'package:flutter_pruner/src/core/confidence/confidence.dart';
 import 'package:flutter_pruner/src/core/confidence/finding_generator.dart';
 import 'package:flutter_pruner/src/core/confidence/mutation_footprint.dart';
+import 'package:flutter_pruner/src/core/confidence/promotion_index.dart';
 import 'package:flutter_pruner/src/core/graph/build_condition.dart';
 import 'package:flutter_pruner/src/core/graph/edge.dart';
 import 'package:flutter_pruner/src/core/graph/evidence.dart';

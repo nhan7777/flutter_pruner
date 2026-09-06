@@ -1,8 +1,8 @@
 import 'package:meta/meta.dart';
 
 import '../../core/confidence/action_capability.dart';
-import '../../core/confidence/promotion_index.dart';
 import '../../core/confidence/action_risk_scope.dart';
+import '../../core/confidence/promotion_index.dart';
 import '../../core/graph/node.dart';
 import '../../core/project/analysis_mode.dart';
 import '../../core/project/project_context.dart';
@@ -30,8 +30,9 @@ final class L10nActionCapability {
     }
 
     // Check for scoped blockers (other than externalConsumersNotScanned)
-    final scopedBlockers = (node.metadata['scopedBlockers'] as List<dynamic>?)
-        ?.cast<String>() ?? <String>[];
+    final scopedBlockers =
+        (node.metadata['scopedBlockers'] as List<dynamic>?)?.cast<String>() ??
+        <String>[];
     final hasNonExternalBlockers = scopedBlockers.any(
       (blocker) => blocker != 'externalConsumersNotScanned',
     );

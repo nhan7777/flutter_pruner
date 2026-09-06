@@ -15,6 +15,7 @@ analyzer:
 
   exclude:
     - test/fixtures/**   # Fixture projects are intentionally messy.
+    - worktrees/**       # Archived benchmark fixtures are intentionally messy.
     - doc/**             # adapter-template.dart is a copy-me starting point.
     - "**/*.g.dart"
 

@@ -1,15 +1,23 @@
-import 'package:meta/meta.dart';
-
 import 'action_risk_scope.dart';
 
-/// Complete mutation footprint for one atomic action unit.
+/// Exact logical findings + physical paths owned by an atomic mutation unit.
 ///
-/// Captures logical finding IDs, physical file paths, risk scope classification,
-/// and optional family identity for family-level actions. Used to assess
-/// confidence and coordinate reversible transactions.
-@immutable
+/// Captures the complete scope of changes a mutation will make, including
+/// both the logical findings being addressed and the physical files affected.
 final class MutationFootprint {
-  /// Creates an immutable mutation footprint.
+  /// Logical finding IDs owned by this atomic unit.
+  final Set<String> findingIds;
+
+  /// Physical file paths that will be mutated (relative to project root).
+  final Set<String> physicalPaths;
+
+  /// Action risk scope classification.
+  final ActionRiskScope riskScope;
+
+  /// Family identifier for family-level actions (null for single actions).
+  final String? familyId;
+
+  /// Creates a mutation footprint with its complete scope.
   const MutationFootprint({
     required this.findingIds,
     required this.physicalPaths,
@@ -17,56 +25,34 @@ final class MutationFootprint {
     this.familyId,
   });
 
-  /// Logical finding IDs owned by this atomic unit.
-  ///
-  /// These are canonical node IDs from the reachability graph.
-  final Set<String> findingIds;
-
-  /// Physical file paths that will be mutated.
-  ///
-  /// Includes source files, generated outputs, and any companion files.
-  /// Paths are relative to project root.
-  final Set<String> physicalPaths;
-
-  /// Action risk scope classification.
-  final ActionRiskScope riskScope;
-
-  /// Family identifier for family-level actions.
-  ///
-  /// Required when [riskScope] is [ActionRiskScope.boundedFamily].
-  /// Null for single-file and open-ended actions.
-  final String? familyId;
-
-  /// Validates footprint constraints.
-  ///
-  /// Throws [ArgumentError] if:
-  /// - [riskScope] is [ActionRiskScope.boundedFamily] but [familyId] is null
-  /// - [riskScope] is not [ActionRiskScope.boundedFamily] but [familyId] is non-null
-  /// - [riskScope] is [ActionRiskScope.boundedSingle] but [findingIds] has more than one entry
-  /// - [findingIds] is empty
-  /// - [physicalPaths] is empty
+  /// Validates footprint constraints based on risk scope.
   void validate() {
     if (findingIds.isEmpty) {
-      throw ArgumentError('findingIds cannot be empty');
+      throw ArgumentError(
+        'MutationFootprint must have at least one finding ID',
+      );
     }
+
     if (physicalPaths.isEmpty) {
-      throw ArgumentError('physicalPaths cannot be empty');
-    }
-    if (riskScope == ActionRiskScope.boundedFamily && familyId == null) {
       throw ArgumentError(
-        'familyId is required when riskScope is boundedFamily',
+        'MutationFootprint must have at least one physical path',
       );
     }
-    if (riskScope != ActionRiskScope.boundedFamily && familyId != null) {
-      throw ArgumentError(
-        'familyId must be null when riskScope is not boundedFamily',
-      );
-    }
-    if (riskScope == ActionRiskScope.boundedSingle && findingIds.length > 1) {
-      throw ArgumentError(
-        'boundedSingle scope must have exactly one finding ID, '
-        'got ${findingIds.length}',
-      );
+
+    switch (riskScope) {
+      case ActionRiskScope.boundedFamily:
+        if (familyId == null) {
+          throw ArgumentError('boundedFamily scope requires non-null familyId');
+        }
+      case ActionRiskScope.boundedSingle:
+        if (findingIds.length != 1) {
+          throw ArgumentError(
+            'boundedSingle scope requires exactly one finding ID, got ${findingIds.length}',
+          );
+        }
+      case ActionRiskScope.openEnded:
+        // No additional constraints for open-ended scope
+        break;
     }
   }
 
@@ -82,19 +68,11 @@ final class MutationFootprint {
 
   @override
   int get hashCode => Object.hash(
-        _setHashCode(findingIds),
-        _setHashCode(physicalPaths),
-        riskScope,
-        familyId,
-      );
-
-  @override
-  String toString() => 'MutationFootprint('
-      'scope: ${riskScope.name}, '
-      'findings: ${findingIds.length}, '
-      'paths: ${physicalPaths.length}'
-      '${familyId != null ? ', family: $familyId' : ''}'
-      ')';
+    _setHashCode(findingIds),
+    _setHashCode(physicalPaths),
+    riskScope,
+    familyId,
+  );
 
   static bool _setEquals<T>(Set<T> a, Set<T> b) {
     if (a.length != b.length) return false;

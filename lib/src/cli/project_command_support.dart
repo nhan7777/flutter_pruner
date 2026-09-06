@@ -45,16 +45,43 @@ ToolWorkspace resolveToolWorkspace(
 
 /// Returns a copyable lifecycle command scoped to [workspace].
 ///
-/// Commands targeting the current directory stay concise; external project
-/// selections retain an explicit path so the suggestion works from here.
-String projectCommandFor(ToolWorkspace workspace, String command) {
+/// A bare subcommand is used for the current directory only when
+/// [preferBareCurrentProject] is requested and [command] is simple. External
+/// project selections retain an explicit path so the suggestion works from
+/// here.
+String projectCommandFor(
+  ToolWorkspace workspace,
+  String command, {
+  bool preferBareCurrentProject = false,
+}) {
   final current = p.normalize(p.absolute(Directory.current.path));
-  final arguments = p.equals(current, workspace.projectRoot.path)
+  final isCurrentProject = p.equals(current, workspace.projectRoot.path);
+  if (preferBareCurrentProject &&
+      isCurrentProject &&
+      _isBareSubcommand(command)) {
+    // Keep the common project-local suggestion concise without weakening the
+    // structured renderer used for external project paths.
+    return 'flutter_pruner $command';
+  }
+  final arguments = isCurrentProject
       ? [command]
       : [command, '--project', workspace.projectRoot.path];
   return SuggestedCommand.flutterPruner(
     arguments,
   ).renderForTerminal(ShellDialect.host);
+}
+
+bool _isBareSubcommand(String command) {
+  if (command.isEmpty) return false;
+  for (final rune in command.runes) {
+    final isLetter =
+        rune >= 0x41 && rune <= 0x5a || rune >= 0x61 && rune <= 0x7a;
+    final isDigit = rune >= 0x30 && rune <= 0x39;
+    if (!isLetter && !isDigit && rune != 0x2d && rune != 0x5f) {
+      return false;
+    }
+  }
+  return true;
 }
 
 /// Requires a real project configuration before analysis or mutation starts.

@@ -955,7 +955,8 @@ class QuarantineEntry {
           ? (json['declarationIds'] as List<dynamic>).cast<String>()
           : null,
       modifiedSha256: json['modifiedSha256'] as String?,
-      wasAbsentBeforeTransaction: json['wasAbsentBeforeTransaction'] as bool? ?? false,
+      wasAbsentBeforeTransaction:
+          json['wasAbsentBeforeTransaction'] as bool? ?? false,
     );
   }
 }

@@ -125,15 +125,11 @@ void main() {
             const ['pub', 'get', '--offline'],
           ],
         );
-        expect(
-          runner.flutterInvocations.map((entry) => entry.arguments),
-          [
-            const ['--version', '--machine'],
-            const ['pub', 'get', '--offline'],
-            const ['--version', '--machine'],
-          ],
-          reason: 'toolchain authority must bracket the only resolution',
-        );
+        expect(runner.flutterInvocations.map((entry) => entry.arguments), [
+          const ['--version', '--machine'],
+          const ['pub', 'get', '--offline'],
+          const ['--version', '--machine'],
+        ], reason: 'toolchain authority must bracket the only resolution');
         final clone = runner.gitInvocations.singleWhere(
           (entry) => entry.arguments.contains('clone'),
         );

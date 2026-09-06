@@ -1,4 +1,5 @@
 import 'package:flutter_pruner/src/adapters/l10n/action_readiness/immutable_bytes.dart';
+import 'package:flutter_pruner/src/adapters/l10n/l10n_mutation_selection.dart';
 import 'package:flutter_pruner/src/adapters/l10n/l10n_removal_batch.dart';
 import 'package:flutter_pruner/src/core/confidence/action_risk_scope.dart';
 import 'package:flutter_pruner/src/core/confidence/mutation_footprint.dart';
@@ -52,7 +53,9 @@ void main() {
         relativePath: 'lib/l10n/app_localizations_en.dart',
         originalBytes: ImmutableBytes.fromString('class AppLocalizationsEn {}'),
         originalHash: 'hash1',
-        candidateBytes: ImmutableBytes.fromString('class AppLocalizationsEn { /* updated */ }'),
+        candidateBytes: ImmutableBytes.fromString(
+          'class AppLocalizationsEn { /* updated */ }',
+        ),
         candidateHash: 'hash2',
         mode: 420,
       );
@@ -67,7 +70,9 @@ void main() {
         relativePath: 'lib/l10n/app_localizations_en.dart',
         originalBytes: null,
         originalHash: null,
-        candidateBytes: ImmutableBytes.fromString('class AppLocalizationsEn {}'),
+        candidateBytes: ImmutableBytes.fromString(
+          'class AppLocalizationsEn {}',
+        ),
         candidateHash: 'hash1',
         mode: 420,
       );
@@ -81,7 +86,9 @@ void main() {
         relativePath: 'lib/l10n/app_localizations_en.dart',
         originalBytes: null,
         originalHash: null,
-        candidateBytes: ImmutableBytes.fromString('class AppLocalizationsEn {}'),
+        candidateBytes: ImmutableBytes.fromString(
+          'class AppLocalizationsEn {}',
+        ),
         candidateHash: 'hash1',
         mode: 420,
       );
@@ -90,7 +97,9 @@ void main() {
         relativePath: 'lib/l10n/app_localizations_en.dart',
         originalBytes: null,
         originalHash: null,
-        candidateBytes: ImmutableBytes.fromString('class AppLocalizationsEn {}'),
+        candidateBytes: ImmutableBytes.fromString(
+          'class AppLocalizationsEn {}',
+        ),
         candidateHash: 'hash1',
         mode: 420,
       );
@@ -109,30 +118,57 @@ void main() {
       List<L10nGeneratedOutputMutation>? generatedOutputMutations,
       MutationFootprint? footprint,
     }) {
+      final effectiveFindingIds = findingIds ?? {'finding1'};
+      final effectiveKeys =
+          selectedKeys ??
+          (effectiveFindingIds.length == 1
+              ? {'key1'}
+              : {
+                  for (
+                    var index = 0;
+                    index < effectiveFindingIds.length;
+                    index++
+                  )
+                    'key${index + 1}',
+                });
+      final sortedFindingIds = effectiveFindingIds.toList()..sort();
+      final sortedKeys = effectiveKeys.toList()..sort();
+      final selection = L10nMutationSelection(
+        requestedFindingIds: effectiveFindingIds,
+        effectiveFindingIds: effectiveFindingIds,
+        findingIdToKey: {
+          for (var index = 0; index < sortedFindingIds.length; index++)
+            sortedFindingIds[index]: sortedKeys[index],
+        },
+      );
+
       return L10nRemovalBatch(
         familyId: familyId,
-        selectedKeys: selectedKeys ?? {'key1'},
-        findingIds: findingIds ?? {'finding1'},
-        arbMutations: arbMutations ?? [
-          L10nArbMutation(
-            relativePath: 'lib/l10n/app_en.arb',
-            originalBytes: ImmutableBytes.fromString('{"key1":"value1"}'),
-            originalHash: 'hash1',
-            candidateBytes: ImmutableBytes.fromString('{}'),
-            candidateHash: 'hash2',
-            mode: 420,
-          ),
-        ],
+        selection: selection,
+        arbMutations:
+            arbMutations ??
+            [
+              L10nArbMutation(
+                relativePath: 'lib/l10n/app_en.arb',
+                originalBytes: ImmutableBytes.fromString('{"key1":"value1"}'),
+                originalHash: 'hash1',
+                candidateBytes: ImmutableBytes.fromString('{}'),
+                candidateHash: 'hash2',
+                mode: 420,
+              ),
+            ],
         generatedOutputMutations: generatedOutputMutations ?? [],
         configurationFingerprint: 'config-fp',
         packageResolutionFingerprint: 'pkg-fp',
         toolchainFingerprint: 'toolchain-fp',
-        footprint: footprint ?? MutationFootprint(
-          findingIds: {'finding1'},
-          physicalPaths: {'lib/l10n/app_en.arb'},
-          riskScope: ActionRiskScope.boundedFamily,
-          familyId: familyId,
-        ),
+        footprint:
+            footprint ??
+            MutationFootprint(
+              findingIds: {'finding1'},
+              physicalPaths: {'lib/l10n/app_en.arb'},
+              riskScope: ActionRiskScope.boundedFamily,
+              familyId: familyId,
+            ),
       );
     }
 
@@ -156,11 +192,13 @@ void main() {
 
       expect(
         () => batch.validate(),
-        throwsA(isA<ArgumentError>().having(
-          (e) => e.message,
-          'message',
-          contains('At least one ARB mutation is required'),
-        )),
+        throwsA(
+          isA<ArgumentError>().having(
+            (e) => e.message,
+            'message',
+            contains('At least one ARB mutation is required'),
+          ),
+        ),
       );
     });
 
@@ -169,11 +207,13 @@ void main() {
 
       expect(
         () => batch.validate(),
-        throwsA(isA<ArgumentError>().having(
-          (e) => e.message,
-          'message',
-          contains('At least one finding ID is required'),
-        )),
+        throwsA(
+          isA<ArgumentError>().having(
+            (e) => e.message,
+            'message',
+            contains('At least one finding ID is required'),
+          ),
+        ),
       );
     });
 
@@ -188,11 +228,13 @@ void main() {
 
       expect(
         () => batch.validate(),
-        throwsA(isA<ArgumentError>().having(
-          (e) => e.message,
-          'message',
-          contains('Footprint must have boundedFamily risk scope'),
-        )),
+        throwsA(
+          isA<ArgumentError>().having(
+            (e) => e.message,
+            'message',
+            contains('Footprint must have boundedFamily risk scope'),
+          ),
+        ),
       );
     });
 
@@ -209,11 +251,13 @@ void main() {
 
       expect(
         () => batch.validate(),
-        throwsA(isA<ArgumentError>().having(
-          (e) => e.message,
-          'message',
-          contains('Footprint familyId must match batch familyId'),
-        )),
+        throwsA(
+          isA<ArgumentError>().having(
+            (e) => e.message,
+            'message',
+            contains('Footprint familyId must match batch familyId'),
+          ),
+        ),
       );
     });
 
@@ -239,11 +283,13 @@ void main() {
 
       expect(
         () => batch.validate(),
-        throwsA(isA<ArgumentError>().having(
-          (e) => e.message,
-          'message',
-          contains('Path must be relative to project root'),
-        )),
+        throwsA(
+          isA<ArgumentError>().having(
+            (e) => e.message,
+            'message',
+            contains('Path must be relative to project root'),
+          ),
+        ),
       );
     });
 
@@ -261,7 +307,10 @@ void main() {
         ],
         footprint: const MutationFootprint(
           findingIds: {'finding1'},
-          physicalPaths: {'lib/l10n/app_en.arb', '/absolute/path/app_localizations.dart'},
+          physicalPaths: {
+            'lib/l10n/app_en.arb',
+            '/absolute/path/app_localizations.dart',
+          },
           riskScope: ActionRiskScope.boundedFamily,
           familyId: 'family1',
         ),
@@ -269,11 +318,13 @@ void main() {
 
       expect(
         () => batch.validate(),
-        throwsA(isA<ArgumentError>().having(
-          (e) => e.message,
-          'message',
-          contains('Path must be relative to project root'),
-        )),
+        throwsA(
+          isA<ArgumentError>().having(
+            (e) => e.message,
+            'message',
+            contains('Path must be relative to project root'),
+          ),
+        ),
       );
     });
 
@@ -307,11 +358,13 @@ void main() {
 
       expect(
         () => batch.validate(),
-        throwsA(isA<ArgumentError>().having(
-          (e) => e.message,
-          'message',
-          contains('Duplicate path in ARB mutations'),
-        )),
+        throwsA(
+          isA<ArgumentError>().having(
+            (e) => e.message,
+            'message',
+            contains('Duplicate path in ARB mutations'),
+          ),
+        ),
       );
     });
 
@@ -347,11 +400,13 @@ void main() {
 
       expect(
         () => batch.validate(),
-        throwsA(isA<ArgumentError>().having(
-          (e) => e.message,
-          'message',
-          contains('Duplicate path across mutations'),
-        )),
+        throwsA(
+          isA<ArgumentError>().having(
+            (e) => e.message,
+            'message',
+            contains('Duplicate path across mutations'),
+          ),
+        ),
       );
     });
 
@@ -435,7 +490,10 @@ void main() {
         ],
         footprint: const MutationFootprint(
           findingIds: {'finding1'},
-          physicalPaths: {'lib/l10n/app_en.arb', 'lib/l10n/app_localizations.dart'},
+          physicalPaths: {
+            'lib/l10n/app_en.arb',
+            'lib/l10n/app_localizations.dart',
+          },
           riskScope: ActionRiskScope.boundedFamily,
           familyId: 'family1',
         ),
@@ -460,7 +518,10 @@ void main() {
         ],
         footprint: const MutationFootprint(
           findingIds: {'finding1'},
-          physicalPaths: {'lib/l10n/app_en.arb', 'lib/l10n/app_localizations.dart'},
+          physicalPaths: {
+            'lib/l10n/app_en.arb',
+            'lib/l10n/app_localizations.dart',
+          },
           riskScope: ActionRiskScope.boundedFamily,
           familyId: 'family1',
         ),

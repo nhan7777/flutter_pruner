@@ -1,27 +1,22 @@
-/// Classification of action risk boundary for confidence assessment.
+/// Action risk scope classification for removal actions.
 ///
-/// Distinguishes single-file operations, family-level bounded operations, and
-/// open-ended broad operations. Used to determine confidence levels and
-/// verification requirements.
+/// Splits the overloaded "scope" concept into explicit risk boundaries.
 enum ActionRiskScope {
-  /// Single file or declaration.
+  /// Single file/declaration, existing narrow actions.
   ///
-  /// Examples: removing one Dart declaration, deleting one asset file.
-  /// Existing narrow actions fall into this category.
+  /// Example: removing one unused function in one file.
   boundedSingle,
 
-  /// Family-level proven actions with bounded scope.
+  /// Family-level proven actions (l10n ARB family + generated outputs).
   ///
-  /// Examples: l10n ARB family (template + locales + generated outputs).
-  /// All mutations are proven deterministic and reversible at family boundary.
+  /// Example: removing l10n keys across ARB files and their generated Dart.
   boundedFamily,
 
-  /// Open-ended broad actions requiring manual intervention.
+  /// Open-ended broad actions (existing broadRemovalScope behavior).
   ///
-  /// Examples: existing broadRemovalScope behavior where impact analysis
-  /// cannot prove bounded scope. Requires explicit user acknowledgement.
+  /// Example: removing a widely-used base class affecting many files.
   openEnded;
 
-  /// Whether this scope represents a family-level action.
+  /// Whether this is a family-level scope.
   bool get isFamily => this == ActionRiskScope.boundedFamily;
 }

@@ -793,7 +793,8 @@ class QuarantineManager {
     }
 
     // Use empty SHA-256 and zero size for absent files
-    const emptySha256 = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
+    const emptySha256 =
+        'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
 
     final applyCase = QuarantineCase(
       caseId: caseId,

@@ -1,11 +1,11 @@
 import 'dart:io';
 
 import 'package:flutter_pruner/src/apply/removal_planner.dart';
-import 'package:flutter_pruner/src/core/confidence/promotion_index.dart';
 import 'package:flutter_pruner/src/core/confidence/action_risk_scope.dart';
 import 'package:flutter_pruner/src/core/confidence/confidence.dart';
 import 'package:flutter_pruner/src/core/confidence/finding.dart';
 import 'package:flutter_pruner/src/core/confidence/mutation_footprint.dart';
+import 'package:flutter_pruner/src/core/confidence/promotion_index.dart';
 import 'package:flutter_pruner/src/core/graph/build_condition.dart';
 import 'package:flutter_pruner/src/core/graph/edge.dart';
 import 'package:flutter_pruner/src/core/graph/evidence.dart';
@@ -60,14 +60,11 @@ void main() {
       );
 
       expect(plan.units, hasLength(1));
-      expect(
-        plan.units.single.findings.map((f) => f.node.id).toSet(),
-        {
-          'l10n:app:unused_key_1',
-          'l10n:app:unused_key_2',
-          'l10n:app:unused_key_3',
-        },
-      );
+      expect(plan.units.single.findings.map((f) => f.node.id).toSet(), {
+        'l10n:app:unused_key_1',
+        'l10n:app:unused_key_2',
+        'l10n:app:unused_key_3',
+      });
       expect(plan.blocked, isEmpty);
     });
 
@@ -111,15 +108,12 @@ void main() {
 
       // All 4 findings grouped into a single unit because they share same ARB file path
       expect(plan.units, hasLength(1));
-      expect(
-        plan.units.single.findings.map((f) => f.node.id).toSet(),
-        {
-          'l10n:app:key1',
-          'l10n:app:key2',
-          'l10n:settings:key1',
-          'l10n:settings:key2',
-        },
-      );
+      expect(plan.units.single.findings.map((f) => f.node.id).toSet(), {
+        'l10n:app:key1',
+        'l10n:app:key2',
+        'l10n:settings:key1',
+        'l10n:settings:key2',
+      });
     });
 
     test('family grouping coexists with path-based grouping', () {
@@ -173,10 +167,7 @@ void main() {
 
     test('ignores findings without readiness entries', () {
       final graph = ReachabilityGraph();
-      final findings = [
-        _l10nFinding('l10n:app:key1'),
-        _finding('dart:lib:a'),
-      ];
+      final findings = [_l10nFinding('l10n:app:key1'), _finding('dart:lib:a')];
       for (final finding in findings) {
         graph.addNode(finding.node);
       }
@@ -312,10 +303,6 @@ final _project = ProjectContext(
   pubspec: const {},
   packageName: 'test_app',
   targets: [
-    BuildTarget(
-      name: 'vm',
-      platform: 'vm',
-      entrypoint: 'lib/main.dart',
-    ),
+    BuildTarget(name: 'vm', platform: 'vm', entrypoint: 'lib/main.dart'),
   ],
 );

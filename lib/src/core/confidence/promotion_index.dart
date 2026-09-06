@@ -2,6 +2,7 @@ import 'package:meta/meta.dart';
 
 import '../graph/node.dart';
 import 'action_risk_scope.dart';
+import 'finding_generator.dart' show FindingGenerator;
 import 'mutation_footprint.dart';
 
 /// Deterministic inverse kind for action operations.
@@ -32,7 +33,8 @@ enum DeterministicInverseKind {
 /// Per-node action readiness metadata computed during static analysis.
 ///
 /// Captures family-level capability information that cannot be derived from
-/// a single [GraphNode] alone. Populated by [StaticActionReadinessResolver]
+/// a single [GraphNode] alone. Populated by the static action-readiness
+/// resolver
 /// after adapters finish but before finding generation.
 @immutable
 final class ActionReadinessEntry {
@@ -68,6 +70,7 @@ final class ActionReadinessEntry {
   /// false for application mode (closed world).
   final bool hasExternalConsumerExposure;
 
+  /// Creates readiness metadata for one graph node.
   const ActionReadinessEntry({
     required this.adapterId,
     required this.nodeKind,
@@ -95,18 +98,19 @@ final class ActionReadinessEntry {
 
   @override
   int get hashCode => Object.hash(
-        adapterId,
-        nodeKind,
-        familyId,
-        configurationFingerprint,
-        mutationFootprint,
-        inverseKind,
-        riskScope,
-        hasExternalConsumerExposure,
-      );
+    adapterId,
+    nodeKind,
+    familyId,
+    configurationFingerprint,
+    mutationFootprint,
+    inverseKind,
+    riskScope,
+    hasExternalConsumerExposure,
+  );
 
   @override
-  String toString() => 'ActionReadinessEntry('
+  String toString() =>
+      'ActionReadinessEntry('
       'adapter: $adapterId, '
       'kind: $nodeKind, '
       'family: $familyId, '
@@ -116,17 +120,19 @@ final class ActionReadinessEntry {
 
 /// Immutable index of action readiness entries keyed by canonical node ID.
 ///
-/// Returned by [StaticActionReadinessResolver] and consumed by
+/// Returned by the static action-readiness resolver and consumed by
 /// [FindingGenerator] to determine family-level action capabilities.
 @immutable
 final class ActionReadinessIndex {
   final Map<String, ActionReadinessEntry> _entries;
 
+  const ActionReadinessIndex._(this._entries);
+
   /// Creates an index from a map of node ID to readiness entry.
   ///
   /// The map is copied and made unmodifiable.
   ActionReadinessIndex(Map<String, ActionReadinessEntry> entries)
-      : _entries = Map.unmodifiable(entries);
+    : _entries = Map.unmodifiable(entries);
 
   /// Looks up the readiness entry for a node ID.
   ///
@@ -149,7 +155,7 @@ final class ActionReadinessIndex {
   bool get isNotEmpty => _entries.isNotEmpty;
 
   /// An empty action readiness index (no entries).
-  static final ActionReadinessIndex empty = ActionReadinessIndex(const {});
+  static const ActionReadinessIndex empty = ActionReadinessIndex._({});
 
   @override
   bool operator ==(Object other) =>
@@ -159,9 +165,8 @@ final class ActionReadinessIndex {
           _mapEquals(_entries, other._entries);
 
   @override
-  int get hashCode => Object.hashAll(_entries.entries.map(
-        (e) => Object.hash(e.key, e.value),
-      ));
+  int get hashCode =>
+      Object.hashAll(_entries.entries.map((e) => Object.hash(e.key, e.value)));
 
   @override
   String toString() => 'ActionReadinessIndex(entries: ${_entries.length})';

@@ -2,10 +2,9 @@
 ///
 /// Tests that shared views can be created, cached, and reused without
 /// requiring a full corpus or running the entire benchmark.
+library;
 
 import 'dart:async';
-
-import 'package:flutter_pruner/src/adapters/l10n/action_readiness/l10n_generation_config.dart';
 
 import 'l10n_mutation_readiness.dart';
 import 'src/shared_view_manager.dart';
@@ -26,7 +25,7 @@ class MockProjectView implements L10nReadinessProjectView {
 
   Future<String> scan() async {
     scanCount++;
-    await Future.delayed(Duration(milliseconds: 100));
+    await Future<void>.delayed(Duration(milliseconds: 100));
     return 'scan-result-$scanCount';
   }
 }
@@ -38,8 +37,12 @@ Future<void> main() async {
 
   Future<MockProjectView> provisionView(String projectId) async {
     provisionCount[projectId] = (provisionCount[projectId] ?? 0) + 1;
-    print('[Smoke Test] Provisioning view for $projectId (count: ${provisionCount[projectId]})');
-    await Future.delayed(Duration(milliseconds: 500)); // Simulate expensive load
+    print(
+      '[Smoke Test] Provisioning view for $projectId (count: ${provisionCount[projectId]})',
+    );
+    await Future<void>.delayed(
+      Duration(milliseconds: 500),
+    ); // Simulate expensive load
     return MockProjectView(projectId);
   }
 
@@ -61,8 +64,14 @@ Future<void> main() async {
   final entry2 = await manager.getSharedView('project2');
   final entry3 = await manager.getSharedView('project3');
 
-  assert(!identical(entry1a, entry2), 'Different projects have different entries');
-  assert(!identical(entry2, entry3), 'Different projects have different entries');
+  assert(
+    !identical(entry1a, entry2),
+    'Different projects have different entries',
+  );
+  assert(
+    !identical(entry2, entry3),
+    'Different projects have different entries',
+  );
   assert(provisionCount['project2'] == 1, 'project2 provisioned once');
   assert(provisionCount['project3'] == 1, 'project3 provisioned once');
   print('[Test 2] ✓ PASS - Projects isolated');
@@ -70,14 +79,17 @@ Future<void> main() async {
   // Test 3: Concurrent access deduplication
   print('\n[Test 3] Concurrent access deduplication');
   provisionCount['project4'] = 0;
-  final futures = List.generate(
-    5,
-    (_) => manager.getSharedView('project4'),
-  );
+  final futures = List.generate(5, (_) => manager.getSharedView('project4'));
   final results = await Future.wait(futures);
 
-  assert(results.every((e) => identical(e, results.first)), 'All should get same entry');
-  assert(provisionCount['project4'] == 1, 'Should provision only once despite 5 parallel requests');
+  assert(
+    results.every((e) => identical(e, results.first)),
+    'All should get same entry',
+  );
+  assert(
+    provisionCount['project4'] == 1,
+    'Should provision only once despite 5 parallel requests',
+  );
   print('[Test 3] ✓ PASS - Concurrent deduplication works');
 
   // Test 4: Scan lock serialization

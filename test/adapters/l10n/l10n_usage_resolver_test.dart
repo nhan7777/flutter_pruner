@@ -244,9 +244,8 @@ void main() {
       () async {
         final root = await _resolverFixture();
         addTearDown(() => root.delete(recursive: true));
-        await File(
-          p.join(root.path, 'lib/non_l10n_write.dart'),
-        ).writeAsString('''
+        await File(p.join(root.path, 'lib/non_l10n_write.dart')).writeAsString(
+          '''
 class Product {
   String? welcome;
 }
@@ -257,7 +256,8 @@ Product qualifiedWrite(Product product) {
 }
 
 Product cascadeWrite() => Product()..welcome = 'cascade';
-''');
+''',
+        );
         final project = await ProjectContext.load(root);
         final config = (L10nConfig.load(project) as L10nConfigValid).config;
         final resolver = L10nUsageResolver(
@@ -272,8 +272,7 @@ Product cascadeWrite() => Product()..welcome = 'cascade';
 
         expect(
           resolver.references.where(
-            (reference) =>
-                reference.location.contains('non_l10n_write.dart'),
+            (reference) => reference.location.contains('non_l10n_write.dart'),
           ),
           isEmpty,
         );
