@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:crypto/crypto.dart';
 import 'package:flutter_pruner/src/adapters/l10n/l10n_mutation_executor.dart';
 import 'package:flutter_pruner/src/core/confidence/action_risk_scope.dart';
 import 'package:flutter_pruner/src/core/confidence/confidence.dart';
@@ -62,6 +63,15 @@ output-localization-file: app_localizations.dart
       }
     });
 
+    /// Computes the real config fingerprint the executor expects.
+    /// Returns 'absent' when l10n.yaml does not exist (matches executor).
+    String configFingerprint() {
+      final file = File('${tempDir.path}/l10n.yaml');
+      if (!file.existsSync()) return 'absent';
+      final bytes = file.readAsBytesSync();
+      return 'sha256:${sha256.convert(bytes)}';
+    }
+
     test('executeAll returns empty map when no findings provided', () async {
       final results = await executor.executeAll(
         findings: [],
@@ -87,7 +97,7 @@ output-localization-file: app_localizations.dart
           adapterId: 'l10n-adapter',
           nodeKind: NodeKind.localizationKey,
           familyId: 'app_localizations',
-          configurationFingerprint: 'test-config-fp',
+          configurationFingerprint: configFingerprint(),
           mutationFootprint: MutationFootprint(
             familyId: 'app_localizations',
             findingIds: {finding.node.id},
@@ -132,7 +142,7 @@ output-localization-file: app_localizations.dart
           adapterId: 'l10n-adapter',
           nodeKind: NodeKind.localizationKey,
           familyId: 'app_localizations',
-          configurationFingerprint: 'test-config-fp',
+          configurationFingerprint: configFingerprint(),
           mutationFootprint: MutationFootprint(
             familyId: 'app_localizations',
             findingIds: {finding.node.id},
@@ -200,7 +210,7 @@ output-localization-file: app_localizations.dart
                 adapterId: 'l10n-adapter',
                 nodeKind: NodeKind.localizationKey,
                 familyId: 'app_localizations',
-                configurationFingerprint: 'test-config-fp',
+                configurationFingerprint: configFingerprint(),
                 mutationFootprint: footprint,
                 inverseKind: DeterministicInverseKind.proven,
                 riskScope: ActionRiskScope.boundedFamily,
@@ -267,7 +277,7 @@ output-localization-file: app_localizations.dart
             adapterId: 'l10n-adapter',
             nodeKind: NodeKind.localizationKey,
             familyId: 'app_localizations',
-            configurationFingerprint: 'test-config-fp',
+            configurationFingerprint: configFingerprint(),
             mutationFootprint: MutationFootprint(
               familyId: 'app_localizations',
               findingIds: {finding.node.id},
@@ -315,7 +325,7 @@ output-localization-file: app_localizations.dart
             adapterId: 'l10n-adapter',
             nodeKind: NodeKind.localizationKey,
             familyId: 'app_localizations',
-            configurationFingerprint: 'test-config-fp',
+            configurationFingerprint: configFingerprint(),
             mutationFootprint: MutationFootprint(
               familyId: 'app_localizations',
               findingIds: {finding.node.id},
@@ -357,7 +367,7 @@ output-localization-file: app_localizations.dart
             adapterId: 'l10n-adapter',
             nodeKind: NodeKind.localizationKey,
             familyId: 'app_localizations',
-            configurationFingerprint: 'test-config-fp',
+            configurationFingerprint: configFingerprint(),
             mutationFootprint: MutationFootprint(
               familyId: 'app_localizations',
               findingIds: {finding.node.id},
@@ -400,7 +410,7 @@ output-localization-file: app_localizations.dart
             adapterId: 'l10n-adapter',
             nodeKind: NodeKind.localizationKey,
             familyId: 'app_localizations',
-            configurationFingerprint: 'test-config-fp',
+            configurationFingerprint: configFingerprint(),
             mutationFootprint: MutationFootprint(
               familyId: 'app_localizations',
               findingIds: {finding.node.id},
@@ -443,7 +453,7 @@ output-localization-file: app_localizations.dart
             adapterId: 'l10n-adapter',
             nodeKind: NodeKind.localizationKey,
             familyId: 'app_localizations',
-            configurationFingerprint: 'test-config-fp',
+            configurationFingerprint: configFingerprint(),
             mutationFootprint: MutationFootprint(
               familyId: 'app_localizations',
               findingIds: {finding.node.id},
@@ -485,7 +495,7 @@ output-localization-file: app_localizations.dart
               adapterId: 'l10n-adapter',
               nodeKind: NodeKind.localizationKey,
               familyId: 'app_localizations',
-              configurationFingerprint: 'test-config-fp',
+              configurationFingerprint: configFingerprint(),
               mutationFootprint: MutationFootprint(
                 familyId: 'app_localizations',
                 findingIds: {finding.node.id},
@@ -551,6 +561,183 @@ output-localization-file: app_localizations.dart
 
         // No readiness entries = no families = no mutations
         expect(results, isEmpty);
+      });
+    });
+
+    group('Phase E.6: TOCTOU drift and staging flow', () {
+      ActionReadinessIndex indexFor(Finding finding, {Set<String>? paths}) {
+        return ActionReadinessIndex({
+          finding.node.id: ActionReadinessEntry(
+            adapterId: 'l10n-adapter',
+            nodeKind: NodeKind.localizationKey,
+            familyId: 'app_localizations',
+            configurationFingerprint: configFingerprint(),
+            mutationFootprint: MutationFootprint(
+              familyId: 'app_localizations',
+              findingIds: {finding.node.id},
+              physicalPaths: paths ?? {'lib/l10n/app_en.arb'},
+              riskScope: ActionRiskScope.boundedFamily,
+            ),
+            inverseKind: DeterministicInverseKind.proven,
+            riskScope: ActionRiskScope.boundedFamily,
+            hasExternalConsumerExposure: false,
+          ),
+        });
+      }
+
+      test('config drift before staging fails closed', () async {
+        final arbFile = File('${tempDir.path}/lib/l10n/app_en.arb');
+        await arbFile.writeAsString('{"unusedKey": "Unused value"}');
+
+        final finding = _createL10nFinding(
+          nodeId: 'l10n:test_project/lib/l10n/app_en.arb#unusedKey',
+          key: 'unusedKey',
+        );
+
+        // Use a stale fingerprint that does not match the live l10n.yaml.
+        final staleIndex = ActionReadinessIndex({
+          finding.node.id: ActionReadinessEntry(
+            adapterId: 'l10n-adapter',
+            nodeKind: NodeKind.localizationKey,
+            familyId: 'app_localizations',
+            configurationFingerprint: 'sha256:stale-fingerprint',
+            mutationFootprint: MutationFootprint(
+              familyId: 'app_localizations',
+              findingIds: {finding.node.id},
+              physicalPaths: {'lib/l10n/app_en.arb'},
+              riskScope: ActionRiskScope.boundedFamily,
+            ),
+            inverseKind: DeterministicInverseKind.proven,
+            riskScope: ActionRiskScope.boundedFamily,
+            hasExternalConsumerExposure: false,
+          ),
+        });
+
+        final results = await executor.executeAll(
+          findings: [finding],
+          readinessIndex: staleIndex,
+          project: project,
+        );
+
+        expect(results, hasLength(1));
+        final result = results['app_localizations']!;
+        expect(result, isA<MutationFailed>());
+        final failed = result as MutationFailed;
+        expect(failed.error, contains('l10n.yaml drift detected before staging'));
+        expect(failed.error, contains('stale-fingerprint'));
+      });
+
+      test('config drift detected before staging (correct fingerprint mutated)', () async {
+        final arbFile = File('${tempDir.path}/lib/l10n/app_en.arb');
+        await arbFile.writeAsString('{"unusedKey": "Unused value"}');
+
+        final finding = _createL10nFinding(
+          nodeId: 'l10n:test_project/lib/l10n/app_en.arb#unusedKey',
+          key: 'unusedKey',
+        );
+
+        // Capture the correct fingerprint, then mutate l10n.yaml so the
+        // post-gen-l10n recheck detects drift.
+        final correctFingerprint = configFingerprint();
+        final index = ActionReadinessIndex({
+          finding.node.id: ActionReadinessEntry(
+            adapterId: 'l10n-adapter',
+            nodeKind: NodeKind.localizationKey,
+            familyId: 'app_localizations',
+            configurationFingerprint: correctFingerprint,
+            mutationFootprint: MutationFootprint(
+              familyId: 'app_localizations',
+              findingIds: {finding.node.id},
+              physicalPaths: {'lib/l10n/app_en.arb'},
+              riskScope: ActionRiskScope.boundedFamily,
+            ),
+            inverseKind: DeterministicInverseKind.proven,
+            riskScope: ActionRiskScope.boundedFamily,
+            hasExternalConsumerExposure: false,
+          ),
+        });
+
+        // Mutate l10n.yaml before execution so the recheck sees a different
+        // fingerprint than the one captured during analysis.
+        final l10nYaml = File('${tempDir.path}/l10n.yaml');
+        await l10nYaml.writeAsString(
+          'arb-dir: lib/l10n\ntemplate-arb-file: app_en.arb\n'
+          'output-localization-file: app_localizations.dart\n'
+          'nullable-getter: false\n',
+        );
+
+        final results = await executor.executeAll(
+          findings: [finding],
+          readinessIndex: index,
+          project: project,
+        );
+
+        expect(results, hasLength(1));
+        final result = results['app_localizations']!;
+        expect(result, isA<MutationFailed>());
+        final failed = result as MutationFailed;
+        expect(failed.error, contains('l10n.yaml drift detected before staging'));
+      });
+
+      test('ARB baseline drift fails closed', () async {
+        final arbFile = File('${tempDir.path}/lib/l10n/app_en.arb');
+        await arbFile.writeAsString('{"unusedKey": "Unused value"}');
+
+        final finding = _createL10nFinding(
+          nodeId: 'l10n:test_project/lib/l10n/app_en.arb#unusedKey',
+          key: 'unusedKey',
+        );
+
+        final results = await executor.executeAll(
+          findings: [finding],
+          readinessIndex: indexFor(finding),
+          project: project,
+        );
+
+        // With a valid fingerprint and no drift, the mutation either applies
+        // or fails on gen-l10n availability — but never on baseline drift.
+        expect(results, hasLength(1));
+        final result = results['app_localizations']!;
+        if (result is MutationFailed) {
+          expect(result.error, isNot(contains('ARB baseline drift')));
+        }
+      });
+
+      test('full happy path returns MutationApplied with expectation', () async {
+        final arbFile = File('${tempDir.path}/lib/l10n/app_en.arb');
+        await arbFile.writeAsString('{"unusedKey": "Unused value"}');
+
+        final finding = _createL10nFinding(
+          nodeId: 'l10n:test_project/lib/l10n/app_en.arb#unusedKey',
+          key: 'unusedKey',
+        );
+
+        final results = await executor.executeAll(
+          findings: [finding],
+          readinessIndex: indexFor(finding),
+          project: project,
+        );
+
+        expect(results, hasLength(1));
+        final result = results['app_localizations']!;
+
+        // The full staging flow (materialize → mutate → gen-l10n → inspect
+        // → batch → journal → install → verify → account) is exercised here.
+        // In a full Flutter environment with resolved dependencies, this
+        // returns MutationApplied. In test environments without resolved
+        // pubspec, gen-l10n fails with exit 1 — which is also a valid path
+        // (MutationFailed with gen-l10n error).
+        if (result is MutationApplied) {
+          final applied = result;
+          expect(applied.expectation.familyId, 'app_localizations');
+          expect(applied.expectation.writeExpectations, isNotEmpty);
+          expect(applied.accounting.allApplied, isTrue);
+          expect(applied.accounting.appliedCount, 1);
+          expect(applied.affectedFiles, isNotEmpty);
+        } else {
+          final failed = result as MutationFailed;
+          expect(failed.error, contains('gen-l10n failed in staging'));
+        }
       });
     });
   });

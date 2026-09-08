@@ -164,10 +164,11 @@ class L10nStagingManager {
     final candidates = <GeneratedFileCandidate>[];
     final unexpectedFiles = <String>[];
 
-    // Expected generated files are relative to the staging root.
-    final expectedPaths = <String>{
-      project.relative(config.generatedLibraryPath),
-    };
+    // Expected generated files: the primary library plus per-locale files.
+    // gen-l10n creates <outputLocalizationFile>.dart and
+    // <outputLocalizationFile>_<locale>.dart for each locale.
+    final outputBaseName = p.basename(config.outputLocalizationFile);
+    final expectedPrefix = p.basenameWithoutExtension(outputBaseName);
 
     // Inspect output directory relative to the staging root.
     final outputDir = Directory(
@@ -201,8 +202,11 @@ class L10nStagingManager {
         ),
       );
 
-      // Check if expected
-      if (!expectedPaths.contains(relativePath)) {
+      // Check if expected: basename must start with the expected prefix
+      // (e.g. app_localizations from app_localizations.dart matches
+      // app_localizations.dart, app_localizations_en.dart, etc.)
+      final basename = p.basename(relativePath);
+      if (!basename.startsWith(expectedPrefix)) {
         unexpectedFiles.add(relativePath);
       }
     }
