@@ -91,13 +91,13 @@ void main() {
       final arbBaselineHashes = <String, String>{};
       final arbDir = Directory(config.arbDir);
       if (arbDir.existsSync()) {
-        for (final file in arbDir
-            .listSync()
-            .whereType<File>()
-            .where((f) => p.extension(f.path) == '.arb')) {
+        for (final file in arbDir.listSync().whereType<File>().where(
+          (f) => p.extension(f.path) == '.arb',
+        )) {
           final relPath = project.relative(file.path);
-          arbBaselineHashes[relPath] =
-              sha256.convert(file.readAsBytesSync()).toString();
+          arbBaselineHashes[relPath] = sha256
+              .convert(file.readAsBytesSync())
+              .toString();
         }
       }
 
@@ -116,6 +116,8 @@ void main() {
         project: project,
         config: config,
         configFingerprint: entry.configurationFingerprint,
+        packageResolutionFingerprint: 'sha256:test-package-resolution',
+        toolchainFingerprint: 'sha256:test-toolchain',
         footprint: entry.mutationFootprint,
         arbBaselineHashes: arbBaselineHashes,
         inspection: inspection,
@@ -185,6 +187,8 @@ void main() {
           project: project,
           config: (L10nConfig.load(project) as L10nConfigValid).config,
           configFingerprint: 'test',
+          packageResolutionFingerprint: 'sha256:test-package-resolution',
+          toolchainFingerprint: 'sha256:test-toolchain',
           footprint: const MutationFootprint(
             findingIds: {'test'},
             physicalPaths: {'lib/l10n/app_en.arb'},
@@ -247,6 +251,8 @@ void main() {
           project: project,
           config: config,
           configFingerprint: entry.configurationFingerprint,
+          packageResolutionFingerprint: 'sha256:test-package-resolution',
+          toolchainFingerprint: 'sha256:test-toolchain',
           footprint: entry.mutationFootprint,
           arbBaselineHashes: const {},
           inspection: const StagingInspectionResult(
@@ -307,6 +313,8 @@ void main() {
           project: project,
           config: config,
           configFingerprint: entry.configurationFingerprint,
+          packageResolutionFingerprint: 'sha256:test-package-resolution',
+          toolchainFingerprint: 'sha256:test-toolchain',
           footprint: entry.mutationFootprint,
           arbBaselineHashes: const {},
           inspection: const StagingInspectionResult(

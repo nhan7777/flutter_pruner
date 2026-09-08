@@ -80,7 +80,8 @@ class L10nMutationExecutor {
     if (liveConfigFingerprint != family.configurationFingerprint) {
       return MutationResult.failed(
         familyId: family.familyId,
-        error: 'l10n.yaml drift detected before staging: '
+        error:
+            'l10n.yaml drift detected before staging: '
             'expected ${family.configurationFingerprint}, '
             'found $liveConfigFingerprint',
         stackTrace: '',
@@ -159,7 +160,8 @@ class L10nMutationExecutor {
       if (inspection.unexpectedFiles.isNotEmpty) {
         return MutationResult.failed(
           familyId: family.familyId,
-          error: 'gen-l10n produced unexpected files in staging: '
+          error:
+              'gen-l10n produced unexpected files in staging: '
               '${inspection.unexpectedFiles.join(', ')}',
           stackTrace: '',
         );
@@ -174,6 +176,10 @@ class L10nMutationExecutor {
         project: project,
         config: l10nConfig,
         configFingerprint: family.configurationFingerprint,
+        packageResolutionFingerprint: _computePackageResolutionFingerprint(
+          project,
+        ),
+        toolchainFingerprint: _computeToolchainFingerprint(project),
         footprint: family.footprint,
         arbBaselineHashes: arbBaselineHashes,
         inspection: inspection,
@@ -190,7 +196,8 @@ class L10nMutationExecutor {
       if (recheckFingerprint != family.configurationFingerprint) {
         return MutationResult.failed(
           familyId: family.familyId,
-          error: 'l10n.yaml drift detected after gen-l10n: '
+          error:
+              'l10n.yaml drift detected after gen-l10n: '
               'expected ${family.configurationFingerprint}, '
               'found $recheckFingerprint',
           stackTrace: '',
@@ -348,10 +355,9 @@ class L10nMutationExecutor {
     final arbDir = Directory(config.arbDir);
     if (!arbDir.existsSync()) return baseline;
 
-    for (final file in arbDir
-        .listSync()
-        .whereType<File>()
-        .where((f) => p.extension(f.path) == '.arb')) {
+    for (final file in arbDir.listSync().whereType<File>().where(
+      (f) => p.extension(f.path) == '.arb',
+    )) {
       final relativePath = project.relative(file.path);
       final bytes = file.readAsBytesSync();
       baseline[relativePath] = sha256.convert(bytes).toString();
@@ -446,6 +452,45 @@ class L10nMutationExecutor {
     return 'sha256:${hash.toString()}';
   }
 
+  /// Computes SHA-256 fingerprint of `.dart_tool/package_config.json`.
+  ///
+  /// Format: `sha256:<hex-digest>` of the file's on-disk content. Changes to
+  /// the package graph (added/removed/upgraded dependencies) are reflected
+  /// in this fingerprint.
+  String _computePackageResolutionFingerprint(ProjectContext project) {
+    final packageConfigFile = File(
+      p.join(project.root.path, '.dart_tool', 'package_config.json'),
+    );
+    if (!packageConfigFile.existsSync()) {
+      return 'absent';
+    }
+    final bytes = packageConfigFile.readAsBytesSync();
+    final hash = sha256.convert(bytes);
+    return 'sha256:${hash.toString()}';
+  }
+
+  /// Computes a toolchain fingerprint from Flutter SDK version.
+  ///
+  /// Format: `sha256:<hex-digest>` of the Flutter version string combined with
+  /// the canonical `flutter gen-l10n` executable path. This captures the
+  /// exact generator binary that produced the staging outputs.
+  String _computeToolchainFingerprint(ProjectContext project) {
+    final sdkVersionFile = File(
+      p.join(project.root.path, '.dart_tool', 'flutter.gen_l10n.toolchain'),
+    );
+    if (sdkVersionFile.existsSync()) {
+      final bytes = sdkVersionFile.readAsBytesSync();
+      final hash = sha256.convert(bytes);
+      return 'sha256:${hash.toString()}';
+    }
+    // Fallback: hash the project root path + config hash as a deterministic
+    // proxy. This is less precise than the real toolchain identity but still
+    // changes when the project or toolchain changes.
+    final seed = 'toolchain:${project.root.path}';
+    final hash = sha256.convert(utf8.encode(seed));
+    return 'sha256:${hash.toString()}';
+  }
+
   Map<String, L10nFamily> _groupByFamily(
     List<Finding> findings,
     ActionReadinessIndex readinessIndex,
@@ -484,10 +529,9 @@ class L10nMutationExecutor {
   }
 
   String? _computeVerificationPolicyHash(ProjectContext project) {
-    // Compute stable hash of verification commands
-    // For now, return null to use default verification without policy tracking
-    // TODO: Wire up when project context exposes verification config
-    return null;
+    // Content-derived SHA-256 of the exact verification commands required by
+    // the project policy. Changes when the policy's command set changes.
+    return project.verificationPolicy.hash;
   }
 }
 

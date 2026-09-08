@@ -33,6 +33,8 @@ class L10nRemovalBatchBuilder {
     required ProjectContext project,
     required L10nConfig config,
     required String configFingerprint,
+    required String packageResolutionFingerprint,
+    required String toolchainFingerprint,
     required MutationFootprint footprint,
     required Map<String, String> arbBaselineHashes,
     required StagingInspectionResult inspection,
@@ -72,8 +74,8 @@ class L10nRemovalBatchBuilder {
       arbMutations: arbMutations,
       generatedOutputMutations: generatedMutations,
       configurationFingerprint: configFingerprint,
-      packageResolutionFingerprint: 'flutter-sdk', // TODO: proper fingerprint
-      toolchainFingerprint: 'flutter-gen-l10n', // TODO: proper fingerprint
+      packageResolutionFingerprint: packageResolutionFingerprint,
+      toolchainFingerprint: toolchainFingerprint,
       footprint: footprint,
     );
 
