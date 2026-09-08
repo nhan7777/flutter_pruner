@@ -4787,6 +4787,18 @@ class QuarantineManager {
         timeout: const Duration(seconds: 10),
         maxOutputBytesPerStream: 64 * 1024,
       );
+    } on ProcessCancellationBeforeLaunchException catch (error) {
+      final state = await _describeAtomicPublishState(prepared, target);
+      throw _AtomicPublishException(
+        'Atomic link process was cancelled before launch by '
+        '${error.originalSignal}. $state',
+      );
+    } on ProcessCancellationConfirmedException catch (error) {
+      final state = await _describeAtomicPublishState(prepared, target);
+      throw _AtomicPublishException(
+        'Atomic link process cancellation was confirmed for root PID '
+        '${error.rootPid} after ${error.originalSignal}. $state',
+      );
     } on ProcessTerminationUnconfirmedException catch (error) {
       final state = await _describeAtomicPublishState(prepared, target);
       throw _AtomicPublishException(
