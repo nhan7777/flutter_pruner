@@ -73,7 +73,22 @@ class L10nMutationExecutor {
       );
     }
     final l10nConfig = configResult.config;
-    final configFingerprint = _computeConfigFingerprint(l10nConfig);
+
+    // Step 0: Compute config fingerprint from raw file bytes (TOCTOU pre-flight)
+    // Must match format from readiness resolver: sha256:<hex-digest>
+    final liveConfigFingerprint = _computeConfigFingerprint(project);
+    if (liveConfigFingerprint != family.configurationFingerprint) {
+      return MutationResult.failed(
+        familyId: family.familyId,
+        error: 'l10n.yaml drift detected before staging: '
+            'expected ${family.configurationFingerprint}, '
+            'found $liveConfigFingerprint',
+        stackTrace: '',
+      );
+    }
+
+    // Step 0b: Capture ARB baseline hashes before any mutation
+    final arbBaselineHashes = _captureArbBaseline(project, l10nConfig);
 
     // Step 1: Build selection from family
     final selection = L10nMutationSelection(
@@ -132,7 +147,25 @@ class L10nMutationExecutor {
         );
       }
 
-      // Step 7: Build batch from staging evidence
+      // Step 7: Inspect staging for generated files (also used to enforce
+      // unexpectedFiles and to avoid duplicate inspection in batch builder)
+      final inspection = await stagingManager.inspect(
+        staging: staging,
+        project: project,
+        config: l10nConfig,
+      );
+
+      // Fail-closed: gen-l10n must not produce unexpected files
+      if (inspection.unexpectedFiles.isNotEmpty) {
+        return MutationResult.failed(
+          familyId: family.familyId,
+          error: 'gen-l10n produced unexpected files in staging: '
+              '${inspection.unexpectedFiles.join(', ')}',
+          stackTrace: '',
+        );
+      }
+
+      // Step 8: Build batch from staging evidence (pass baseline + inspection)
       final batchBuilder = const L10nRemovalBatchBuilder();
       final batch = await batchBuilder.build(
         familyId: family.familyId,
@@ -140,16 +173,39 @@ class L10nMutationExecutor {
         staging: staging,
         project: project,
         config: l10nConfig,
-        configFingerprint: configFingerprint,
+        configFingerprint: family.configurationFingerprint,
         footprint: family.footprint,
+        arbBaselineHashes: arbBaselineHashes,
+        inspection: inspection,
       );
 
-      // Step 8: Build journal entries and expectation
+      // Step 9: Build journal entries and expectation
       final journalBuilder = const L10nBatchJournalBuilder();
       final entries = journalBuilder.buildQuarantineEntries(batch);
       final expectation = journalBuilder.buildExpectation(batch);
 
-      // Step 9: Create actual quarantine with journaled entries
+      // Step 10: TOCTOU re-validation — re-read config fingerprint and verify
+      // ARB baseline hashes haven't drifted since Step 0b.
+      final recheckFingerprint = _computeConfigFingerprint(project);
+      if (recheckFingerprint != family.configurationFingerprint) {
+        return MutationResult.failed(
+          familyId: family.familyId,
+          error: 'l10n.yaml drift detected after gen-l10n: '
+              'expected ${family.configurationFingerprint}, '
+              'found $recheckFingerprint',
+          stackTrace: '',
+        );
+      }
+
+      // Re-verify ARB baseline hashes against captured snapshot
+      _validateArbBaseline(
+        project: project,
+        config: l10nConfig,
+        baselineHashes: arbBaselineHashes,
+        familyId: family.familyId,
+      );
+
+      // Step 11: Create actual quarantine with journaled entries
       final quarantineDir = await quarantine.createCaseQuarantine(
         runId:
             'l10n-${family.familyId}-${DateTime.now().millisecondsSinceEpoch}',
@@ -160,7 +216,7 @@ class L10nMutationExecutor {
       // Manually write entries to quarantine manifest
       await _writeQuarantineEntries(quarantineDir, entries);
 
-      // Step 10: Begin transaction
+      // Step 12: Begin transaction
       final transaction = await quarantine.beginTransaction(
         quarantineDir: quarantineDir,
         transactionId: family.familyId,
@@ -170,14 +226,14 @@ class L10nMutationExecutor {
         caseIds: family.caseIds,
       );
 
-      // Step 11: Install candidate bytes from staging
+      // Step 13: Install candidate bytes from staging
       final installer = L10nBatchInstaller();
       final writtenPaths = await installer.install(
         batch: batch,
         project: project,
       );
 
-      // Step 12: Record all cases as applied
+      // Step 14: Record all cases as applied
       for (final caseId in family.caseIds) {
         await quarantine.recordCaseApplied(
           quarantineDir: quarantineDir,
@@ -185,14 +241,21 @@ class L10nMutationExecutor {
         );
       }
 
-      // Step 13: Verify installed bytes match expectations
+      // Step 15: Mark transaction as applied
+      await quarantine.recordTransactionApplied(
+        quarantineDir: quarantineDir,
+        transactionId: family.familyId,
+        caseIds: family.caseIds,
+      );
+
+      // Step 16: Verify installed bytes match expectations
       final verifier = L10nBatchVerifier();
       final verifyResult = await verifier.verify(
         expectation: expectation,
         project: project,
       );
 
-      // Step 14: Account per-finding outcomes
+      // Step 17: Account per-finding outcomes
       final accountant = const L10nOutcomeAccountant();
       final accounting = accountant.account(
         familyId: family.familyId,
@@ -201,9 +264,22 @@ class L10nMutationExecutor {
         verificationResult: verifyResult,
       );
 
-      // Step 15: Handle verification result
+      // Step 18: Handle verification result and complete transaction lifecycle
       if (verifyResult is VerificationSuccess) {
-        // Success: commit transaction
+        // Complete transaction lifecycle: verify → commit
+        final verificationStepIds = ['install', 'verify'];
+        await quarantine.verifyTransaction(
+          quarantineDir: quarantineDir,
+          transactionId: family.familyId,
+          policyHash: family.verificationPolicyHash ?? '',
+          requiredStepIds: verificationStepIds,
+          observedStepIds: verificationStepIds,
+        );
+        await quarantine.commitTransaction(
+          quarantineDir: quarantineDir,
+          transactionId: family.familyId,
+        );
+
         return MutationResult.applied(
           familyId: family.familyId,
           transactionId: transaction.transactionId,
@@ -213,16 +289,23 @@ class L10nMutationExecutor {
           accounting: accounting,
         );
       } else {
-        // Failure: rollback atomically
+        // Failure: rollback atomically and mark transaction recovery-required
         final failed = verifyResult as VerificationFailed;
+        final reason =
+            'Verification failed: ${failed.mismatches.length} mismatches';
         await quarantine.rollbackCasesAtomically(
           quarantineDir: quarantineDir,
           caseIds: family.caseIds,
-          reason: 'Verification failed: ${failed.mismatches.length} mismatches',
+          reason: reason,
+        );
+        await quarantine.requireTransactionRecovery(
+          quarantineDir: quarantineDir,
+          transactionId: family.familyId,
+          reason: reason,
         );
         return MutationResult.failed(
           familyId: family.familyId,
-          error: 'Verification failed: ${failed.mismatches.length} mismatches',
+          error: reason,
           stackTrace: '',
           accounting: accounting,
         );
@@ -249,6 +332,68 @@ class L10nMutationExecutor {
       // Always cleanup staging
       await stagingManager.cleanupStaging(staging);
       await stagingManager.cleanupStaging(tempQuarantine);
+    }
+  }
+
+  /// Captures SHA-256 hashes of all ARB files in the live project.
+  ///
+  /// Called before any staging work begins so the batch builder can compare
+  /// against a pre-mutation snapshot instead of reading the live project
+  /// after gen-l10n has already run (baseline timing fix).
+  Map<String, String> _captureArbBaseline(
+    ProjectContext project,
+    L10nConfig config,
+  ) {
+    final baseline = <String, String>{};
+    final arbDir = Directory(config.arbDir);
+    if (!arbDir.existsSync()) return baseline;
+
+    for (final file in arbDir
+        .listSync()
+        .whereType<File>()
+        .where((f) => p.extension(f.path) == '.arb')) {
+      final relativePath = project.relative(file.path);
+      final bytes = file.readAsBytesSync();
+      baseline[relativePath] = sha256.convert(bytes).toString();
+    }
+    return baseline;
+  }
+
+  /// Verifies that live ARB files still match the captured baseline.
+  ///
+  /// Throws [StateError] on drift — this is the TOCTOU guard between
+  /// preflight and installation.
+  void _validateArbBaseline({
+    required ProjectContext project,
+    required L10nConfig config,
+    required Map<String, String> baselineHashes,
+    required String familyId,
+  }) {
+    final current = _captureArbBaseline(project, config);
+
+    // Any file in the baseline that changed or disappeared is drift.
+    for (final entry in baselineHashes.entries) {
+      final currentHash = current[entry.key];
+      if (currentHash == null) {
+        throw StateError(
+          'ARB baseline drift for $familyId: ${entry.key} disappeared',
+        );
+      }
+      if (currentHash != entry.value) {
+        throw StateError(
+          'ARB baseline drift for $familyId: ${entry.key} changed '
+          '(expected ${entry.value}, found $currentHash)',
+        );
+      }
+    }
+
+    // Any new ARB file appearing after preflight is also drift.
+    for (final path in current.keys) {
+      if (!baselineHashes.containsKey(path)) {
+        throw StateError(
+          'ARB baseline drift for $familyId: new file appeared: $path',
+        );
+      }
     }
   }
 
@@ -283,15 +428,22 @@ class L10nMutationExecutor {
     );
   }
 
-  String _computeConfigFingerprint(L10nConfig config) {
-    // Compute stable hash of l10n configuration
-    final buffer = StringBuffer()
-      ..write(config.arbDir)
-      ..write(config.templateArbFile)
-      ..write(config.outputLocalizationFile)
-      ..write(config.outputClass)
-      ..write(config.nullableGetter ? 'nullable' : 'nonnullable');
-    return _computeSha256(utf8.encode(buffer.toString()));
+  /// Computes SHA-256 fingerprint of the raw `l10n.yaml` file bytes.
+  ///
+  /// Matches the format produced by the static readiness resolver:
+  /// `sha256:<hex-digest>` of the file's on-disk content. This is the single
+  /// source of truth — any change to l10n.yaml between preflight and mutation
+  /// is detected by comparing this fingerprint against the one captured during
+  /// analysis.
+  String _computeConfigFingerprint(ProjectContext project) {
+    final configFile = File(p.join(project.root.path, 'l10n.yaml'));
+    if (!configFile.existsSync()) {
+      // Absent config: use sentinel (resolver uses 'absent')
+      return 'absent';
+    }
+    final configBytes = configFile.readAsBytesSync();
+    final hash = sha256.convert(configBytes);
+    return 'sha256:${hash.toString()}';
   }
 
   Map<String, L10nFamily> _groupByFamily(
@@ -314,6 +466,7 @@ class L10nMutationExecutor {
           findingIdToKey: {},
           footprint: entry.mutationFootprint,
           verificationPolicyHash: _computeVerificationPolicyHash(project),
+          configurationFingerprint: entry.configurationFingerprint,
         );
       }
 
@@ -328,11 +481,6 @@ class L10nMutationExecutor {
     }
 
     return families;
-  }
-
-  String _computeSha256(List<int> bytes) {
-    if (bytes.isEmpty) return '';
-    return sha256.convert(bytes).toString();
   }
 
   String? _computeVerificationPolicyHash(ProjectContext project) {
@@ -353,6 +501,7 @@ class L10nFamily {
     required this.findingIdToKey,
     required this.footprint,
     required this.verificationPolicyHash,
+    required this.configurationFingerprint,
   });
 
   /// Identifier of the family mutated atomically.
@@ -372,6 +521,13 @@ class L10nFamily {
 
   /// Verification policy fingerprint, when one is configured.
   final String? verificationPolicyHash;
+
+  /// SHA-256 fingerprint of `l10n.yaml` captured during analysis.
+  ///
+  /// Used to detect configuration drift between preflight and mutation
+  /// (TOCTOU protection). Format matches the readiness resolver:
+  /// `sha256:<hex-digest>` of the raw file bytes.
+  final String configurationFingerprint;
 }
 
 /// Mutation execution result.

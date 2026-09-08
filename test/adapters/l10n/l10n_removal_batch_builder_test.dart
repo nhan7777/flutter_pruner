@@ -1,11 +1,14 @@
 import 'dart:io';
 
+import 'package:crypto/crypto.dart';
 import 'package:flutter_pruner/src/adapters/l10n/l10n_config.dart';
 import 'package:flutter_pruner/src/adapters/l10n/l10n_mutation_selection.dart';
 import 'package:flutter_pruner/src/adapters/l10n/l10n_removal_batch_builder.dart';
 import 'package:flutter_pruner/src/adapters/l10n/l10n_staging_manager.dart';
 import 'package:flutter_pruner/src/adapters/l10n/l10n_static_readiness_resolver.dart';
 import 'package:flutter_pruner/src/analysis/project_analyzer.dart';
+import 'package:flutter_pruner/src/core/confidence/action_risk_scope.dart';
+import 'package:flutter_pruner/src/core/confidence/mutation_footprint.dart';
 import 'package:flutter_pruner/src/core/project/project_context.dart';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
@@ -84,6 +87,27 @@ void main() {
         findingIdToKey: {node.id: node.metadata['key'] as String? ?? 'testKey'},
       );
 
+      // Capture baseline ARB hashes (as executor would do before staging)
+      final arbBaselineHashes = <String, String>{};
+      final arbDir = Directory(config.arbDir);
+      if (arbDir.existsSync()) {
+        for (final file in arbDir
+            .listSync()
+            .whereType<File>()
+            .where((f) => p.extension(f.path) == '.arb')) {
+          final relPath = project.relative(file.path);
+          arbBaselineHashes[relPath] =
+              sha256.convert(file.readAsBytesSync()).toString();
+        }
+      }
+
+      // Inspect staging for generated outputs
+      final inspection = await stagingManager.inspect(
+        staging: staging,
+        project: project,
+        config: config,
+      );
+
       // Build batch
       final batch = await builder.build(
         familyId: entry.familyId,
@@ -93,6 +117,8 @@ void main() {
         config: config,
         configFingerprint: entry.configurationFingerprint,
         footprint: entry.mutationFootprint,
+        arbBaselineHashes: arbBaselineHashes,
+        inspection: inspection,
       );
 
       // Verify batch
@@ -159,7 +185,17 @@ void main() {
           project: project,
           config: (L10nConfig.load(project) as L10nConfigValid).config,
           configFingerprint: 'test',
-          footprint: throw UnimplementedError(),
+          footprint: const MutationFootprint(
+            findingIds: {'test'},
+            physicalPaths: {'lib/l10n/app_en.arb'},
+            riskScope: ActionRiskScope.boundedFamily,
+            familyId: 'test',
+          ),
+          arbBaselineHashes: const {},
+          inspection: const StagingInspectionResult(
+            candidates: [],
+            unexpectedFiles: [],
+          ),
         ),
         throwsA(anything), // Will fail on missing staging structure
       );
@@ -212,6 +248,11 @@ void main() {
           config: config,
           configFingerprint: entry.configurationFingerprint,
           footprint: entry.mutationFootprint,
+          arbBaselineHashes: const {},
+          inspection: const StagingInspectionResult(
+            candidates: [],
+            unexpectedFiles: [],
+          ),
         ),
         throwsA(isA<ArgumentError>()),
       );
@@ -267,6 +308,11 @@ void main() {
           config: config,
           configFingerprint: entry.configurationFingerprint,
           footprint: entry.mutationFootprint,
+          arbBaselineHashes: const {},
+          inspection: const StagingInspectionResult(
+            candidates: [],
+            unexpectedFiles: [],
+          ),
         ),
         throwsA(isA<StateError>()),
       );

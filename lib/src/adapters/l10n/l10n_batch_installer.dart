@@ -83,13 +83,32 @@ class L10nBatchInstaller {
       await parent.create(recursive: true);
     }
 
-    // Write bytes atomically
-    await file.writeAsBytes(bytes, flush: true);
+    // Write atomically: temp file in the same directory → flush → rename.
+    // A crash mid-write leaves only the temp file, never a corrupt target.
+    final tempFile = File(
+      '${file.path}.tmp-${DateTime.now().microsecondsSinceEpoch}',
+    );
+    try {
+      await tempFile.writeAsBytes(bytes, flush: true);
 
-    // Set mode if non-zero (skip mode 0 as it's invalid)
-    if (mode > 0 && (Platform.isLinux || Platform.isMacOS)) {
-      // Set file permissions on Unix-like systems
-      await Process.run('chmod', [mode.toRadixString(8), file.path]);
+      // Set mode on the temp file before rename so the target never exists
+      // with the wrong permissions.
+      if (mode > 0 && (Platform.isLinux || Platform.isMacOS)) {
+        await Process.run('chmod', [mode.toRadixString(8), tempFile.path]);
+      }
+
+      // Atomic rename on the same filesystem.
+      await tempFile.rename(file.path);
+    } catch (e) {
+      // Best-effort cleanup of the temp file on failure.
+      try {
+        if (tempFile.existsSync()) {
+          await tempFile.delete();
+        }
+      } catch (_) {
+        // Ignore cleanup errors; the original error is what matters.
+      }
+      rethrow;
     }
   }
 }

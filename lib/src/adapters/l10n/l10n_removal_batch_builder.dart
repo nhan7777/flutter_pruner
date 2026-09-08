@@ -34,27 +34,23 @@ class L10nRemovalBatchBuilder {
     required L10nConfig config,
     required String configFingerprint,
     required MutationFootprint footprint,
+    required Map<String, String> arbBaselineHashes,
+    required StagingInspectionResult inspection,
   }) async {
     // Validate selection
     selection.validate();
 
-    // Capture baseline ARB files
+    // Capture baseline ARB files from the pre-mutation snapshot
     final arbMutations = await _buildArbMutations(
       staging: staging,
       project: project,
       config: config,
       keys: selection.effectiveKeys,
+      baselineHashes: arbBaselineHashes,
     );
 
-    // Inspect staging for generated outputs
-    final stagingManager = const L10nStagingManager();
-    final inspection = await stagingManager.inspect(
-      staging: staging,
-      project: project,
-      config: config,
-    );
-
-    // Build generated output mutations
+    // Build generated output mutations from the passed inspection result
+    // (avoids duplicate StagingManager instantiation + inspection)
     final generatedMutations = await _buildGeneratedMutations(
       staging: staging,
       project: project,
@@ -92,6 +88,7 @@ class L10nRemovalBatchBuilder {
     required ProjectContext project,
     required L10nConfig config,
     required Set<String> keys,
+    required Map<String, String> baselineHashes,
   }) async {
     final mutations = <L10nArbMutation>[];
     final arbDirRelative = project.relative(config.arbDir);
@@ -111,14 +108,27 @@ class L10nRemovalBatchBuilder {
       final basename = p.basename(stagingArbFile.path);
       final relativePath = p.join(arbDirRelative, basename);
 
-      // Read baseline from project
+      // Read baseline from the live project, but verify it still matches the
+      // pre-mutation snapshot captured by the executor. Any drift between
+      // preflight and batch-build fails closed (TOCTOU protection).
       final projectArbFile = File(p.join(project.root.path, relativePath));
       if (!projectArbFile.existsSync()) {
         throw StateError('Baseline ARB not found: $relativePath');
       }
-
       final originalBytes = projectArbFile.readAsBytesSync();
       final originalHash = sha256.convert(originalBytes).toString();
+      final expectedBaselineHash = baselineHashes[relativePath];
+      if (expectedBaselineHash == null) {
+        throw StateError(
+          'Baseline ARB not captured at preflight: $relativePath',
+        );
+      }
+      if (originalHash != expectedBaselineHash) {
+        throw StateError(
+          'ARB baseline drift for $relativePath: '
+          'expected $expectedBaselineHash, found $originalHash',
+        );
+      }
 
       // Read candidate from staging
       final candidateBytes = stagingArbFile.readAsBytesSync();
