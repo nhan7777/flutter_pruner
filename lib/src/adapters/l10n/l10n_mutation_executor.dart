@@ -483,11 +483,10 @@ class L10nMutationExecutor {
       final hash = sha256.convert(bytes);
       return 'sha256:${hash.toString()}';
     }
-    // Fallback: hash the project root path + config hash as a deterministic
-    // proxy. This is less precise than the real toolchain identity but still
-    // changes when the project or toolchain changes.
-    final seed = 'toolchain:${project.root.path}';
-    final hash = sha256.convert(utf8.encode(seed));
+    // Fallback: hash Platform.version which reflects the exact Dart runtime
+    // (and thus Flutter SDK) used to run gen-l10n. This changes on every
+    // SDK upgrade and is the canonical toolchain identity for this mutation.
+    final hash = sha256.convert(utf8.encode(Platform.version));
     return 'sha256:${hash.toString()}';
   }
 
