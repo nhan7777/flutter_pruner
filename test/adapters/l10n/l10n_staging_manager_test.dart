@@ -302,8 +302,33 @@ void main() {
     });
 
     test('inspect finds generated files', () async {
-      // Skip: requires gen-l10n to succeed first
-    }, skip: true);
+      final staging = await stagingManager.createStaging(quarantineDir);
+      final configResult = L10nConfig.load(project);
+      final config = (configResult as L10nConfigValid).config;
+
+      await stagingManager.materialize(
+        staging: staging,
+        project: project,
+        config: config,
+      );
+
+      final genResult = await stagingManager.runGenL10nInStaging(
+        staging: staging,
+      );
+      expect(genResult, isA<GenL10nSuccess>());
+
+      final inspection = await stagingManager.inspect(
+        staging: staging,
+        project: project,
+        config: config,
+      );
+
+      expect(inspection.candidates, isNotEmpty);
+      expect(
+        inspection.candidates.any((c) => c.relativePath.endsWith('.dart')),
+        isTrue,
+      );
+    });
 
     test('inspect finds generated files (mock)', () async {
       final staging = await stagingManager.createStaging(quarantineDir);
@@ -335,8 +360,32 @@ void main() {
     });
 
     test('inspect computes sha256 hashes', () async {
-      // Skip: requires gen-l10n
-    }, skip: true);
+      final staging = await stagingManager.createStaging(quarantineDir);
+      final configResult = L10nConfig.load(project);
+      final config = (configResult as L10nConfigValid).config;
+
+      await stagingManager.materialize(
+        staging: staging,
+        project: project,
+        config: config,
+      );
+
+      final genResult = await stagingManager.runGenL10nInStaging(
+        staging: staging,
+      );
+      expect(genResult, isA<GenL10nSuccess>());
+
+      final inspection = await stagingManager.inspect(
+        staging: staging,
+        project: project,
+        config: config,
+      );
+
+      for (final candidate in inspection.candidates) {
+        expect(candidate.sha256, matches(RegExp(r'^[0-9a-f]{64}$')));
+        expect(candidate.sizeBytes, greaterThan(0));
+      }
+    });
 
     test('inspect computes sha256 hashes (mock)', () async {
       final staging = await stagingManager.createStaging(quarantineDir);
