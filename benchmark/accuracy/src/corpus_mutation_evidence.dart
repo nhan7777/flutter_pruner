@@ -1029,8 +1029,13 @@ final class DefaultCorpusProjectViewFactory
       return CorpusProjectViewRejected(
         _provisioningOutcome(project, failureStatus),
       );
-    } on _CorpusGateException catch (e) {
+    } on _CorpusGateException catch (e, stackTrace) {
       failureStatus = e.status;
+      if (Platform.environment['FLUTTER_PRUNER_STAGE1_DEBUG'] == '1') {
+        stderr
+          ..writeln('corpus gate: ${e.status}')
+          ..writeln(stackTrace);
+      }
       if (lease != null && !lease.isPoisoned) {
         if (!await lease.dispose()) failureStatus = 'cleanupFailed';
       }
