@@ -2061,7 +2061,8 @@ final class _OwnedProjectViewLease implements CorpusProjectViewLease {
         // mode regardless of the host umask (CI runners may create temp
         // directories with a broader mode). The lease's authority and
         // disposal checks require this exact mode.
-        Process.runSync('/bin/chmod', ['700', root.path]);
+        final chmod = Process.runSync('/bin/chmod', ['700', root.path]);
+        if (chmod.exitCode != 0) throw const _CorpusGateException();
       }
       if (FileSystemEntity.typeSync(root.path, followLinks: false) !=
               FileSystemEntityType.directory ||
