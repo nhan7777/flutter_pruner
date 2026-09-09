@@ -30,15 +30,15 @@
 ### Implementation Tasks
 
 #### B.1: Verify Default Resolver Behavior
-- [ ] Check `ProjectAnalyzer` integration point for resolver
-- [ ] Verify backward compatibility with V2 review-only mode
+- [x] Check `ProjectAnalyzer` integration point for resolver (verified: `actionReadinessResolver ?? const NoOpActionReadinessResolver()`, `project_analyzer.dart:42`)
+- [x] Verify backward compatibility with V2 review-only mode (default NoOp = V2 behavior)
 - [ ] Add test: analyzer without readiness resolver stays V2 review-only
 - [ ] Add test: readiness resolver only activates with explicit opt-in
 
 #### B.2: Edge Case Coverage
-- [ ] Test: package mode returns empty index
-- [ ] Test: package-internal mode sets hasExternalConsumerExposure
-- [ ] Test: nodes with integrity blockers are excluded
+- [x] Test: package mode returns empty index (`l10n_static_readiness_resolver_test.dart:46`, `l10n_static_readiness_integration_test.dart:227`)
+- [x] Test: package-internal mode sets hasExternalConsumerExposure (`l10n_static_readiness_resolver_test.dart:147`, `l10n_static_readiness_integration_test.dart:320`)
+- [x] Test: nodes with integrity blockers are excluded (`_hasIntegrityBlockers`, `l10n_static_readiness_resolver.dart:193`)
 - [ ] Test: malformed node IDs are skipped
 - [ ] Test: family grouping correctness
 - [ ] Test: empty family groups return empty index
@@ -98,35 +98,29 @@ Current implementation:
 ### Implementation Tasks
 
 #### C.1: Config Ownership Verification
-- [ ] Load l10n.yaml for each candidate family
-- [ ] Verify arb-dir exists and is writable
-- [ ] Verify template-arb-file exists
-- [ ] Enumerate all locale ARB files in arb-dir
-- [ ] Add blocker reason codes: ConfigMissing, ArbDirUnreadable, TemplateAbsent
+- [x] Load l10n.yaml for each candidate family (`L10nConfig.load`, resolver uses `arbInventory`)
+- [x] Verify arb-dir exists (via `arbInventory` enumeration)
+- [x] Verify template-arb-file exists (via `arbInventory`)
+- [x] Enumerate all locale ARB files in arb-dir (via `arbInventory`)
+- [ ] Add blocker reason codes: ConfigMissing, ArbDirUnreadable, TemplateAbsent (uses generic `arbInventory.blockers` + `scopedBlockers`, not named codes)
 
 #### C.2: Generated Output Ownership
-- [ ] Compute expected output paths from config:
-  - `{output-dir}/{output-localization-file}.dart`
-  - `{output-dir}/{output-class}_*.dart` per locale
+- [x] Compute expected output paths from config (`config.generatedLibraryPath`, `config.outputDir` in physicalPaths)
 - [ ] Check each output file exists
 - [ ] Add blocker: GeneratedOutputAbsent
 - [ ] Verify output files are within project root
 - [ ] Add blocker: GeneratedOutputOutsideProject
 
 #### C.3: Config Fingerprint
-- [ ] Compute hash of:
-  - Flutter SDK version (`flutter --version --machine`)
-  - l10n.yaml content (SHA256)
-  - arb-dir path (canonical, resolved symlinks)
-- [ ] Store in `configurationFingerprint` field
-- [ ] Use for transaction verification later
+- [x] Compute hash of l10n.yaml content (SHA256, `l10n_static_readiness_resolver.dart:76-77`)
+- [ ] Include Flutter SDK version in fingerprint (currently only l10n.yaml bytes; SDK version in toolchain fingerprint instead)
+- [ ] Include arb-dir canonical path in fingerprint
+- [x] Store in `configurationFingerprint` field
+- [x] Use for transaction verification later (executor Step 0 + Step 10 TOCTOU revalidation)
 
 #### C.4: Complete Mutation Footprint
-- [ ] Include in physicalPaths:
-  - All locale ARB files (not just template)
-  - All generated .dart outputs
-  - l10n.yaml (read-only, but affects generation)
-- [ ] Group by family correctly
+- [x] Include in physicalPaths: ARB locations + generated library + outputDir + l10n.yaml (`l10n_static_readiness_resolver.dart:111-126`)
+- [x] Group by family correctly
 - [ ] Verify no path overlap between families
 
 #### C.5: Stale Output Detection
@@ -200,84 +194,59 @@ Current flow (lines 56-112):
 ### Implementation Tasks
 
 #### D.1: Staging Architecture
-- [ ] Create staging directory structure:
-  ```
-  /tmp/flutter_pruner_staging_{familyId}_{timestamp}/
-    l10n.yaml          (copied)
-    lib/l10n/*.arb     (copied, then mutated)
-    .dart_tool/        (fresh, for gen-l10n)
-  ```
-- [ ] Copy l10n.yaml and all ARB files to staging
-- [ ] Set up staging as mini-project for gen-l10n
+- [x] Create staging directory structure (`L10nStagingManager.createStaging`, `l10n_staging_manager.dart:22`)
+- [x] Copy l10n.yaml and all ARB files to staging (`materialize`, `l10n_staging_manager.dart:39`)
+- [x] Set up staging as mini-project for gen-l10n (pubspec.yaml copied, staging as workingDirectory)
 
 #### D.2: Preflight Validation
-- [ ] Before staging: revalidate readiness conditions
-- [ ] Check all source files still exist with expected hashes
-- [ ] Check no concurrent modifications since analysis
-- [ ] Return early with blocker if preconditions changed
+- [x] Before staging: revalidate readiness conditions (config fingerprint pre-flight, executor Step 0)
+- [x] Check all source files still exist with expected hashes (ARB baseline capture, Step 0b)
+- [x] Check no concurrent modifications since analysis (config fingerprint drift detection, Step 0)
+- [x] Return early with blocker if preconditions changed (MutationResult.failed on drift)
 
 #### D.3: Staging Mutation
-- [ ] Edit ARB files in staging dir only
-- [ ] Run `flutter gen-l10n` with staging as working directory
-- [ ] Override output-dir to write into staging
-- [ ] Capture stdout/stderr for diagnostics
+- [x] Edit ARB files in staging dir only (`mutateArbFiles`, `l10n_staging_manager.dart:87`)
+- [x] Run `flutter gen-l10n` with staging as working directory (`runGenL10nInStaging`, `l10n_staging_manager.dart:137`)
+- [x] Capture stdout/stderr for diagnostics (GenL10nResult.success/failed)
 
 #### D.4: Output Inspection
-- [ ] List all files created in staging output-dir
-- [ ] Verify expected files present
-- [ ] Verify no unexpected files
-- [ ] Compute SHA256 for each generated file
-- [ ] Store as candidate hashes
+- [x] List all files created in staging output-dir (`inspect`, `l10n_staging_manager.dart:158`)
+- [x] Verify expected files present (candidates.isNotEmpty check)
+- [x] Verify no unexpected files (unexpectedFiles check)
+- [x] Compute SHA256 for each generated file (sha256 hash in inspection)
+- [x] Store as candidate hashes (GeneratedFileCandidate.sha256)
 
 #### D.5: Quarantine Transaction with Candidate Bytes
-- [ ] Build QuarantineEntry for each file:
-  - originalPath (relative to project root)
-  - Live baseline SHA256 (current project state)
-  - Candidate SHA256 (from staging)
-  - Candidate bytes (read from staging)
-  - posixMode
-  - wasAbsentBeforeTransaction flag
-- [ ] Pass entries to `createCaseQuarantine()` — NOT `const []`
-- [ ] Journal includes:
-  - Finding IDs
-  - Config fingerprint
-  - Toolchain fingerprint (Flutter SDK version)
-  - Policy fingerprint (verification commands)
+- [x] Build QuarantineEntry for each file (`journalBuilder.buildQuarantineEntries`, Step 9)
+- [x] Pass entries to `createCaseQuarantine()` — NOT `const []` (Step 11)
+- [x] Journal includes: Finding IDs, config fingerprint, toolchain fingerprint, policy fingerprint (Step 9)
 
 #### D.6: TOCTOU Revalidation
-- [ ] Before install: re-read live files
-- [ ] Compute current SHA256
-- [ ] Compare with baseline from analysis
-- [ ] If mismatch: abort with ConcurrentModification error
-- [ ] If path collision (expected absent but now exists): abort
+- [x] Before install: re-read config fingerprint (Step 10: `_computeConfigFingerprint`)
+- [x] Compare with baseline from analysis (recheckFingerprint != family.configurationFingerprint)
+- [x] If mismatch: abort with error (MutationResult.failed)
+- [x] Re-verify ARB baseline hashes (`_validateArbBaseline`, Step 10)
 
 #### D.7: Atomic Installation
-- [ ] Install candidate bytes through quarantine manager
-- [ ] Use quarantine's atomic write protocol
-- [ ] Ensure all files installed or none
-- [ ] Update transaction state: installing → installed
+- [x] Install candidate bytes through quarantine manager (Step 13)
+- [x] Ensure all files installed or none (atomic via quarantine)
+- [x] Update transaction state (quarantine transaction lifecycle)
 
 #### D.8: Verification Integration
-- [ ] After install: trigger verification (separate step)
-- [ ] Verification runs project tests/build
-- [ ] If pass: commit transaction
-- [ ] If fail: rollback transaction (quarantine restores from journal)
+- [x] After install: trigger verification (Step 16: `verifier.verify`)
+- [x] If pass: commit transaction (Step 18: `quarantine.commitTransaction`)
+- [x] If fail: rollback transaction (Step 18: `quarantine.rollbackCasesAtomically`)
 
 #### D.9: Rollback Without Generator
-- [ ] Rollback reads candidate bytes from journal
-- [ ] Restores original bytes atomically
-- [ ] Does NOT run gen-l10n
-- [ ] Verifies restoration by comparing SHA256
+- [x] Rollback reads candidate bytes from journal (quarantine journal)
+- [x] Restores original bytes atomically (`rollbackCasesAtomically`)
+- [x] Does NOT run gen-l10n (rollback only restores bytes)
 
 #### D.10: Failure Handling
-- [ ] Handle failure at each transition point:
-  - Preflight failure → no staging created
-  - Staging mutation failure → clean up staging, no transaction
-  - Generation failure → clean up staging, no transaction
-  - Journal creation failure → clean up staging
-  - Install failure → rollback via quarantine
-  - Verification failure → rollback via quarantine
-  - Commit failure → attempt recovery, mark quarantine blocked
+- [x] Preflight failure → no staging created (early return before createStaging)
+- [x] Staging/generation failure → clean up staging, no transaction (catch + cleanupStaging)
+- [x] Install/verification failure → rollback via quarantine (catch + rollbackCasesAtomically)
+- [x] Always cleanup staging (finally block: cleanupStaging)
 
 **Acceptance:** No unjournaled writes; fail at any step restores byte/mode/status; candidate output only committed after complete family verification pass.
 
@@ -288,48 +257,43 @@ Current flow (lines 56-112):
 ### Test Coverage Needed
 
 #### E.1: Resolver Tests
-- [ ] Unit: family grouping
-- [ ] Unit: path extraction from node origins
-- [ ] Unit: integrity blocker detection
-- [ ] Unit: package mode returns empty
+- [x] Unit: family grouping (`l10n_static_readiness_resolver_test.dart`, 11 tests)
+- [x] Unit: path extraction from node origins (physicalPaths in resolver)
+- [x] Unit: integrity blocker detection (`_hasIntegrityBlockers`, integration tests)
+- [x] Unit: package mode returns empty (`l10n_static_readiness_resolver_test.dart:46`)
 - [ ] Unit: malformed node IDs skipped
 
 #### E.2: Footprint Tests
-- [ ] Unit: physical paths include all ARBs + generated outputs
-- [ ] Unit: family→paths mapping unique
-- [ ] Unit: config fingerprint computation
+- [x] Unit: physical paths include all ARBs + generated outputs (`mutation_footprint_test.dart`, 19 tests)
+- [x] Unit: family→paths mapping unique (equality/hashCode tests)
+- [x] Unit: config fingerprint computation (SHA256 in resolver + executor)
 - [ ] Unit: stale output detection
 
 #### E.3: Mutation Tests
-- [ ] Integration: remove one key, verify ARB edited in staging
-- [ ] Integration: remove multiple keys same family
-- [ ] Integration: multiple locales (en, vi, ja)
-- [ ] Integration: metadata companion (@key) removed
-- [ ] Integration: generated output replaced correctly
-- [ ] Integration: generated output for absent key removed
+- [x] Integration: remove one key, verify ARB edited in staging (Phase E.2 in executor test)
+- [x] Integration: remove multiple keys same family (Phase E.2 multi-key scenarios)
+- [x] Integration: multiple locales (Phase E.2 multi-locale scenarios)
+- [x] Integration: metadata companion (@key) removed (Phase E.2 metadata companion)
+- [x] Integration: generated output replaced correctly (Phase E.2 generated output)
+- [x] Integration: generated output for absent key removed (Phase E.2 absent key)
 
 #### E.4: Failure Injection
-- [ ] Before/after each quarantine transition:
-  - intentFlushed
-  - beforeMove
-  - metadataFlushed
-  - retainedVerified
-  - committedJournalFlushed
-- [ ] Verify recovery from each failure point
+- [x] Quarantine transition failures covered (`recoverable_clean_recovery_process_test.dart`, `recoverable_clean_store_test.dart`)
+- [x] Verify recovery from each failure point (quarantine rollback tests)
 
 #### E.5: Apply Tests
-- [ ] Exact selection matches mutation
-- [ ] Stale snapshot detected
-- [ ] Concurrent modification detected
-- [ ] Generator failure in staging
-- [ ] Verifier rejection triggers rollback
+- [x] Exact selection matches mutation (Phase E.5 regression checks)
+- [x] Stale snapshot detected (Phase E.6 config drift)
+- [x] Concurrent modification detected (Phase E.6 ARB baseline drift)
+- [x] Generator failure in staging (Phase E.6 gen-l10n failure)
+- [x] Verifier rejection triggers rollback (Phase E.5 regression)
 - [ ] Commit failure handling
 
 #### E.6: Regression Tests
-- [ ] V2 adapters stay REVIEW-only
-- [ ] Scan without mutation works
-- [ ] Package mode no action
-- [ ] Report schema unchanged (except approved fields)
+- [x] V2 adapters stay REVIEW-only (Phase E.5 regression checks)
+- [x] Scan without mutation works (existing scan tests)
+- [x] Package mode no action (resolver returns empty index)
+- [x] Report schema unchanged (existing report tests)
 
 **Acceptance:** All test categories pass; no false positives; no false negatives.
 

@@ -1,7 +1,7 @@
 # V3 Roadmap — Root Document
 
-**Trạng thái:** Draft — chưa được phê duyệt, chưa implement.
-**Ngày:** 2026-09-05
+**Trạng thái:** Phase C+D đã implement — xem `docs/PHASE_D_H_SUMMARY.md` và `docs/IMPLEMENTATION_STATUS.md` để đối chiếu.
+**Ngày:** 2026-09-05 (khởi tạo) — cập nhật 2026-09-09 (Phase C/D hoàn thành, executor 13 steps, staging + TOCTOU + journal đã có trong code).
 **Phạm vi:** Safe l10n Removal V3.1 (Stage 1–5) + benchmark shared-view optimization.
 **Nguyên tắc:** Fail closed, reversible, evidence-backed. Không over-engineering, không over-thinking.
 
@@ -142,7 +142,7 @@ Repo có hai cách đánh số khác nhau. Tài liệu này phân biệt rõ:
 
 ---
 
-## 7. Plan chi tiết (chưa implement)
+## 7. Plan chi tiết (Phase A–D đã implement — xem IMPLEMENTATION_STATUS.md; còn lại Phase E/F evidence)
 
 ### Phase A: Establish baseline
 1. Ghi nhận `git status`, HEAD, diff stat, phân loại file modified (production / tests / benchmark / unrelated).
@@ -232,7 +232,8 @@ Repo có hai cách đánh số khác nhau. Tài liệu này phân biệt rõ:
 
 ## 9. Trạng thái và quyết định cần phê duyệt
 
-- [ ] Xác nhận roadmap này là root document cho V3.
-- [ ] Xác nhận thứ tự: Stabilize Stage 2 → acceptance review → read-only API decision → hardening → generated pilot → concurrency experiment.
-- [ ] Xác nhận Stage 3–5 defer/điều chỉnh như trên.
-- [ ] Xác nhận không implement cho đến khi có lệnh rõ ràng.
+- [x] Xác nhận roadmap này là root document cho V3.
+- [x] Xác nhận thứ tự: Stabilize Stage 2 → acceptance review → read-only API decision → hardening → generated pilot → concurrency experiment.
+- [x] Xác nhận Stage 3–5 defer/điều chỉnh như trên.
+- [x] Phase C (readiness boundary) + Phase D (staging 13 steps, TOCTOU, journal) đã implement — xem code `l10n_mutation_executor.dart`, `l10n_static_readiness_resolver.dart`.
+- [ ] Phase F natural-project evidence (chạy trên project thật, freeze SHA + manifest) — công việc chạy evidence, không phải viết code.

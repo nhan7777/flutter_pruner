@@ -1,7 +1,7 @@
 # Phase D-H Implementation Summary
 
-**Status:** IMPLEMENTATION COMPLETE  
-**Date:** 2026-09-05
+**Status:** PHASE D FULLY IMPLEMENTED (executor 13 steps, staging + TOCTOU + journal + quarantine entries)
+**Date:** 2026-09-05 (khởi tạo) — cập nhật 2026-09-09 (D.2-D.4 đã xong, không còn defer).
 
 ---
 
@@ -16,45 +16,31 @@
 - ARB mutation in staging verified
 - Cleanup verified
 
-**Tasks D.2-D.4: Preflight, TOCTOU, Atomic Installation** ⚠️ 
-- **Design decision:** Defer full implementation to avoid over-engineering
-- **Rationale:** Phase C already provides config fingerprint and mutation footprint
-- **Current L10nMutationExecutor already has:**
-  - Baseline hash capture (via `_buildEntries`)
-  - Quarantine transaction journaling
-  - Rollback mechanism
-- **What's needed for minimal viable Phase D:**
-  - Replace in-place mutation with staging-based flow
-  - Validate config fingerprint before mutation
-  - Install candidate bytes from staging
-
-**Simplified Phase D completion:**
-- Refactor `L10nMutationExecutor` to use `L10nStagingManager`
-- Add config fingerprint validation (reuse from Phase C)
-- Remove direct gen-l10n execution in live project
-- Tests verify staging flow works
+**Tasks D.2-D.4: Preflight, TOCTOU, Atomic Installation** ✅ IMPLEMENTED
+- Config fingerprint validation (Step 0: `_computeConfigFingerprint`, SHA256 of `l10n.yaml` bytes)
+- ARB baseline capture + re-validation (Step 0b + Step 10: `_captureArbBaseline` + `_validateArbBaseline`)
+- Quarantine entries với actual bytes (Step 9: `journalBuilder.buildQuarantineEntries(batch)`, không còn `const []`)
+- Install candidate bytes từ staging (Step 13)
+- Rollback không chạy generator (restore từ journal bytes)
 
 ---
 
 ### Phase E: Focused Verification
 
-**Status:** DEFER - already covered by existing tests
-- Phase C: 33 tests passing
-- L10n adapter: 370+ tests passing
-- Mutation executor: covered by existing apply tests
-- **Decision:** No new verification needed at this stage
+**Status:** E.2/E.3/E.5/E.6 tests exist (mutation scenarios, failure injection, regression, TOCTOU+staging flow)
+- `l10n_mutation_executor_test.dart`: Phase E.2 (mutation scenarios), E.3 (failure injection), E.5 (regression checks), E.6 (TOCTOU drift + staging flow)
+- **Pass rate trên CI:** macOS green; ubuntu/ubuntu-3.9 fail pre-existing (corpus git provisioning, stage-verifier Dart 3.9 analyzer drift)
+- **Local:** E.6 all 4 tests pass
 
 ---
 
 ### Phase F: Natural-Project Evidence
 
-**Status:** DEFER - requires production corpus
+**Status:** PENDING - requires production corpus
 - Needs real-world Flutter project corpus
 - Requires manifest freeze and reproducible environment
 - Not implementable in test environment
 - **Recommendation:** Run after Phase D stabilizes in production
-
----
 
 ### Phase G: Shared-View Benchmark Validation
 
@@ -173,42 +159,33 @@ This achieves Phase D goals without over-engineering:
 - ✅ ARB mutation in staging working
 - ✅ Gen-l10n runs in staging (not live project)
 - ✅ Staging cleanup working
-- ⏳ Executor refactored to use staging (minimal integration needed)
-- ⏳ Config fingerprint validation integrated
-- ⏳ Candidate bytes installation from staging
+- ✅ Executor refactored to use staging (13 steps)
+- ✅ Config fingerprint validation integrated (SHA256 of l10n.yaml)
+- ✅ Candidate bytes installation from staging
+- ✅ TOCTOU revalidation (config fingerprint + ARB baseline hashes)
+- ✅ Journal entries với actual bytes (không còn `const []`)
+- ✅ Package/toolchain fingerprints implemented
 
 ### Phases E-H
 
-- ✅ Phase E: Covered by existing test suite
-- ✅ Phase F: Deferred (requires production corpus)
+- ✅ Phase E: E.2/E.3/E.5/E.6 tests exist and pass locally
+- ⏳ Phase F: Pending (requires production corpus evidence)
 - ✅ Phase G: Not applicable (per roadmap decision)
 - ✅ Phase H: Decisions made (all defer)
-
----
-
 ## Recommendation
 
-**Complete Phase D with minimal executor refactoring, then stop.**
+**Phase D complete. Next: Phase F natural-project evidence.**
 
 Rationale:
-1. Phase C foundation is solid (33 tests passing)
-2. Staging manager is complete and tested (15 tests passing)
-3. Phases E-H are deferred per roadmap guidance
-4. Over-implementing without production validation violates "fail closed, no over-engineering" principle
+1. Phase C foundation is solid (config fingerprint SHA256, physicalPaths đầy đủ)
+2. Phase D fully implemented (executor 13 steps, staging + TOCTOU + journal + quarantine entries)
+3. Phase E tests exist (E.2/E.3/E.5/E.6) and pass locally
+4. Remaining CI failures are pre-existing env-specific (corpus git provisioning, RSS /proc, stage-verifier Dart 3.9)
 
 **Next practical step:**
-- Create one focused commit for Phase D.1 (staging manager)
-- Create minimal PR showing staging integration in executor
-- Get production feedback before continuing
-
-This aligns with roadmap's core message:
-> "Đóng các khoảng cách giữa Phase 2 implementation và Stage 2 safety contract"
-
-Phase D.1 (staging) closes the biggest gap: unjournaled generated writes.
-
-The rest can iterate based on production evidence.
-
----
+- Run Phase F on real Flutter project: freeze SHA + manifest, execute candidates to terminal state, rollback + verify hash
+- Re-run subset for reproducibility check
+- Only then review Stage 3 (read-only API) decision
 
 ## Files Created/Modified
 
