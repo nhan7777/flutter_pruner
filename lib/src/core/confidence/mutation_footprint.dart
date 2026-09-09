@@ -26,25 +26,25 @@ final class MutationFootprint {
   });
 
   /// Validates footprint constraints based on risk scope.
+  /// Validates footprint constraints based on risk scope.
   void validate() {
     if (findingIds.isEmpty) {
-      throw ArgumentError(
-        'MutationFootprint must have at least one finding ID',
-      );
+      throw ArgumentError('findingIds cannot be empty');
     }
 
     if (physicalPaths.isEmpty) {
-      throw ArgumentError(
-        'MutationFootprint must have at least one physical path',
-      );
+      throw ArgumentError('physicalPaths cannot be empty');
     }
 
     switch (riskScope) {
       case ActionRiskScope.boundedFamily:
         if (familyId == null) {
-          throw ArgumentError('boundedFamily scope requires non-null familyId');
+          throw ArgumentError('familyId is required for boundedFamily scope');
         }
       case ActionRiskScope.boundedSingle:
+        if (familyId != null) {
+          throw ArgumentError('familyId must be null for boundedSingle scope');
+        }
         if (findingIds.length != 1) {
           throw ArgumentError(
             'boundedSingle scope requires exactly one finding ID, got ${findingIds.length}',
@@ -54,6 +54,17 @@ final class MutationFootprint {
         // No additional constraints for open-ended scope
         break;
     }
+  }
+
+  @override
+  String toString() {
+    final buffer = StringBuffer('MutationFootprint(')
+      ..write(riskScope.name)
+      ..write(', findings: ${findingIds.length}')
+      ..write(', paths: ${physicalPaths.length}');
+    if (familyId != null) buffer.write(', family: $familyId');
+    buffer.write(')');
+    return buffer.toString();
   }
 
   @override

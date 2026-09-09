@@ -136,10 +136,26 @@ class L10nStagingManager {
   /// Runs flutter gen-l10n in staging directory.
   Future<GenL10nResult> runGenL10nInStaging({
     required Directory staging,
+    Future<ProcessResult> Function(
+      String,
+      List<String>, {
+      String? workingDirectory,
+    })?
+    processRunner,
   }) async {
-    final result = await Process.run('flutter', [
-      'gen-l10n',
-    ], workingDirectory: staging.path);
+    final runner = processRunner ?? Process.run;
+    ProcessResult result;
+    try {
+      result = await runner('flutter', [
+        'gen-l10n',
+      ], workingDirectory: staging.path);
+    } on ProcessException catch (e) {
+      return GenL10nResult.failed(
+        exitCode: e.errorCode,
+        stdout: '',
+        stderr: e.message,
+      );
+    }
 
     if (result.exitCode != 0) {
       return GenL10nResult.failed(

@@ -83,10 +83,12 @@ class ScanCommand extends Command<int> {
         allowed: ['2', '3'],
         defaultsTo: '3',
         help: 'JSON report schema; version 2 is legacy',
+        hide: true,
       )
       ..addMultiOption(
         'adapter',
         help: 'Run only these adapter IDs; defaults to all registered',
+        hide: true,
       )
       ..addOption(
         'config',

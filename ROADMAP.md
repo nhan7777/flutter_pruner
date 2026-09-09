@@ -31,8 +31,8 @@ This document describes product direction, not a delivery schedule.
 - [x] Scoped blockers for unresolved, dynamic, generated, and incomplete input
 - [x] Stable adapter ownership and deterministic report identifiers
 
-See [the graph model](doc/graph-model.md) and
-[the confidence model](doc/confidence-model.md).
+See [the graph model](doc/advanced/graph-model.md) and
+[the confidence model](doc/advanced/confidence-model.md).
 
 ### Built-in analyzers
 
@@ -63,7 +63,7 @@ propose deleting individual methods or fields.
       available
 
 The rollback contract does not include xattrs, ACLs, ownership, or hard-link
-topology. See [the architecture](doc/architecture.md) for transaction and
+topology. See [the architecture](doc/advanced/architecture.md) for transaction and
 filesystem boundaries.
 
 ### Reports and integrations

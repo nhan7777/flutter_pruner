@@ -630,7 +630,10 @@ output-localization-file: app_localizations.dart
         final result = results['app_localizations']!;
         expect(result, isA<MutationFailed>());
         final failed = result as MutationFailed;
-        expect(failed.error, contains('l10n.yaml drift detected before staging'));
+        expect(
+          failed.error,
+          contains('l10n.yaml drift detected before staging'),
+        );
         expect(failed.error, contains('stale-fingerprint'));
       });
 
@@ -712,8 +715,12 @@ output-localization-file: app_localizations.dart
           arbMutations: [
             L10nArbMutation(
               relativePath: 'lib/l10n/app_en.arb',
-              originalBytes: ImmutableBytes.copyOf(utf8.encode('{"unusedKey": "old"}')),
-              originalHash: sha256.convert(utf8.encode('{"unusedKey": "old"}')).toString(),
+              originalBytes: ImmutableBytes.copyOf(
+                utf8.encode('{"unusedKey": "old"}'),
+              ),
+              originalHash: sha256
+                  .convert(utf8.encode('{"unusedKey": "old"}'))
+                  .toString(),
               candidateBytes: ImmutableBytes.copyOf(candidateBytes),
               candidateHash: sha256.convert(candidateBytes).toString(),
               mode: 420,
@@ -752,42 +759,45 @@ output-localization-file: app_localizations.dart
         expect(failed.mismatches.first.path, 'lib/l10n/app_en.arb');
         expect(failed.mismatches.first.reason, contains('Hash mismatch'));
       });
-      test('full happy path returns MutationApplied with expectation', () async {
-        final arbFile = File('${tempDir.path}/lib/l10n/app_en.arb');
-        await arbFile.writeAsString('{"unusedKey": "Unused value"}');
+      test(
+        'full happy path returns MutationApplied with expectation',
+        () async {
+          final arbFile = File('${tempDir.path}/lib/l10n/app_en.arb');
+          await arbFile.writeAsString('{"unusedKey": "Unused value"}');
 
-        final finding = _createL10nFinding(
-          nodeId: 'l10n:test_project/lib/l10n/app_en.arb#unusedKey',
-          key: 'unusedKey',
-        );
+          final finding = _createL10nFinding(
+            nodeId: 'l10n:test_project/lib/l10n/app_en.arb#unusedKey',
+            key: 'unusedKey',
+          );
 
-        final results = await executor.executeAll(
-          findings: [finding],
-          readinessIndex: indexFor(finding),
-          project: project,
-        );
+          final results = await executor.executeAll(
+            findings: [finding],
+            readinessIndex: indexFor(finding),
+            project: project,
+          );
 
-        expect(results, hasLength(1));
-        final result = results['app_localizations']!;
+          expect(results, hasLength(1));
+          final result = results['app_localizations']!;
 
-        // The full staging flow (materialize → mutate → gen-l10n → inspect
-        // → batch → journal → install → verify → account) is exercised here.
-        // In a full Flutter environment with resolved dependencies, this
-        // returns MutationApplied. In test environments without resolved
-        // pubspec, gen-l10n fails with exit 1 — which is also a valid path
-        // (MutationFailed with gen-l10n error).
-        if (result is MutationApplied) {
-          final applied = result;
-          expect(applied.expectation.familyId, 'app_localizations');
-          expect(applied.expectation.writeExpectations, isNotEmpty);
-          expect(applied.accounting.allApplied, isTrue);
-          expect(applied.accounting.appliedCount, 1);
-          expect(applied.affectedFiles, isNotEmpty);
-        } else {
-          final failed = result as MutationFailed;
-          expect(failed.error, contains('gen-l10n failed in staging'));
-        }
-      });
+          // The full staging flow (materialize → mutate → gen-l10n → inspect
+          // → batch → journal → install → verify → account) is exercised here.
+          // In a full Flutter environment with resolved dependencies, this
+          // returns MutationApplied. In test environments without resolved
+          // pubspec, gen-l10n fails with exit 1 — which is also a valid path
+          // (MutationFailed with gen-l10n error).
+          if (result is MutationApplied) {
+            final applied = result;
+            expect(applied.expectation.familyId, 'app_localizations');
+            expect(applied.expectation.writeExpectations, isNotEmpty);
+            expect(applied.accounting.allApplied, isTrue);
+            expect(applied.accounting.appliedCount, 1);
+            expect(applied.affectedFiles, isNotEmpty);
+          } else {
+            final failed = result as MutationFailed;
+            expect(failed.error, contains('gen-l10n failed in staging'));
+          }
+        },
+      );
     });
   });
 }

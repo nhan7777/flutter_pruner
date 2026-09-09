@@ -972,6 +972,7 @@ Set<String> _configuredHelpCopy(FlutterPrunerCommandRunner runner) {
     copy.add(command.description);
     if (command.usageFooter case final footer?) copy.add(footer);
     for (final option in command.argParser.options.values) {
+      if (option.hide) continue;
       final help = option.help;
       if (option.name != 'help' && help != null && help.isNotEmpty) {
         copy.add(help);
@@ -983,6 +984,7 @@ Set<String> _configuredHelpCopy(FlutterPrunerCommandRunner runner) {
   }
 
   for (final option in runner.argParser.options.values) {
+    if (option.hide) continue;
     final help = option.help;
     if (option.name != 'help' && help != null && help.isNotEmpty) {
       copy.add(help);

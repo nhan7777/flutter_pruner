@@ -138,6 +138,7 @@ class ApplyCommand extends Command<int> {
       ..addMultiOption(
         'adapter',
         help: 'Run only these adapter IDs; defaults to all registered',
+        hide: true,
       )
       ..addMultiOption(
         'finding-id',
@@ -151,6 +152,7 @@ class ApplyCommand extends Command<int> {
         help:
             'Require exact v1 preview fingerprint before verification or '
             'mutation',
+        hide: true,
       )
       ..addOption(
         'config',
@@ -161,6 +163,7 @@ class ApplyCommand extends Command<int> {
         help:
             'Quarantine directory; defaults to .flutter_pruner/quarantine in '
             'the selected project',
+        hide: true,
       )
       ..addOption(
         'report-output',

@@ -27,7 +27,7 @@ dart-define branches — if you have hit one in production, encode it.
 that is the highest-priority class of bug. A failing test with a fixture is a
 complete report.
 
-**Fix documentation.** Especially [flutter-facts.md](doc/flutter-facts.md) — if a
+**Fix documentation.** Especially [flutter-facts.md](doc/advanced/flutter-facts.md) — if a
 claim there is out of date, that is a correctness bug, because adapters are built
 on it.
 
@@ -73,9 +73,9 @@ configuration and is read-only with respect to project source and assets.
 These documents will save you time, and reviewers will assume you have read
 the ones relevant to your change:
 
-- [graph-model.md](doc/graph-model.md) — nodes, edges, conditional reachability,
+- [graph-model.md](doc/advanced/graph-model.md) — nodes, edges, conditional reachability,
   blockers. Explains why reachability is per build target.
-- [confidence-model.md](doc/confidence-model.md) — the shared hard gates,
+- [confidence-model.md](doc/advanced/confidence-model.md) — the shared hard gates,
   explicit risks, and why tiers are used instead of a score.
 - [profiling.md](doc/performance/profiling.md) — reproducible synthetic benchmarks,
   subphase profiling, and rules for sharing results safely.
@@ -310,4 +310,4 @@ By contributing you agree your code is licensed under the MIT License.
 
 - [Discussions](https://github.com/nhan7777/flutter_pruner/discussions)
 - [Issues](https://github.com/nhan7777/flutter_pruner/issues)
-- [Architecture docs](doc/architecture.md)
+- [Architecture docs](doc/advanced/architecture.md)

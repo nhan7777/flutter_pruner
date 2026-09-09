@@ -102,15 +102,12 @@ const _scanHelp =
     '''Analyse without changing project sources; always saves a report
 
 Usage: flutter_pruner scan [arguments] [project-path]
--h, --help            Print this usage information.
-    --format          Saved report format; defaults to self-contained interactive HTML
-                      [human, json, html (default)]
--o, --output          Override automatic .flutter_pruner/reports destination; absolute paths remain supported
-    --json-version    JSON report schema; version 2 is legacy
-                      [2, 3 (default)]
-    --adapter         Run only these adapter IDs; defaults to all registered
-    --config          Configuration path; relative paths start at selected project
--p, --project         Dart or Flutter project root; defaults to current directory
+-h, --help       Print this usage information.
+    --format     Saved report format; defaults to self-contained interactive HTML
+                 [human, json, html (default)]
+-o, --output     Override automatic .flutter_pruner/reports destination; absolute paths remain supported
+    --config     Configuration path; relative paths start at selected project
+-p, --project    Dart or Flutter project root; defaults to current directory
 
 Run "flutter_pruner help" to see global options.
 Examples:
@@ -125,18 +122,15 @@ const _applyHelp =
     '''Apply findings; rollback restores quarantined regular-file bytes and POSIX modes where available, subject to verification
 
 Usage: flutter_pruner apply [arguments] [project-path]
--h, --help                          Print this usage information.
--n, --dry-run                       Preview dependency-closed plan without changing files
-    --yes                           Accept package-internal external-consumer risk without prompting
-    --adapter                       Run only these adapter IDs; defaults to all registered
-    --finding-id                    Apply only these exact, case-sensitive finding IDs; repeat for an atomic batch
-    --expect-preview-fingerprint    Require exact v1 preview fingerprint before verification or mutation
-    --config                        Configuration path; relative paths start at selected project
-    --quarantine                    Quarantine directory; defaults to .flutter_pruner/quarantine in the selected project
-    --report-output                 Override automatic .flutter_pruner/reports destination; absolute paths remain supported
-    --report-format                 Saved report format; defaults to HTML and also keeps canonical quarantine JSON
-                                    [json, html (default)]
--p, --project                       Dart or Flutter project root; defaults to current directory
+-h, --help             Print this usage information.
+-n, --dry-run          Preview dependency-closed plan without changing files
+    --yes              Accept package-internal external-consumer risk without prompting
+    --finding-id       Apply only these exact, case-sensitive finding IDs; repeat for an atomic batch
+    --config           Configuration path; relative paths start at selected project
+    --report-output    Override automatic .flutter_pruner/reports destination; absolute paths remain supported
+    --report-format    Saved report format; defaults to HTML and also keeps canonical quarantine JSON
+                       [json, html (default)]
+-p, --project          Dart or Flutter project root; defaults to current directory
 
 Run "flutter_pruner help" to see global options.
 Examples:
@@ -278,7 +272,7 @@ void main() {
       expect(result.exitCode, 0);
       expect(
         result.stdoutText,
-        'flutter_pruner 1.6.0${Platform.isWindows ? '\r\n' : '\n'}',
+        'flutter_pruner 1.7.0${Platform.isWindows ? '\r\n' : '\n'}',
       );
       expect(result.stderrBytes, isEmpty);
       expectNoAnsi(result);

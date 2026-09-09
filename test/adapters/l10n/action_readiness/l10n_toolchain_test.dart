@@ -4276,6 +4276,7 @@ void main() {
   );
 
   test('testing generation-root identity supports GNU stat on Linux', () async {
+    _installFixture(project, 'fvmrc/.fvmrc', '.fvmrc');
     final runner = _FakeProcessRunner([
       _ProcessReply.result(
         _successfulProbe(_fixtureBytes('machine/flutter_3_38_7.json')),
