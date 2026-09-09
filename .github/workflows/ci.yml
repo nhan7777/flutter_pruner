@@ -110,6 +110,8 @@ jobs:
 
       - name: Run tests
         run: dart test --reporter expanded
+        env:
+          FLUTTER_PRUNER_STAGE1_DEBUG: '1'
 
       - name: Generate hosted clean blocker evidence
         if: matrix.clean_evidence == true
