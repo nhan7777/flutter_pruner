@@ -496,6 +496,7 @@ void main() {
 
     test(
       'rejects retained ARB token drift and malformed candidate bytes',
+      timeout: const Timeout(Duration(seconds: 60)),
       () async {
         final drift = await _VerifierFixture.create();
         addTearDown(drift.dispose);
@@ -678,63 +679,78 @@ void main() {
       expect(result.toolchainIdentity, isNot('malformed'));
     });
 
-    test('rejects extra or drifted staged analyzer sources', () async {
-      final cases = <({String label, void Function(_VerifierFixture) mutate})>[
-        (
-          label: 'extra-source',
-          mutate: (fixture) {
-            final file = File(
-              p.join(fixture.pair.candidate.directory.path, 'lib/extra.dart'),
-            );
-            file.writeAsStringSync('const extra = true;\n');
-          },
-        ),
-        (
-          label: 'source-bytes',
-          mutate: (fixture) {
-            File(
-              p.join(fixture.pair.candidate.directory.path, _mainPath),
-            ).writeAsStringSync('void main() { throw StateError("drift"); }\n');
-          },
-        ),
-        if (!Platform.isWindows)
-          (
-            label: 'source-mode',
-            mutate: (fixture) {
-              _setFileMode(
-                File(p.join(fixture.pair.candidate.directory.path, _mainPath)),
-                0x180,
-              );
-            },
-          ),
-      ];
-      for (final testCase in cases) {
-        final fixture = await _VerifierFixture.create();
-        addTearDown(fixture.dispose);
-        testCase.mutate(fixture);
-        var analysisCalled = false;
-        final result = await fixture.verifyCandidate(
-          fixture.verifier(
-            analysisRunner: (project, only) async {
-              analysisCalled = true;
-              return _analysisFor(project);
-            },
-          ),
-        );
+    test(
+      'rejects extra or drifted staged analyzer sources',
+      timeout: const Timeout(Duration(seconds: 60)),
+      () async {
+        final cases =
+            <({String label, void Function(_VerifierFixture) mutate})>[
+              (
+                label: 'extra-source',
+                mutate: (fixture) {
+                  final file = File(
+                    p.join(
+                      fixture.pair.candidate.directory.path,
+                      'lib/extra.dart',
+                    ),
+                  );
+                  file.writeAsStringSync('const extra = true;\n');
+                },
+              ),
+              (
+                label: 'source-bytes',
+                mutate: (fixture) {
+                  File(
+                    p.join(fixture.pair.candidate.directory.path, _mainPath),
+                  ).writeAsStringSync(
+                    'void main() { throw StateError("drift"); }\n',
+                  );
+                },
+              ),
+              if (!Platform.isWindows)
+                (
+                  label: 'source-mode',
+                  mutate: (fixture) {
+                    _setFileMode(
+                      File(
+                        p.join(
+                          fixture.pair.candidate.directory.path,
+                          _mainPath,
+                        ),
+                      ),
+                      0x180,
+                    );
+                  },
+                ),
+            ];
+        for (final testCase in cases) {
+          final fixture = await _VerifierFixture.create();
+          addTearDown(fixture.dispose);
+          testCase.mutate(fixture);
+          var analysisCalled = false;
+          final result = await fixture.verifyCandidate(
+            fixture.verifier(
+              analysisRunner: (project, only) async {
+                analysisCalled = true;
+                return _analysisFor(project);
+              },
+            ),
+          );
 
-        expect(analysisCalled, isFalse, reason: testCase.label);
-        _expectFailure(
-          result.failures,
-          L10nEvidenceRejectionCode.candidateVerificationFailed,
-          testCase.label == 'extra-source'
-              ? 'analyzer-closure-incomplete'
-              : 'analyzer-closure-identity-drift',
-          relativePath: testCase.label == 'extra-source'
-              ? 'lib/extra.dart'
-              : _mainPath,
-        );
-      }
-    });
+          expect(analysisCalled, isFalse, reason: testCase.label);
+          _expectFailure(
+            result.failures,
+            L10nEvidenceRejectionCode.candidateVerificationFailed,
+            testCase.label == 'extra-source'
+                ? 'analyzer-closure-incomplete'
+                : 'analyzer-closure-identity-drift',
+            relativePath: testCase.label == 'extra-source'
+                ? 'lib/extra.dart'
+                : _mainPath,
+          );
+        }
+      },
+    );
 
     test(
       'rejects a selected package mapping back to the live project',
