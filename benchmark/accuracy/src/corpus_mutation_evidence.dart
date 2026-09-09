@@ -2056,13 +2056,16 @@ final class _OwnedProjectViewLease implements CorpusProjectViewLease {
     }
     final root = Directory(canonicalBase).createTempSync(_ownedPrefix);
     try {
-      final actualMode = _isPosix ? root.statSync().mode & 0xfff : null;
+      if (_isPosix) {
+        // Normalize the freshly allocated owned root to the exact private
+        // mode regardless of the host umask (CI runners may create temp
+        // directories with a broader mode). The lease's authority and
+        // disposal checks require this exact mode.
+        Process.runSync('/bin/chmod', ['700', root.path]);
+      }
       if (FileSystemEntity.typeSync(root.path, followLinks: false) !=
               FileSystemEntityType.directory ||
-          (_isPosix && actualMode != 0x1c0)) {
-        stderr.writeln(
-          'corpus lease mode: ${actualMode?.toRadixString(8)} expected 0700',
-        );
+          (_isPosix && root.statSync().mode & 0xfff != 0x1c0)) {
         throw const _CorpusGateException();
       }
       final canonicalRoot = root.resolveSymbolicLinksSync();
