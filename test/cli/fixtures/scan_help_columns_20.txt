@@ -15,24 +15,14 @@ information.
     defaults to
     self-contained
     interactive HTML
-  [human, json, html
-  (default)]
+[human, json, html
+                 (default)]
 -o, --output
 Override automatic
 .flutter_pruner/reports
 destination;
 absolute paths
 remain supported
-    --json-version
-    JSON report
-    schema; version
-    2 is legacy
-[2, 3 (default)]
-    --adapter Run
-    only these
-    adapter IDs;
-    defaults to all
-    registered
     --config
     Configuration
     path; relative

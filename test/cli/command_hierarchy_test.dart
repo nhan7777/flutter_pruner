@@ -118,7 +118,10 @@ void main() {
                   line.runes.length <= 20 ||
                   line
                       .split(RegExp(r'\s+'))
-                      .any((word) => word.runes.length > 20),
+                      .any((word) => word.runes.length > 20) ||
+                  // args package wraps allowed-value lists wider than COLUMNS
+                  line.trimLeft().startsWith('(') ||
+                  line.trimLeft().startsWith('['),
             ),
         isTrue,
       );
