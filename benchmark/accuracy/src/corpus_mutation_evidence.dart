@@ -2056,9 +2056,11 @@ final class _OwnedProjectViewLease implements CorpusProjectViewLease {
     }
     final root = Directory(canonicalBase).createTempSync(_ownedPrefix);
     try {
+      final actualMode = _isPosix ? root.statSync().mode & 0xfff : null;
       if (FileSystemEntity.typeSync(root.path, followLinks: false) !=
               FileSystemEntityType.directory ||
-          (_isPosix && root.statSync().mode & 0xfff != 0x1c0)) {
+          (_isPosix && actualMode != 0x1c0)) {
+        stderr.writeln('corpus lease mode: ${actualMode?.toRadixString(8)} expected 0700');
         throw const _CorpusGateException();
       }
       final canonicalRoot = root.resolveSymbolicLinksSync();
