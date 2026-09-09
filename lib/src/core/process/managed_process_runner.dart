@@ -542,7 +542,7 @@ final class ProcessCancellationConfirmedException implements Exception {
 }
 
 const _processTerminationTimeout = Duration(seconds: 5);
-const _processInspectionTimeout = Duration(seconds: 2);
+const _processInspectionTimeout = Duration(seconds: 5);
 const _processObservationInterval = Duration(milliseconds: 100);
 const _inspectionOutputLimit = 4 * 1024 * 1024;
 

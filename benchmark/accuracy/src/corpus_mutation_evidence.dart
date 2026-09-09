@@ -606,8 +606,7 @@ final class DefaultCorpusProjectViewFactory
       );
       if (flutterIdentityBefore !=
           _fileFingerprint(flutter, includePhysical: true)) {
-        failureStatus = 'toolchainDrift';
-        throw const _CorpusGateException();
+        throw const _CorpusGateException('toolchainDrift');
       }
 
       final retainedGitControlBefore = _retainedGitControlFingerprint(retained);
@@ -617,8 +616,7 @@ final class DefaultCorpusProjectViewFactory
       );
       if (_retainedGitControlFingerprint(retained) !=
           retainedGitControlBefore) {
-        failureStatus = 'retainedRepositoryDrift';
-        throw const _CorpusGateException();
+        throw const _CorpusGateException('retainedRepositoryDrift');
       }
       final retainedHead = await _gitText(retained, const [
         'rev-parse',
@@ -627,10 +625,11 @@ final class DefaultCorpusProjectViewFactory
       if (retainedHead != project.repositoryRevision ||
           _retainedGitControlFingerprint(retained) !=
               retainedGitControlBefore) {
-        failureStatus = retainedHead == project.repositoryRevision
-            ? 'retainedRepositoryDrift'
-            : 'repositoryRevisionDrift';
-        throw const _CorpusGateException();
+        throw _CorpusGateException(
+          retainedHead == project.repositoryRevision
+              ? 'retainedRepositoryDrift'
+              : 'repositoryRevisionDrift',
+        );
       }
       var repository = Directory(p.join(lease.root.path, 'repository'));
       await _requireGitSuccess(
@@ -650,8 +649,7 @@ final class DefaultCorpusProjectViewFactory
       if (File(
         p.join(repository.path, '.git', 'objects', 'info', 'alternates'),
       ).existsSync()) {
-        failureStatus = 'cloneSharesObjectAuthority';
-        throw const _CorpusGateException();
+        throw const _CorpusGateException('cloneSharesObjectAuthority');
       }
       await _requireGitSuccess(
         [
@@ -670,8 +668,7 @@ final class DefaultCorpusProjectViewFactory
         'HEAD',
       ], environment: gitEnvironment);
       if (checkedOutHead != project.repositoryRevision) {
-        failureStatus = 'checkoutRevisionDrift';
-        throw const _CorpusGateException();
+        throw const _CorpusGateException('checkoutRevisionDrift');
       }
       await _requireGitSuccess(
         ['-C', repository.path, 'remote', 'remove', 'origin'],
@@ -688,8 +685,7 @@ final class DefaultCorpusProjectViewFactory
           utf8
               .decode(gitConfig.copy(), allowMalformed: true)
               .contains(retained.path)) {
-        failureStatus = 'cloneRetainedAuthority';
-        throw const _CorpusGateException();
+        throw const _CorpusGateException('cloneRetainedAuthority');
       }
       repository = _canonicalDirectoryEntry(repository);
       final expectedRepositoryPath = repository.path;
@@ -722,8 +718,7 @@ final class DefaultCorpusProjectViewFactory
         expectedRepositoryPath: expectedRepositoryPath,
         expectedPackagePath: expectedPackagePath,
       )) {
-        failureStatus = 'protectedAuthorityDrift';
-        throw const _CorpusGateException();
+        throw const _CorpusGateException('protectedAuthorityDrift');
       }
       final repositoryGitControlBeforePub = _retainedGitControlFingerprint(
         repository,
@@ -760,7 +755,7 @@ final class DefaultCorpusProjectViewFactory
               followLinks: false,
             ) !=
             FileSystemEntityType.notFound) {
-          throw const _CorpusGateException();
+          throw const _CorpusGateException('protectedAuthorityDrift');
         }
       }
       final sourceStatusBeforePub = await _gitStatus(
@@ -780,8 +775,7 @@ final class DefaultCorpusProjectViewFactory
             expectedRepositoryPath: expectedRepositoryPath,
             expectedPackagePath: expectedPackagePath,
           )) {
-        failureStatus = 'protectedAuthorityDrift';
-        throw const _CorpusGateException();
+        throw const _CorpusGateException('protectedAuthorityDrift');
       }
 
       final pubGet = await _processRunner.run(
@@ -797,8 +791,7 @@ final class DefaultCorpusProjectViewFactory
             ..writeln(utf8.decode(pubGet.stdout.capturedPayload))
             ..writeln(utf8.decode(pubGet.stderr.capturedPayload));
         }
-        failureStatus = _processStatus(pubGet);
-        throw const _CorpusGateException();
+        throw _CorpusGateException(_processStatus(pubGet));
       }
       if (!_factoryViewAuthorityCurrent(
             lease: lease,
@@ -809,18 +802,15 @@ final class DefaultCorpusProjectViewFactory
           ) ||
           _retainedGitControlFingerprint(repository) !=
               repositoryGitControlBeforePub) {
-        failureStatus = 'protectedAuthorityDrift';
-        throw const _CorpusGateException();
+        throw const _CorpusGateException('protectedAuthorityDrift');
       }
       _validateToolchainSelectionEvidence(project, repository);
       if (flutterIdentityBefore !=
           _fileFingerprint(flutter, includePhysical: true)) {
-        failureStatus = 'toolchainDrift';
-        throw const _CorpusGateException();
+        throw const _CorpusGateException('toolchainDrift');
       }
       if (!_overlayTargetsStillMatch(repository, overlayPlan.fixtureWrites)) {
-        failureStatus = 'overlayTargetDrift';
-        throw const _CorpusGateException();
+        throw const _CorpusGateException('overlayTargetDrift');
       }
       for (final relativePath in flutterPubEphemeralPaths) {
         final type = FileSystemEntity.typeSync(
@@ -849,8 +839,7 @@ final class DefaultCorpusProjectViewFactory
             expectedRepositoryPath: expectedRepositoryPath,
             expectedPackagePath: expectedPackagePath,
           )) {
-        failureStatus = 'pubSourceDrift';
-        throw const _CorpusGateException();
+        throw const _CorpusGateException('pubSourceDrift');
       }
       for (final write in overlayPlan.normalizationWrites) {
         await _installOverlay(repository, write);
@@ -866,8 +855,7 @@ final class DefaultCorpusProjectViewFactory
           maxOutputBytesPerStream: _maxOutputBytesPerStream,
         );
         if (baselineFailure != null) {
-          failureStatus = baselineFailure;
-          throw const _CorpusGateException();
+          throw _CorpusGateException(baselineFailure);
         }
       }
       final overlayWrites = overlayPlan.allWrites;
@@ -881,13 +869,11 @@ final class DefaultCorpusProjectViewFactory
       if (toolchainProbeBefore != toolchainProbeAfter ||
           flutterIdentityBefore !=
               _fileFingerprint(flutter, includePhysical: true)) {
-        failureStatus = 'toolchainDrift';
-        throw const _CorpusGateException();
+        throw const _CorpusGateException('toolchainDrift');
       }
       final toolchainProbe = toolchainProbeAfter;
       if (!_overlayTargetsStillMatch(repository, overlayWrites)) {
-        failureStatus = 'overlayTargetDrift';
-        throw const _CorpusGateException();
+        throw const _CorpusGateException('overlayTargetDrift');
       }
       if (!_factoryViewAuthorityCurrent(
             lease: lease,
@@ -898,15 +884,13 @@ final class DefaultCorpusProjectViewFactory
           ) ||
           _retainedGitControlFingerprint(repository) !=
               repositoryGitControlBeforePub) {
-        failureStatus = 'protectedAuthorityDrift';
-        throw const _CorpusGateException();
+        throw const _CorpusGateException('protectedAuthorityDrift');
       }
 
-      failureStatus = 'retainedRepositoryDrift';
       if (_retainedGitControlFingerprint(retained) !=
               retainedGitControlBefore ||
           !_fixtureSourcesStillMatch(fixtureSources)) {
-        throw const _CorpusGateException();
+        throw const _CorpusGateException('retainedRepositoryDrift');
       }
       final retainedStatusAfter = await _gitStatus(
         retained,
@@ -914,7 +898,7 @@ final class DefaultCorpusProjectViewFactory
       );
       if (_retainedGitControlFingerprint(retained) !=
           retainedGitControlBefore) {
-        throw const _CorpusGateException();
+        throw const _CorpusGateException('retainedRepositoryDrift');
       }
       final retainedHeadAfter = await _gitText(retained, const [
         'rev-parse',
@@ -925,9 +909,8 @@ final class DefaultCorpusProjectViewFactory
           _retainedGitControlFingerprint(retained) !=
               retainedGitControlBefore ||
           !_fixtureSourcesStillMatch(fixtureSources)) {
-        throw const _CorpusGateException();
+        throw const _CorpusGateException('retainedRepositoryDrift');
       }
-      failureStatus = 'protectedAuthorityDrift';
       if (!_factoryViewAuthorityCurrent(
             lease: lease,
             repository: repository,
@@ -937,7 +920,7 @@ final class DefaultCorpusProjectViewFactory
           ) ||
           _retainedGitControlFingerprint(repository) !=
               repositoryGitControlBeforePub) {
-        throw const _CorpusGateException();
+        throw const _CorpusGateException('protectedAuthorityDrift');
       }
       final finalHead = await _gitText(repository, const [
         'rev-parse',
@@ -953,10 +936,11 @@ final class DefaultCorpusProjectViewFactory
             expectedRepositoryPath: expectedRepositoryPath,
             expectedPackagePath: expectedPackagePath,
           )) {
-        if (finalHead != project.repositoryRevision) {
-          failureStatus = 'repositoryRevisionDrift';
-        }
-        throw const _CorpusGateException();
+        throw _CorpusGateException(
+          finalHead != project.repositoryRevision
+              ? 'repositoryRevisionDrift'
+              : 'protectedAuthorityDrift',
+        );
       }
       final baselineStatus = await _gitStatus(
         repository,
@@ -971,8 +955,7 @@ final class DefaultCorpusProjectViewFactory
             expectedRepositoryPath: expectedRepositoryPath,
             expectedPackagePath: expectedPackagePath,
           )) {
-        failureStatus = 'protectedAuthorityDrift';
-        throw const _CorpusGateException();
+        throw const _CorpusGateException('protectedAuthorityDrift');
       }
       final baselineStatusIdentity = _sha256(baselineStatus);
       final protectedAuthority = _protectedAuthorityFingerprint(
@@ -997,11 +980,9 @@ final class DefaultCorpusProjectViewFactory
             includePhysical: true,
           ),
       };
-      failureStatus = 'retainedRepositoryDrift';
       if (!_fixtureSourcesStillMatch(fixtureSources)) {
-        throw const _CorpusGateException();
+        throw const _CorpusGateException('retainedRepositoryDrift');
       }
-      failureStatus = 'protectedAuthorityDrift';
       if (!_factoryViewAuthorityCurrent(
             lease: lease,
             repository: repository,
@@ -1011,8 +992,7 @@ final class DefaultCorpusProjectViewFactory
           ) ||
           _retainedGitControlFingerprint(repository) !=
               repositoryGitControlBeforePub) {
-        failureStatus = 'protectedAuthorityDrift';
-        throw const _CorpusGateException();
+        throw const _CorpusGateException('protectedAuthorityDrift');
       }
       final viewFingerprint = _hashFields([
         _viewFingerprintSchema,
@@ -1046,6 +1026,14 @@ final class DefaultCorpusProjectViewFactory
     } on ProcessTerminationUnconfirmedException {
       failureStatus = 'terminationUnconfirmed';
       lease?.poison();
+      return CorpusProjectViewRejected(
+        _provisioningOutcome(project, failureStatus),
+      );
+    } on _CorpusGateException catch (e) {
+      failureStatus = e.status;
+      if (lease != null && !lease.isPoisoned) {
+        if (!await lease.dispose()) failureStatus = 'cleanupFailed';
+      }
       return CorpusProjectViewRejected(
         _provisioningOutcome(project, failureStatus),
       );
@@ -2027,7 +2015,8 @@ final class DefaultCorpusMutationEvidenceRunner
 }
 
 final class _CorpusGateException implements Exception {
-  const _CorpusGateException();
+  const _CorpusGateException([this.status = 'provisioningFailed']);
+  final String status;
 }
 
 final class _OwnedProjectViewLease implements CorpusProjectViewLease {

@@ -39,14 +39,6 @@ const _fixedEnvironment = <String, String>{
 
 void main() {
   group('ProcessL10nGenerator bound launch', () {
-    setUp(() {
-      if (Platform.isWindows) {
-        markTestSkipped(
-          'Task 6 currently requires POSIX host executable authority.',
-        );
-      }
-    });
-
     test(
       'uses the resolver-bound command exactly and consumes one stage once',
       () async {
@@ -877,7 +869,7 @@ void main() {
         });
       },
     );
-  });
+  }, skip: Platform.isWindows ? 'Task 6 requires POSIX' : null);
 
   test('generation evidence sorts failures by stable identity fields', () {
     final unavailable = L10nStageInventoryCapture.unavailable();

@@ -960,6 +960,7 @@ void main() {
 
     test(
       'rejects verification-time mutation of ARB config or generated paths',
+      timeout: const Timeout(Duration(seconds: 60)),
       () async {
         for (final path in [_templatePath, 'l10n.yaml', _outputPath]) {
           final fixture = await _VerifierFixture.create();

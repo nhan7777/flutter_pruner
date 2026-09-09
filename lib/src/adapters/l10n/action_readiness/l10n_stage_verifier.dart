@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:collection';
 import 'dart:convert';
 import 'dart:io';
@@ -347,45 +348,58 @@ final class DefaultL10nStageVerifier implements L10nStageVerifier {
       }
 
       if (failures.isEmpty && stagedProject != null) {
-        final analysis = await _analysisRunner(stagedProject, const <String>{
-          'l10n',
-        });
-        final failureCountBeforeAnalysisValidation = failures.length;
-        _validateAnalysis(
-          analysis: analysis,
-          stagedProject: stagedProject,
-          snapshot: snapshot,
-          removedKeys: removedKeys,
-          failures: failures,
-        );
-        if (failures.length == failureCountBeforeAnalysisValidation) {
-          final allFamilyIds = _familyNodeIds(
-            stagedProject,
-            snapshot,
-            const {},
+        AnalysisSnapshot? analysis;
+        try {
+          analysis = await _analysisRunner(stagedProject, const <String>{
+            'l10n',
+          }).timeout(const Duration(seconds: 15));
+        } on TimeoutException {
+          failures.add(
+            const L10nEvidenceFailure(
+              code: L10nEvidenceRejectionCode.toolchainUnavailable,
+              stage: _verificationStage,
+              detailCode: 'stage-verification-timeout',
+            ),
           );
-          if (stage.role == L10nStageRole.baseline) {
-            final baselineIdentity = const L10nAnalysisFingerprintProjector()
-                .project(analysis: analysis, familyNodeIds: allFamilyIds);
-            if (baselineIdentity != snapshot.l10nAnalysisFingerprint) {
-              failures.add(_failure('baseline-l10n-graph-identity-mismatch'));
-            }
-          }
-          final retainedIds = _familyNodeIds(
-            stagedProject,
-            snapshot,
-            snapshot.selectedKeys,
-          );
-          summary['retainedL10nGraphIdentity'] =
-              const L10nAnalysisFingerprintProjector().project(
-                analysis: analysis,
-                familyNodeIds: retainedIds,
-              );
         }
-        summary['analyzerAdapterIds'] = analysis.adapterIds;
-        summary['graphNodeCount'] = analysis.graph.nodeCount;
-        summary['graphEdgeCount'] = analysis.graph.edgeCount;
-        summary['graphBlockerCount'] = analysis.graph.blockers.length;
+        if (analysis != null) {
+          final failureCountBeforeAnalysisValidation = failures.length;
+          _validateAnalysis(
+            analysis: analysis,
+            stagedProject: stagedProject,
+            snapshot: snapshot,
+            removedKeys: removedKeys,
+            failures: failures,
+          );
+          if (failures.length == failureCountBeforeAnalysisValidation) {
+            final allFamilyIds = _familyNodeIds(
+              stagedProject,
+              snapshot,
+              const {},
+            );
+            if (stage.role == L10nStageRole.baseline) {
+              final baselineIdentity = const L10nAnalysisFingerprintProjector()
+                  .project(analysis: analysis, familyNodeIds: allFamilyIds);
+              if (baselineIdentity != snapshot.l10nAnalysisFingerprint) {
+                failures.add(_failure('baseline-l10n-graph-identity-mismatch'));
+              }
+            }
+            final retainedIds = _familyNodeIds(
+              stagedProject,
+              snapshot,
+              snapshot.selectedKeys,
+            );
+            summary['retainedL10nGraphIdentity'] =
+                const L10nAnalysisFingerprintProjector().project(
+                  analysis: analysis,
+                  familyNodeIds: retainedIds,
+                );
+          }
+          summary['analyzerAdapterIds'] = analysis.adapterIds;
+          summary['graphNodeCount'] = analysis.graph.nodeCount;
+          summary['graphEdgeCount'] = analysis.graph.edgeCount;
+          summary['graphBlockerCount'] = analysis.graph.blockers.length;
+        }
       }
     } on Object {
       failures.add(
