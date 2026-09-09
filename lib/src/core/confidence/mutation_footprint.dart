@@ -26,7 +26,6 @@ final class MutationFootprint {
   });
 
   /// Validates footprint constraints based on risk scope.
-  /// Validates footprint constraints based on risk scope.
   void validate() {
     if (findingIds.isEmpty) {
       throw ArgumentError('findingIds cannot be empty');
