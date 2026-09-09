@@ -1150,7 +1150,7 @@ void main() {
         );
       },
     );
-  });
+  }, skip: Platform.isWindows ? 'POSIX resolver contract' : null);
 
   group('probe failure handling', () {
     setUp(_requirePosixResolverHost);
