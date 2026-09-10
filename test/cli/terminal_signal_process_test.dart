@@ -557,12 +557,7 @@ Future<void> main(List<String> arguments) async {
   while (!childPid.existsSync()) {
     await Future<void>.delayed(const Duration(milliseconds: 10));
   }
-  final parent = Process.runSync('ps', ['-o', 'ppid=', '-p', '$pid']);
-  if (parent.exitCode != 0) {
-    throw StateError('could not resolve CLI parent PID: ${parent.stderr}');
-  }
   File(arguments[3]).writeAsStringSync(jsonEncode({
-    'cliPid': int.parse((parent.stdout as String).trim()),
     'rootPid': pid,
     'childPid': int.parse(childPid.readAsStringSync()),
   }));
@@ -605,12 +600,17 @@ Future<void> main(List<String> arguments) async {
           completion,
           timeout: const Duration(seconds: 45),
         );
-        final pids = jsonDecode(ready.readAsStringSync()) as Map;
-
-        Process.killPid(pids['cliPid'] as int, ProcessSignal.sigterm);
+        Process.killPid(invocation.processId, ProcessSignal.sigterm);
         final result = await completion;
 
-        expect(result.exitCode, 143);
+        expect(
+          result.exitCode,
+          143,
+          reason:
+              'stdout: \n${result.stdoutText}\n'
+              'stderr: \n${result.stderrText}\n'
+              'report: \n${report.existsSync() ? report.readAsStringSync() : '<absent>'}',
+        );
         expect(report.existsSync(), isTrue);
         final saved = jsonDecode(report.readAsStringSync()) as Map;
         expect((saved['run'] as Map)['status'], 'interrupted');

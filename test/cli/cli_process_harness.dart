@@ -621,6 +621,9 @@ class CliProcessInvocation {
   /// Completion includes raw stream closure, not merely root exit.
   Future<CliProcessResult> get result => _active.completion;
 
+  /// OS PID of the CLI process, for signal delivery in tests.
+  int get processId => _active.process.pid;
+
   /// Terminates the tracked root/tree and confirms its disappearance.
   Future<void> close() => _active.terminate();
 }
