@@ -609,8 +609,10 @@ class _ProcessTreeObserver {
     if (!Platform.isLinux && !Platform.isMacOS) return;
     // The freshly spawned root may not appear in the first ps snapshot on
     // slower hosts. Retry a few times before starting the continuous loop so
-    // the root identity is captured before it can exit.
+    // the root identity is captured before it can exit. A miss during this
+    // initial phase is expected and must not poison reliability.
     for (var attempt = 0; attempt < 5 && !_capturedRootIdentity; attempt++) {
+      _inspectionReliable = true;
       await _observeOnce();
       if (!_capturedRootIdentity) {
         await Future<void>.delayed(_processObservationInterval);
