@@ -607,7 +607,15 @@ class _ProcessTreeObserver {
 
   Future<void> captureInitialIdentityAndStart() async {
     if (!Platform.isLinux && !Platform.isMacOS) return;
-    await _observeOnce();
+    // The freshly spawned root may not appear in the first ps snapshot on
+    // slower hosts. Retry a few times before starting the continuous loop so
+    // the root identity is captured before it can exit.
+    for (var attempt = 0; attempt < 5 && !_capturedRootIdentity; attempt++) {
+      await _observeOnce();
+      if (!_capturedRootIdentity) {
+        await Future<void>.delayed(_processObservationInterval);
+      }
+    }
     if (!_stopping) _task = _observe();
   }
 
