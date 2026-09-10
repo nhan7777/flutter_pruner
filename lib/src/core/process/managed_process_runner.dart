@@ -582,7 +582,8 @@ class _ProcessTreeObserver {
   final ProcessIdentityInspector _identityInspector;
   final String posixProcessTableExecutable;
   final Map<int, PosixProcessIdentity> _observedProcesses = {};
-  var _inspectionReliable = true;
+  var _resourceObservationReliable = true;
+  var _terminationObservationReliable = true;
   var _capturedRootIdentity = false;
   var _stopping = false;
   Future<void>? _task;
@@ -597,7 +598,7 @@ class _ProcessTreeObserver {
       return ProcessTreeResourceObservation.unsupported;
     }
     return ProcessTreeResourceObservation(
-      status: _inspectionReliable
+      status: _resourceObservationReliable
           ? ProcessResourceObservationStatus.measured
           : ProcessResourceObservationStatus.unreliable,
       sampleCount: _sampleCount,
@@ -607,24 +608,14 @@ class _ProcessTreeObserver {
 
   Future<void> captureInitialIdentityAndStart() async {
     if (!Platform.isLinux && !Platform.isMacOS) return;
-    // The freshly spawned root may not appear in the first ps snapshot on
-    // slower hosts. Retry a few times before starting the continuous loop so
-    // the root identity is captured before it can exit. A miss during this
-    // initial phase is expected and must not poison reliability.
-    for (var attempt = 0; attempt < 5 && !_capturedRootIdentity; attempt++) {
-      _inspectionReliable = true;
-      await _observeOnce();
-      if (!_capturedRootIdentity) {
-        await Future<void>.delayed(_processObservationInterval);
-      }
-    }
+    await _observeOnce();
     if (!_stopping) _task = _observe();
   }
 
   Future<bool> stop() async {
     _stopping = true;
     await _task;
-    return _inspectionReliable;
+    return _terminationObservationReliable;
   }
 
   Future<void> _observe() async {
@@ -640,7 +631,7 @@ class _ProcessTreeObserver {
     try {
       final processTable = await _identityInspector.snapshot();
       if (processTable == null) {
-        _inspectionReliable = false;
+        _markObservationUnreliable();
         return;
       }
       final rootIdentity = processTable.identityFor(rootPid);
@@ -652,27 +643,26 @@ class _ProcessTreeObserver {
         } else if (previousRoot != rootIdentity) {
           // Do not replace the original lifetime with a reused root PID. The
           // missing interval could also have hidden a detached descendant.
-          _inspectionReliable = false;
+          _markObservationUnreliable();
         }
       } else if (!_capturedRootIdentity) {
         // Missing the root before its identity was captured leaves a gap in
         // which descendants could have detached unobserved.
-        _inspectionReliable = false;
+        _markObservationUnreliable();
       }
 
       for (final identity in _observedProcesses.values) {
         if (!processTable.containsIdentity(identity)) {
-          // Historical identities are monotonic evidence. Disappearance
-          // between snapshots is an observation gap: the process may have
-          // forked and reparented a child before exiting.
-          _inspectionReliable = false;
+          // Disappearance after a valid sample is normal for RSS, but remains
+          // an observation gap for timeout or cancellation termination proof.
+          _terminationObservationReliable = false;
         }
       }
       final liveRoots = processTable.matchingPids(_observedProcesses.values);
       for (final pid in processTable.descendantsOf(liveRoots)) {
         final identity = processTable.identityFor(pid);
         if (identity == null) {
-          _inspectionReliable = false;
+          _markObservationUnreliable();
           continue;
         }
         final previousIdentity = _observedProcesses[pid];
@@ -681,7 +671,7 @@ class _ProcessTreeObserver {
         } else if (previousIdentity != identity) {
           // A reused descendant PID cannot replace its historical identity or
           // become a traversal root for the new, unrelated lifetime.
-          _inspectionReliable = false;
+          _markObservationUnreliable();
         }
       }
 
@@ -696,8 +686,13 @@ class _ProcessTreeObserver {
         }
       }
     } catch (_) {
-      _inspectionReliable = false;
+      _markObservationUnreliable();
     }
+  }
+
+  void _markObservationUnreliable() {
+    _resourceObservationReliable = false;
+    _terminationObservationReliable = false;
   }
 }
 

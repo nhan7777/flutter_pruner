@@ -467,6 +467,130 @@ Future<void> main(List<String> arguments) async {
   );
 
   test(
+    'natural completion tolerates an in-flight snapshot observing exit',
+    () async {
+      final workload = _writeScript(tempDir, 'completion_race.dart', r'''
+import 'dart:async';
+
+Future<void> main() async {
+  await Future<void>.delayed(const Duration(milliseconds: 80));
+}
+''');
+      late Process spawned;
+      var snapshotCount = 0;
+      final inspector = _CallbackProcessIdentityInspector(() async {
+        if (snapshotCount++ == 0) {
+          return _snapshotContaining(spawned.pid);
+        }
+        await spawned.exitCode;
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+        return const PosixProcessTableSnapshot.empty();
+      });
+
+      final result =
+          await ManagedProcessRunner(
+            processStarter:
+                (executable, arguments, {required workingDirectory}) async {
+                  spawned = await Process.start(
+                    executable,
+                    arguments,
+                    workingDirectory: workingDirectory,
+                  );
+                  return spawned;
+                },
+            processIdentityInspector: inspector,
+          ).run(
+            Platform.resolvedExecutable,
+            [workload.path],
+            workingDirectory: tempDir.path,
+            timeout: const Duration(seconds: 5),
+            maxOutputBytesPerStream: 4096,
+          );
+
+      expect(result.exitCode, 0);
+      expect(
+        result.resourceObservation.status,
+        ProcessResourceObservationStatus.measured,
+      );
+      expect(result.resourceObservation.sampleCount, 1);
+      expect(result.resourceObservation.sampledPeakRssBytes, 128 * 1024);
+    },
+    skip: !Platform.isLinux && !Platform.isMacOS
+        ? 'Process-tree RSS sampling is supported only on POSIX hosts.'
+        : false,
+  );
+
+  test(
+    'completion race keeps late cancellation termination evidence strict',
+    () async {
+      final workload = _writeScript(tempDir, 'cancellation_race.dart', r'''
+import 'dart:async';
+
+Future<void> main() async {
+  await Future<void>.delayed(const Duration(milliseconds: 80));
+}
+''');
+      final controller = ManagedProcessCancellationController();
+      late Process spawned;
+      var snapshotCount = 0;
+      final inspector = _CallbackProcessIdentityInspector(() async {
+        if (snapshotCount++ == 0) {
+          return _snapshotContaining(spawned.pid);
+        }
+        await spawned.exitCode;
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+        controller.requestCancellation(ProcessSignal.sigterm);
+        return const PosixProcessTableSnapshot.empty();
+      });
+      bool? terminationObservationReliable;
+
+      final execution =
+          ManagedProcessRunner(
+            cancellationController: controller,
+            processStarter:
+                (executable, arguments, {required workingDirectory}) async {
+                  spawned = await Process.start(
+                    executable,
+                    arguments,
+                    workingDirectory: workingDirectory,
+                  );
+                  return spawned;
+                },
+            processIdentityInspector: inspector,
+            processTreeTerminator:
+                (
+                  process,
+                  exitCode, {
+                  required observedProcesses,
+                  required observationReliable,
+                }) async {
+                  terminationObservationReliable = observationReliable;
+                  return ManagedProcessTerminationEvidence(
+                    terminationConfirmed: true,
+                    observedProcesses: observedProcesses,
+                    observationReliable: observationReliable,
+                  );
+                },
+          ).run(
+            Platform.resolvedExecutable,
+            [workload.path],
+            workingDirectory: tempDir.path,
+            timeout: const Duration(seconds: 5),
+            maxOutputBytesPerStream: 4096,
+          );
+
+      await expectLater(
+        execution,
+        throwsA(isA<ProcessCancellationConfirmedException>()),
+      );
+      expect(terminationObservationReliable, isFalse);
+    },
+    skip: !Platform.isLinux && !Platform.isMacOS
+        ? 'Process-tree termination evidence is supported only on POSIX hosts.'
+        : false,
+  );
+
+  test(
     'confirmed POSIX timeout retains collected RSS samples',
     () async {
       final child = _writeScript(tempDir, 'timeout_child.dart', r'''
@@ -515,4 +639,17 @@ Future<void> main(List<String> arguments) async {
 
 File _writeScript(Directory directory, String name, String content) {
   return File(p.join(directory.path, name))..writeAsStringSync(content);
+}
+
+PosixProcessTableSnapshot _snapshotContaining(int pid) =>
+    PosixProcessTableSnapshot.parse('$pid 1 Sun Aug 16 10:00:00 2026 S 128\n');
+
+final class _CallbackProcessIdentityInspector
+    implements ProcessIdentityInspector {
+  _CallbackProcessIdentityInspector(this._snapshot);
+
+  final Future<PosixProcessTableSnapshot?> Function() _snapshot;
+
+  @override
+  Future<PosixProcessTableSnapshot?> snapshot() => _snapshot();
 }
