@@ -25,8 +25,9 @@ const _actionablePredicates = SafetyPredicates(
 );
 
 void main() {
-  if (Platform.isWindows)
+  if (Platform.isWindows) {
     return; // dart: URI to file path conversion fails on Windows
+  }
 
   group('RemovalPlanner l10n family grouping', () {
     test('groups findings with same familyId into one atomic unit', () {
