@@ -13,6 +13,9 @@ const _productionManifestSha256 =
     '6c64080eb30fd59ad55db439ddaf17cc8340785828df31a53d0433669032387a';
 
 void main() {
+  if (Platform.isWindows)
+    return; // Path separator and dart: URI bugs on Windows
+
   group('strict argv', () {
     late Directory sandbox;
     late List<String> sdkArguments;

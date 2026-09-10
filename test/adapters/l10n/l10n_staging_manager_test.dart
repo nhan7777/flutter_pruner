@@ -37,7 +37,10 @@ void main() {
       final staging = await stagingManager.createStaging(quarantineDir);
 
       expect(staging.existsSync(), isTrue);
-      expect(staging.path, endsWith('quarantine/staging'));
+      expect(
+        staging.path,
+        anyOf(endsWith('quarantine/staging'), endsWith('quarantine\\staging')),
+      );
     });
 
     test('createStaging throws if staging already exists', () async {

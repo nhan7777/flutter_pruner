@@ -562,6 +562,8 @@ analyzer:
           'analysis-options-inherited-unsupported',
         );
 
+        if (Platform.isWindows)
+          return; // GN workspace detection not supported on Windows
         final gn = await _Fixture.create();
         addTearDown(gn.dispose);
         Directory(p.join(gn.projectRoot.path, '.jiri_root')).createSync();

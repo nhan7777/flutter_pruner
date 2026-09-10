@@ -1588,7 +1588,7 @@ void main() {
         detailCode: 'direct-probe-stderr-nonempty',
       );
     });
-  });
+  }, skip: Platform.isWindows ? 'POSIX resolver contract' : null);
 
   group('launch artifact validation', () {
     setUp(_requirePosixResolverHost);
@@ -1674,7 +1674,7 @@ void main() {
       );
       expect(runner.calls, isEmpty);
     });
-  });
+  }, skip: Platform.isWindows ? 'POSIX resolver contract' : null);
 
   group('retained evidence selection', () {
     setUp(_requirePosixResolverHost);
@@ -1851,7 +1851,7 @@ void main() {
         expect(runner.calls, isEmpty);
       });
     }
-  });
+  }, skip: Platform.isWindows ? 'POSIX resolver contract' : null);
 
   group('identity and immutability', () {
     setUp(_requirePosixResolverHost);
@@ -1970,7 +1970,7 @@ void main() {
         isNot((second as L10nToolchainResolved).identitySha256),
       );
     });
-  });
+  }, skip: Platform.isWindows ? 'POSIX resolver contract' : null);
 
   group('SDK Git HEAD identity', () {
     setUp(_requirePosixResolverHost);
@@ -2716,7 +2716,7 @@ void main() {
         expect(runner.calls, hasLength(1));
       },
     );
-  });
+  }, skip: Platform.isWindows ? 'POSIX resolver contract' : null);
 
   group('POSIX launch control semantics', () {
     setUp(_requirePosixResolverHost);
@@ -3396,7 +3396,7 @@ void main() {
         expect(runner.calls, hasLength(1));
       },
     );
-  });
+  }, skip: Platform.isWindows ? 'POSIX resolver contract' : null);
 
   group('within-probe temporal drift', () {
     setUp(_requirePosixResolverHost);
@@ -3661,7 +3661,7 @@ void main() {
         );
       },
     );
-  });
+  }, skip: Platform.isWindows ? 'POSIX resolver contract' : null);
 
   group('revalidation', () {
     setUp(_requirePosixResolverHost);
@@ -3978,7 +3978,7 @@ void main() {
         _expectChanged(result, detailCode: 'direct-probe-unavailable');
       },
     );
-  });
+  }, skip: Platform.isWindows ? 'POSIX resolver contract' : null);
 
   group('installed SDK direct integration', () {
     setUp(_requireDarwinResolverHost);
