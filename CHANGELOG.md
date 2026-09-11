@@ -7,6 +7,19 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+### Added
+
+- Add progress feedback for long-running analysis operations: adapter names now
+  include "(may take 30-60s on large projects)" to indicate expected duration.
+- Add signal handling documentation at `doc/signal-handling.md` explaining
+  graceful interruption, stale lock recovery, and fail-closed lock design.
+
+### Changed
+
+- Improve stale lock error messages: interrupted operations now clearly explain
+  the cause ("operation was interrupted and did not complete cleanup") and
+  provide step-by-step recovery instructions with exact `rm` command, distinct
+  from actual corruption errors ("process uncertainty evidence is corrupt").
 ## [1.7.0] - 2026-09-11
 ### Added
 

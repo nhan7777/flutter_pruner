@@ -71,6 +71,25 @@ class ProjectOperationLock {
         );
       }
       if (journal.unresolved case final unresolved?) {
+        final isStaleArmed =
+            unresolved.rootPid == null &&
+            unresolved.identities.isEmpty &&
+            !unresolved.observationReliable;
+        if (isStaleArmed) {
+          throw ProjectOperationLockException(
+            'Flutter Pruner operation "${unresolved.phase}" for '
+            '${workspace.projectRoot.path} was interrupted and did not complete '
+            'cleanup (incident ${unresolved.incidentId}).\n\n'
+            'Recovery:\n'
+            '1. Verify no flutter_pruner processes are running:\n'
+            '   ps aux | grep flutter_pruner\n'
+            '2. If none found, remove the stale lock:\n'
+            '   rm "${lockFile.path}"\n'
+            '3. Retry your command.\n\n'
+            'If flutter_pruner processes are still running, wait for them to '
+            'exit or terminate them before removing the lock.',
+          );
+        }
         if (!unresolved.hasCompleteIdentityEvidence) {
           throw ProjectOperationLockException(
             _corruptUncertaintyMessage(

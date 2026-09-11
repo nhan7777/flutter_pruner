@@ -673,6 +673,46 @@ Future<void> main(List<String> arguments) async {
     },
   );
 
+  test('stale armed record shows clear recovery guidance', () async {
+    final project = await Directory.systemTemp.createTemp(
+      'flutter_pruner_stale_armed_',
+    );
+    addTearDown(() async {
+      if (project.existsSync()) await project.delete(recursive: true);
+    });
+    final workspace = ToolWorkspace(project);
+
+    // Simulate interrupted operation: write armed record without clearing it
+    await _recordArmed(
+      workspace: workspace,
+      incidentId: 'interrupted-scan',
+      phase: 'analysis',
+    );
+
+    // Next acquire should show stale armed recovery guidance
+    final lockPath = workspace.operationLockFile.path;
+    await expectLater(
+      ProjectOperationLock.acquire(
+        workspace: workspace,
+        operation: 'next-scan',
+        identityInspector: const _FixedIdentityInspector.absent(),
+      ),
+      throwsA(
+        isA<ProjectOperationLockException>().having(
+          (error) => error.message,
+          'message',
+          allOf([
+            contains('interrupted and did not complete cleanup'),
+            contains('incident interrupted-scan'),
+            contains('ps aux | grep flutter_pruner'),
+            contains('rm "$lockPath"'),
+            contains('Retry your command'),
+          ]),
+        ),
+      ),
+    );
+  });
+
   test(
     'normal managed completion clears armed uncertainty before release',
     () async {
@@ -1069,6 +1109,31 @@ Future<void> _recordUnconfirmedIdentities(
   } finally {
     await lock.release();
   }
+}
+
+Future<void> _recordArmed({
+  required ToolWorkspace workspace,
+  required String incidentId,
+  required String phase,
+}) async {
+  // Create workspace directory structure
+  await workspace.directory.create(recursive: true);
+
+  // Write armed record directly (simulates interrupted operation)
+  final armedRecord = {
+    'recordType': 'processUncertainty',
+    'version': 1,
+    'incidentId': incidentId,
+    'phase': phase,
+    'state': 'armed',
+    'recordedAtUtc': DateTime.now().toUtc().toIso8601String(),
+  };
+
+  await workspace.operationLockFile.writeAsString(
+    '${jsonEncode(armedRecord)}\n',
+    mode: FileMode.append,
+    flush: true,
+  );
 }
 
 final class _FixedIdentityInspector implements ProcessIdentityInspector {

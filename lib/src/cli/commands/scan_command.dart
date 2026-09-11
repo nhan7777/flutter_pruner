@@ -314,6 +314,9 @@ Scan may persist tool state and reports''';
               );
               currentAdapterId = context?.id;
               currentAdapterName = context?.name;
+              stderr.writeln(
+                'Note: Analysis may take 30-60 seconds on large projects.',
+              );
               progress.start(context?.name ?? 'adapter analysis');
             },
             onAdapterFinished: (adapter, status) {

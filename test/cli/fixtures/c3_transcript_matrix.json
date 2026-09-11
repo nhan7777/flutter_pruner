@@ -37,7 +37,7 @@
       "init.interactive.next"
     ],
     "init-cancelled": ["init.cancelled"],
-    "scan-zero": ["scan.banner", "scan.success.completed-plural", "scan.analysis-limited", "scan.analysis-targets", "scan.analysis-targets-next", "scan.analysis-inventory", "scan.analysis-inventory-next", "scan.analysis-next", "scan.empty.incomplete", "scan.report.ready", "scan.report.path", "scan.project", "scan.progress.adapter", "scan.progress.adapter"],
+    "scan-zero": ["scan.banner", "scan.success.completed-plural", "scan.analysis-limited", "scan.analysis-targets", "scan.analysis-targets-next", "scan.analysis-inventory", "scan.analysis-inventory-next", "scan.analysis-next", "scan.empty.incomplete", "scan.report.ready", "scan.report.path", "scan.project", "scan.progress.analysis-note", "scan.progress.adapter", "scan.progress.analysis-note", "scan.progress.adapter"],
     "scan-one": [
       "scan.banner",
       "scan.success.clean-singular",
@@ -61,6 +61,7 @@
       "scan.json-report.ready",
       "scan.report.path",
       "scan.project",
+      "scan.progress.analysis-note",
       "scan.progress.adapter"
     ],
     "scan-many": [
@@ -92,6 +93,7 @@
       "scan.json-report.ready",
       "scan.report.path",
       "scan.project",
+      "scan.progress.analysis-note",
       "scan.progress.adapter"
     ],
     "scan-operational-failure": ["scan.error.missing-project"],
