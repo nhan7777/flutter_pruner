@@ -16,7 +16,7 @@ discussion first so we do not duplicate work.
 ## Ways to contribute
 
 **Add an analyzer adapter.** The main extension point — routes, DI, localization,
-fonts. See [the walkthrough](doc/contributing/how-to-add-adapter.md).
+fonts. See [the repository walkthrough](https://github.com/nhan7777/flutter_pruner/blob/main/doc/contributing/how-to-add-adapter.md).
 
 **Add test fixtures.** A small project under `test/fixtures/` that exercises a
 real edge case is genuinely valuable, and needs no engine knowledge. Dynamic
@@ -27,9 +27,8 @@ dart-define branches — if you have hit one in production, encode it.
 that is the highest-priority class of bug. A failing test with a fixture is a
 complete report.
 
-**Fix documentation.** Especially [flutter-facts.md](doc/advanced/flutter-facts.md) — if a
-claim there is out of date, that is a correctness bug, because adapters are built
-on it.
+**Fix documentation.** Keep product documentation concise and verify behavior
+and links before opening a pull request.
 
 ---
 
@@ -70,15 +69,11 @@ configuration and is read-only with respect to project source and assets.
 
 ## Read these first
 
-These documents will save you time, and reviewers will assume you have read
-the ones relevant to your change:
+Contributor deep dives live in the source repository:
 
-- [graph-model.md](doc/advanced/graph-model.md) — nodes, edges, conditional reachability,
-  blockers. Explains why reachability is per build target.
-- [confidence-model.md](doc/advanced/confidence-model.md) — the shared hard gates,
-  explicit risks, and why tiers are used instead of a score.
-- [profiling.md](doc/performance/profiling.md) — reproducible synthetic benchmarks,
-  subphase profiling, and rules for sharing results safely.
+- [Graph model](https://github.com/nhan7777/flutter_pruner/blob/main/doc/advanced/graph-model.md)
+- [Confidence model](https://github.com/nhan7777/flutter_pruner/blob/main/doc/advanced/confidence-model.md)
+- [Profiling](https://github.com/nhan7777/flutter_pruner/blob/main/doc/performance/profiling.md)
 
 ---
 
@@ -287,8 +282,8 @@ High-impact adapter work still unclaimed:
   APIs, `riverpod`
 - unused font weights and variants
 
-[ROADMAP.md](ROADMAP.md) has the current state. Comment on the relevant issue, or
-open one, before starting something large.
+Check the current project roadmap in the repository before starting something
+large, and comment on the relevant issue or open one first.
 
 ---
 
@@ -310,4 +305,3 @@ By contributing you agree your code is licensed under the MIT License.
 
 - [Discussions](https://github.com/nhan7777/flutter_pruner/discussions)
 - [Issues](https://github.com/nhan7777/flutter_pruner/issues)
-- [Architecture docs](doc/advanced/architecture.md)

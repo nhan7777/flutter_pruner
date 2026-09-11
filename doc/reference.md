@@ -54,7 +54,7 @@ jq -e '
   .run.status == "completed" and
   .statistics.findings.byTier.SAFE == 0 and
   .statistics.findings.byTier.HIGH == 0
-' scan.json
+' .flutter_pruner/reports/scan.json
 ```
 
 Reports may contain absolute paths and toolchain identity. Review before
@@ -66,7 +66,9 @@ Human results go to stdout. Progress, diagnostics, usage, and errors go to
 stderr. JSON is selected with `--format json --output <file>`, never by
 redirecting stdout.
 
-## Next steps
+## Further reading
 
 - [Project configuration](flutter_pruner.yaml.md) — every config field.
-- [Run reports](run-report.md) — full schema and storage layout.
+
+For deeper report storage and schema details, see the repository's
+[run report reference](https://github.com/nhan7777/flutter_pruner/blob/main/doc/run-report.md).

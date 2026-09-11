@@ -60,5 +60,5 @@ Each mutating run records its recovery data under
 `.flutter_pruner/quarantine/<run-id>`. Keep the quarantine until the resulting
 project has been reviewed and verified.
 
-Before using the tool on an important project, read
-[Using Flutter Pruner safely](../doc/using-flutter-pruner.md).
+Before using the tool on an important project, read the
+[quickstart](../doc/quickstart.md) and [workflow guide](../doc/workflow.md).

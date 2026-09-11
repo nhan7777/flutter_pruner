@@ -16,8 +16,9 @@
 
 <p align="center">
   <strong>Safety-first semantic cleanup for Dart and Flutter.</strong><br>
-  Find unreachable declarations and assets, review the evidence, then apply only
-  changes allowed by the configured safety policy.
+  Find unreachable Dart declarations, assets, and other supported resources;
+  review the evidence, then apply only changes allowed by the configured safety
+  policy.
 </p>
 
 ## Install
@@ -60,6 +61,9 @@ important project.
 - [Workflow and safety model](doc/workflow.md)
 - [CLI and CI reference](doc/reference.md)
 - [Project configuration](doc/flutter_pruner.yaml.md)
+
+Technical architecture, report storage, performance, and release-validation
+notes remain repository-only deep dives.
 
 Found a false `SAFE` finding, data loss, or broken rollback? Open an
 [issue](https://github.com/nhan7777/flutter_pruner/issues) — these are
