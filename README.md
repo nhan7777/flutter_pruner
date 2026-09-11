@@ -71,6 +71,20 @@ To undo: `flutter_pruner rollback <run-id>`.
 
 See the [5-minute quickstart](doc/quickstart.md) for a complete walkthrough.
 
+## Choose adapters per run
+
+On an interactive terminal, `scan` and `apply` quickly detect applicable
+adapters and show a multi-select list. All detected adapters are selected by
+default; enter comma-separated numbers or IDs to run only the domains you need.
+
+Automation never prompts. Pass `--adapter` repeatedly or comma-separate IDs to
+make the selection explicit:
+
+```bash
+flutter_pruner scan --adapter dart,assets
+flutter_pruner apply --dry-run --adapter duplicates
+```
+
 ## 🔄 Apply and recover
 
 A mutating run is all-or-nothing: originals are quarantined before editing,
@@ -94,7 +108,12 @@ important project.
   inferred.
 - **Scan exits 0 even with findings.** Inspect the report, not the exit code.
 - **Stop on `recoveryRequired`.** Inspect quarantine before running anything
-  else.
+- **Interrupting with Ctrl+C is safe.** The first signal triggers graceful
+  cleanup; a second signal forces immediate exit. Long operations (analysis,
+  verification) may take 30-60 seconds on large projects. If interrupted during
+  cleanup, the next run will detect the stale lock and provide recovery steps.
+- See [signal handling and recovery](doc/signal-handling.md) for interruption
+  behavior and stale-lock recovery steps.
 
 ## 📊 Reports
 

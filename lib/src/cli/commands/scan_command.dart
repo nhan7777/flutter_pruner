@@ -314,7 +314,9 @@ Scan may persist tool state and reports''';
               );
               currentAdapterId = context?.id;
               currentAdapterName = context?.name;
-              progress.start(context?.name ?? 'adapter analysis');
+              progress.start(
+                '${context?.name ?? 'adapter analysis'} (may take 30-60s on large projects)',
+              );
             },
             onAdapterFinished: (adapter, status) {
               if (status == AdapterRunStatus.failed) return;
