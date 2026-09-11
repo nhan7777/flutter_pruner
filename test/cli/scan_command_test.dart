@@ -2094,6 +2094,7 @@ target_matrix:
       expect(
         _stripAnsi(progress),
         '◆ PROJECT  ${project.path}\n'
+        'Note: Analysis may take 30-60 seconds on large projects.\n'
         '• Scanning Duplicate file detector…\n',
       );
 
