@@ -7,13 +7,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
-### Fixed
-
-- Target the CLI PID supplied by the process harness in the baseline SIGTERM
-  test instead of inferring it from a verifier subprocess.
-
-## [1.7.0] - 2026-09-08
-
+## [1.7.0] - 2026-09-11
 ### Added
 
 - Add isolated staging for l10n key-removal mutations: ARB files are edited in
@@ -95,6 +89,17 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   quarantine moves, restoring native NTFS clean and retained-restore behavior
   without falling back to an unconfirmed move result. Map absent relative NTFS
   objects to the typed not-found observation used by restart reconciliation.
+- Target the CLI PID supplied by the process harness in the baseline SIGTERM
+  test instead of inferring it from a verifier subprocess.
+
+### Documentation
+
+- Enrich README with analyzer overview table, confidence tiers, workflow
+  details, CI report example, configuration summary, and contributing guide.
+- Streamline published documentation: move internal planning artifacts out
+  of `doc/`, consolidate contributor guides, and add verified Flutter facts.
+- Remove internal session artifacts, phase plans, and planning docs from
+  git tracking; add `.gitignore` patterns to prevent re-committing.
 
 ## [1.6.0] - 2026-08-24
 
@@ -374,7 +379,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Custom runtime callback and asset registries require explicit modeling or
   project policy.
 
-[Unreleased]: https://github.com/nhan7777/flutter_pruner/compare/v1.6.0...main
+[Unreleased]: https://github.com/nhan7777/flutter_pruner/compare/v1.7.0...main
+[1.7.0]: https://github.com/nhan7777/flutter_pruner/compare/v1.6.0...v1.7.0
 [1.6.0]: https://github.com/nhan7777/flutter_pruner/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/nhan7777/flutter_pruner/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/nhan7777/flutter_pruner/compare/v1.3.0...v1.4.0
