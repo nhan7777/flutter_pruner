@@ -22,12 +22,28 @@ flutter_pruner.yaml
 .codex/
 AGENTS.md
 .github/
-doc/superpowers/
+# Repository-only deep dives and implementation evidence.
+doc/advanced/
+doc/performance/
+doc/run-report.md
+doc/using-flutter-pruner.md
+doc/contributing/
+doc/release-readiness.md
+tool/
+worktrees/
+.superpowers/
+
+# Repository-only planning, summaries, and benchmark tooling.
+PLAN.md
+ROADMAP.md
+PHASE*.md
+$CLAUDE_JOB_DIR/
+benchmark/
+docs/
 doc/plans/
 
 # Internal release/accuracy validation inputs are retained in the repository,
 # but are not runtime contents of the published CLI package.
-benchmark/accuracy/
 dart_test.yaml
 *.rej
 

@@ -1,0 +1,13 @@
+name: l10n_snapshot_fixture
+description: Private V3.1 l10n family snapshot fixture.
+publish_to: none
+
+environment:
+  sdk: ^3.9.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+flutter:
+  generate: true

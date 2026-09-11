@@ -1,0 +1,14 @@
+{
+  "@@locale": "en",
+  "live": "Live",
+  "dead": "Dead",
+  "welcome": "Welcome {name}",
+  "@welcome": {
+    "description": "Greeting",
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  }
+}

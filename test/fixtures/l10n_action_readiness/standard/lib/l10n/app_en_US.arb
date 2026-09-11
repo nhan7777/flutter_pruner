@@ -1,0 +1,6 @@
+{
+  "@@locale": "en_US",
+  "live": "Live US",
+  "dead": "Dead US",
+  "welcome": "Welcome {name}"
+}

@@ -1,0 +1,12 @@
+version: 1
+analysis:
+  mode: application
+target_matrix:
+  complete: true
+  targets:
+    - name: android-default
+      platform: android
+      entrypoint: lib/main.dart
+    - name: ios-default
+      platform: ios
+      entrypoint: lib/main.dart

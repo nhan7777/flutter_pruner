@@ -1,0 +1,5 @@
+include: config/base.yaml
+
+analyzer:
+  exclude:
+    - build/**

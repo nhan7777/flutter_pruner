@@ -742,6 +742,81 @@ class QuarantineManager {
     return applyCase;
   }
 
+  /// Journals an absent file for a V3 transaction.
+  ///
+  /// Used when a file does not exist before the transaction but will be created
+  /// during mutation (e.g., l10n generated outputs that may not exist initially).
+  /// Rollback deletes the file instead of restoring bytes.
+  Future<QuarantineCase> beginAbsentCase({
+    required Directory quarantineDir,
+    required String caseId,
+    required String findingId,
+    required String relativePath,
+    required QuarantineOperationType operationType,
+    List<String>? declarationIds,
+    required String transactionId,
+  }) async {
+    if (!RegExp(r'^[A-Za-z0-9_-]+$').hasMatch(caseId)) {
+      throw QuarantineException('Invalid case ID: $caseId');
+    }
+
+    final manifest = await _readManifest(quarantineDir);
+    if (!manifest.usesTransactionJournal) {
+      throw QuarantineException(
+        'Absent case journaling requires V3 transaction journal.',
+      );
+    }
+
+    final transaction = _transactionById(manifest, transactionId);
+    _requireTransactionStatus(transaction, const {
+      QuarantineTransactionStatus.pending,
+    });
+    if (!transaction.caseIds.contains(caseId)) {
+      throw QuarantineException(
+        'Case $caseId is not declared by transaction $transactionId.',
+      );
+    }
+
+    final existingIndex = manifest.cases.indexWhere(
+      (item) => item.caseId == caseId,
+    );
+    if (existingIndex != -1) {
+      throw QuarantineException('Case already exists: $caseId');
+    }
+
+    final absolutePath = p.join(projectRoot.path, relativePath);
+    final file = File(absolutePath);
+    if (file.existsSync()) {
+      throw QuarantineException(
+        'Cannot journal absent case for existing file: $absolutePath',
+      );
+    }
+
+    // Use empty SHA-256 and zero size for absent files
+    const emptySha256 =
+        'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
+
+    final applyCase = QuarantineCase(
+      caseId: caseId,
+      findingId: findingId,
+      entry: QuarantineEntry(
+        originalPath: absolutePath,
+        sha256: emptySha256,
+        sizeBytes: 0,
+        posixMode: null,
+        operationType: operationType,
+        declarationIds: declarationIds,
+        wasAbsentBeforeTransaction: true,
+      ),
+      status: QuarantineCaseStatus.backedUp,
+      transactionId: transactionId,
+    );
+
+    final cases = [...manifest.cases, applyCase];
+    await _writeManifest(quarantineDir, _copyManifest(manifest, cases: cases));
+    return applyCase;
+  }
+
   /// Journals and atomically displaces one source before candidate mutation.
   ///
   /// The source inode itself becomes the authoritative case backup. Candidate
@@ -1251,13 +1326,16 @@ class QuarantineManager {
 
     final byPath = <String, List<QuarantineCase>>{};
     for (final applyCase in selected) {
-      final snapshot = _caseSnapshotFor(quarantineDir, applyCase);
-      if (!snapshot.existsSync() ||
-          await _computeSha256(snapshot) != applyCase.entry.sha256) {
-        throw QuarantineException(
-          'Valid snapshot missing for case ${applyCase.caseId}: '
-          '${snapshot.path}',
-        );
+      // Absent-before cases have no snapshot: rollback deletes the file.
+      if (!applyCase.entry.wasAbsentBeforeTransaction) {
+        final snapshot = _caseSnapshotFor(quarantineDir, applyCase);
+        if (!snapshot.existsSync() ||
+            await _computeSha256(snapshot) != applyCase.entry.sha256) {
+          throw QuarantineException(
+            'Valid snapshot missing for case ${applyCase.caseId}: '
+            '${snapshot.path}',
+          );
+        }
       }
       byPath.putIfAbsent(applyCase.entry.originalPath, () => []).add(applyCase);
     }
@@ -1266,6 +1344,32 @@ class QuarantineManager {
       final first = pathCases.first;
       final last = pathCases.last;
       final target = File(first.entry.originalPath);
+
+      // Handle absent files: delete instead of restore
+      if (first.entry.wasAbsentBeforeTransaction) {
+        if (target.existsSync()) {
+          // Verify it matches the expected candidate hash before deletion
+          final targetHash = await _computeSha256(target);
+          if (targetHash != last.entry.modifiedSha256) {
+            throw QuarantineException(
+              'Absent-before file was modified after transaction apply: '
+              '${target.path}\n'
+              'Expected: ${last.entry.modifiedSha256}\n'
+              'Actual: $targetHash\n'
+              'Refusing to delete user changes.',
+            );
+          }
+          await target.delete();
+        }
+        // Verify file is now absent
+        if (target.existsSync()) {
+          throw QuarantineException(
+            'Failed to delete absent-before file during rollback: ${target.path}',
+          );
+        }
+        continue;
+      }
+
       final targetHash = target.existsSync()
           ? await _computeSha256(target)
           : null;
@@ -1840,7 +1944,11 @@ class QuarantineManager {
   void _requireV3PosixModeEvidence(QuarantineManifest manifest) {
     if (!_supportsPosixModes || !manifest.usesTransactionJournal) return;
     final missingCaseIds = manifest.cases
-        .where((applyCase) => applyCase.entry.posixMode == null)
+        .where(
+          (applyCase) =>
+              applyCase.entry.posixMode == null &&
+              !applyCase.entry.wasAbsentBeforeTransaction,
+        )
         .map((applyCase) => applyCase.caseId)
         .toList();
     if (missingCaseIds.isEmpty) return;
@@ -4693,10 +4801,8 @@ class QuarantineManager {
       );
     } on ProcessTerminationUnconfirmedException catch (error) {
       final state = await _describeAtomicPublishState(prepared, target);
-      final trigger = error.triggerSignal;
       throw _AtomicPublishException(
-        'Atomic link process termination was not confirmed'
-        '${trigger == null ? '' : ' after $trigger'}: $error. $state',
+        'Atomic link process termination was not confirmed: $error. $state',
         processTerminationUnconfirmed: error,
       );
     } catch (error) {

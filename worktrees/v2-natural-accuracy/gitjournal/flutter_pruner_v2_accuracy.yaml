@@ -1,0 +1,45 @@
+version: 1
+analysis:
+  mode: application
+target_matrix:
+  complete: true
+  targets:
+    - name: android-default
+      platform: android
+      entrypoint: lib/main.dart
+    - name: ios-default
+      platform: ios
+      entrypoint: lib/main.dart
+    - name: linux-default
+      platform: linux
+      entrypoint: lib/main.dart
+    - name: macos-default
+      platform: macos
+      entrypoint: lib/main.dart
+    - name: web-default
+      platform: web
+      entrypoint: lib/main.dart
+    - name: widgetbook
+      platform: macos
+      entrypoint: lib/main.widgetbook.dart
+    - name: script-convert-arb-keys
+      platform: linux
+      entrypoint: scripts/convert_arb_keys.dart
+    - name: script-setup-env
+      platform: linux
+      entrypoint: scripts/setup_env.dart
+    - name: test-driver-android
+      platform: android
+      entrypoint: test_driver/main.dart
+    - name: test-driver-ios
+      platform: ios
+      entrypoint: test_driver/main.dart
+    - name: test-driver-linux
+      platform: linux
+      entrypoint: test_driver/main.dart
+    - name: test-driver-macos
+      platform: macos
+      entrypoint: test_driver/main.dart
+    - name: test-driver-web
+      platform: web
+      entrypoint: test_driver/main.dart

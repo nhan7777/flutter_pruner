@@ -1,0 +1,6 @@
+{
+  "@@locale": "vi",
+  "live": "Dang dung",
+  "dead": "Khong dung",
+  "welcome": "Xin chao {name}"
+}

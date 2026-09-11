@@ -418,35 +418,63 @@ Future<void> _runResolutionTests(
   Directory root,
 ) async {
   final platform = _currentPlatform();
+  // Collect all required test runs for resolved blockers on this platform.
+  final requiredRuns = <_RequiredTestRun>[];
+  for (final blocker in blockers.where((entry) => entry.status == 'resolved')) {
+    for (final run in blocker.requiredTestRuns.where(
+      (run) => run.platform == platform,
+    )) {
+      requiredRuns.add(run);
+    }
+  }
+  // Group by file path to minimize process launches.
+  final byPath =
+      <String, List<({String path, String name, String blockerId})>>{};
+  for (final run in requiredRuns) {
+    final entry = byPath.putIfAbsent(run.path, () => []);
+    // Find the blocker that owns this test run.
+    final blockerId = blockers
+        .where((b) => b.requiredTestRuns.contains(run))
+        .first
+        .id;
+    entry.add((path: run.path, name: run.name, blockerId: blockerId));
+  }
   final reporterDirectory = await Directory.systemTemp.createTemp(
     'flutter_pruner_release_evidence_',
   );
   try {
     var reporterIndex = 0;
-    for (final blocker in blockers.where(
-      (entry) => entry.status == 'resolved',
-    )) {
-      for (final requiredTest in blocker.requiredTestRuns.where(
-        (run) => run.platform == platform,
-      )) {
-        final reporter = File(
-          p.join(reporterDirectory.path, '${reporterIndex++}.json'),
+    for (final entry in byPath.entries) {
+      final filePath = entry.key;
+      final requiredNames = {for (final r in entry.value) r.name: r.blockerId};
+      final reporter = File(
+        p.join(reporterDirectory.path, '${reporterIndex++}.json'),
+      );
+      final result = await Process.run(Platform.resolvedExecutable, [
+        'test',
+        '--reporter=silent',
+        '--file-reporter=json:${reporter.path}',
+        filePath,
+      ], workingDirectory: root.path);
+      if (result.exitCode != 0) {
+        throw _ResolutionTestFailure(
+          '$filePath failed to run (exit ${result.exitCode}).',
         );
-        final result = await Process.run(Platform.resolvedExecutable, [
-          'test',
-          '--reporter=silent',
-          '--file-reporter=json:${reporter.path}',
-          '--name',
-          '^${RegExp.escape(requiredTest.name)}\$',
-          requiredTest.path,
-        ], workingDirectory: root.path);
-        final observed = reporter.existsSync()
-            ? _observedTest(await reporter.readAsString(), requiredTest.name)
-            : _ObservedTest.missing;
-        if (result.exitCode != 0 || observed != _ObservedTest.passed) {
+      }
+      if (!reporter.existsSync()) {
+        throw _ResolutionTestFailure('$filePath produced no reporter output.');
+      }
+      final statuses = _observedTests(
+        await reporter.readAsString(),
+        requiredNames.keys.toSet(),
+      );
+      for (final name in requiredNames.keys) {
+        final status = statuses[name] ?? _ObservedTest.missing;
+        if (status != _ObservedTest.passed) {
+          final blockerId = requiredNames[name]!;
           throw _ResolutionTestFailure(
-            '${blocker.id}: ${requiredTest.path} :: ${requiredTest.name} '
-            'was ${observed.name} (exit ${result.exitCode}).',
+            '$blockerId: $filePath :: $name '
+            'was ${status.name}.',
           );
         }
       }
@@ -458,9 +486,12 @@ Future<void> _runResolutionTests(
   }
 }
 
-_ObservedTest _observedTest(String output, String expectedName) {
+Map<String, _ObservedTest> _observedTests(
+  String output,
+  Set<String> expectedNames,
+) {
   final namesById = <int, String>{};
-  _ObservedTest result = _ObservedTest.missing;
+  final statuses = <String, _ObservedTest>{};
   for (final line in const LineSplitter().convert(output)) {
     final decoded = jsonDecode(line);
     if (decoded is! Map<String, Object?>) continue;
@@ -473,15 +504,19 @@ _ObservedTest _observedTest(String output, String expectedName) {
       }
     }
     if (decoded['type'] != 'testDone' || decoded['testID'] is! int) continue;
-    if (namesById[decoded['testID']] != expectedName) continue;
-    if (result != _ObservedTest.missing) return _ObservedTest.duplicate;
-    result = decoded['skipped'] == true
+    final name = namesById[decoded['testID']];
+    if (name == null || !expectedNames.contains(name)) continue;
+    if (statuses.containsKey(name)) {
+      statuses[name] = _ObservedTest.duplicate;
+      continue;
+    }
+    statuses[name] = decoded['skipped'] == true
         ? _ObservedTest.skipped
         : decoded['result'] == 'success'
         ? _ObservedTest.passed
         : _ObservedTest.failed;
   }
-  return result;
+  return statuses;
 }
 
 String _currentPlatform() {

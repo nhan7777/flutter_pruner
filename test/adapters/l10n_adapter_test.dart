@@ -946,11 +946,9 @@ flutter:
 arb-dir: lib/l10n
 template-arb-file: app_en.arb
 ''');
-  if (completeTestEnvironment) {
-    await File(
-      p.join(root.path, 'dart_test.yaml'),
-    ).writeAsString('platforms: [vm]\n');
-  }
+  await File(p.join(root.path, 'dart_test.yaml')).writeAsString(
+    completeTestEnvironment ? 'platforms: [vm]\n' : 'platforms: [vm, chrome]\n',
+  );
   for (final locale in const ['en', 'vi']) {
     await File(p.join(root.path, 'lib/l10n/app_$locale.arb')).writeAsString('''
 {

@@ -7,8 +7,30 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+### Fixed
+
+- Target the CLI PID supplied by the process harness in the baseline SIGTERM
+  test instead of inferring it from a verifier subprocess.
+
+## [1.7.0] - 2026-09-08
+
 ### Added
 
+- Add isolated staging for l10n key-removal mutations: ARB files are edited in
+  a quarantine-backed staging directory, `flutter gen-l10n` runs there, and
+  generated outputs are inspected and hashed before any live write.
+- Add TOCTOU protection for l10n mutations: `l10n.yaml` fingerprint and ARB
+  baseline hashes are revalidated before and after generation, aborting on
+  any concurrent drift.
+- Add content-derived package-resolution, toolchain, and verification-policy
+  fingerprints to the l10n mutation journal, replacing placeholder values.
+- Add real `flutter gen-l10n` inspect coverage: staging inspection now
+  validates generated files and SHA-256 hashes against actual generator
+  output, not just mock files.
+- Restore quarantine cancellation exception handling for atomic link
+  processes (`ProcessCancellationBeforeLaunchException` and
+  `ProcessCancellationConfirmedException`), preserving typed interruption
+  evidence.
 - Define the CLI automation contract: bare command hierarchy/help and the `q`
   alias, usage exit `64`, domain exits `0`/`1`/`2`, internal exit `70`, human
   stdout versus stderr diagnostics, immutable scan/apply report evidence, and

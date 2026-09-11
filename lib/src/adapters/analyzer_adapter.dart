@@ -71,7 +71,7 @@ class AdapterServices {
 /// ```
 ///
 /// See `doc/contributing/how-to-add-adapter.md` for the full walkthrough, and
-/// `doc/flutter-facts.md` for verified framework behaviour you will need.
+/// `doc/advanced/flutter-facts.md` for verified framework behaviour you will need.
 abstract class AnalyzerAdapter {
   /// Creates an adapter.
   const AnalyzerAdapter();

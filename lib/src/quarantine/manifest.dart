@@ -872,15 +872,21 @@ class QuarantineEntry {
     this.operationType = QuarantineOperationType.file,
     this.declarationIds,
     this.modifiedSha256,
+    this.wasAbsentBeforeTransaction = false,
   }) : assert(posixMode == null || (posixMode >= 0 && posixMode <= 0xfff));
 
   /// Original absolute path before quarantine.
   final String originalPath;
 
   /// SHA-256 hash for verification.
+  ///
+  /// For files that were absent before transaction, this is the empty string
+  /// SHA-256: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
   final String sha256;
 
   /// File size in bytes.
+  ///
+  /// For files that were absent before transaction, this is 0.
   final int sizeBytes;
 
   /// Original POSIX permission bits, including special permission bits.
@@ -898,6 +904,12 @@ class QuarantineEntry {
   /// SHA-256 of modified file after declaration removal.
   final String? modifiedSha256;
 
+  /// Whether this file was absent before the transaction began.
+  ///
+  /// When true, rollback deletes the file instead of restoring bytes.
+  /// This supports l10n generated outputs that may not exist initially.
+  final bool wasAbsentBeforeTransaction;
+
   /// Returns this entry with the final working-copy hash recorded.
   QuarantineEntry withModifiedSha256(String? value) => QuarantineEntry(
     originalPath: originalPath,
@@ -907,6 +919,7 @@ class QuarantineEntry {
     operationType: operationType,
     declarationIds: declarationIds,
     modifiedSha256: value,
+    wasAbsentBeforeTransaction: wasAbsentBeforeTransaction,
   );
 
   /// Converts to JSON.
@@ -918,6 +931,7 @@ class QuarantineEntry {
     'operationType': operationType.toJson(),
     if (declarationIds != null) 'declarationIds': declarationIds,
     if (modifiedSha256 != null) 'modifiedSha256': modifiedSha256,
+    if (wasAbsentBeforeTransaction) 'wasAbsentBeforeTransaction': true,
   };
 
   /// Creates from JSON.
@@ -941,6 +955,8 @@ class QuarantineEntry {
           ? (json['declarationIds'] as List<dynamic>).cast<String>()
           : null,
       modifiedSha256: json['modifiedSha256'] as String?,
+      wasAbsentBeforeTransaction:
+          json['wasAbsentBeforeTransaction'] as bool? ?? false,
     );
   }
 }

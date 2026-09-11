@@ -83,11 +83,11 @@ class VerificationRunner {
           '$executable\u0000${result.exitCode}\u0000'
           '${result.stdout.text}\u0000${result.stderr.text}',
         );
+      } on ProcessTerminationUnconfirmedException {
+        rethrow;
       } on ProcessCancellationBeforeLaunchException {
         rethrow;
       } on ProcessCancellationConfirmedException {
-        rethrow;
-      } on ProcessTerminationUnconfirmedException {
         rethrow;
       } catch (error) {
         evidence.add('$executable\u0000unavailable\u0000$error');
@@ -130,11 +130,11 @@ class VerificationRunner {
             : result.stderr.text,
         duration: stopwatch.elapsed,
       );
+    } on ProcessTerminationUnconfirmedException {
+      rethrow;
     } on ProcessCancellationBeforeLaunchException {
       rethrow;
     } on ProcessCancellationConfirmedException {
-      rethrow;
-    } on ProcessTerminationUnconfirmedException {
       rethrow;
     } catch (e) {
       return VerificationStep(
@@ -158,11 +158,11 @@ class VerificationRunner {
       return !result.timedOut &&
           !result.outputTruncated &&
           result.exitCode == 0;
+    } on ProcessTerminationUnconfirmedException {
+      rethrow;
     } on ProcessCancellationBeforeLaunchException {
       rethrow;
     } on ProcessCancellationConfirmedException {
-      rethrow;
-    } on ProcessTerminationUnconfirmedException {
       rethrow;
     } catch (e) {
       return false;

@@ -92,34 +92,52 @@ Future<void> main(List<String> arguments) async {
     'flutter_pruner_windows_evidence_',
   );
   try {
-    for (var index = 0; index < _testRuns.length; index++) {
-      final testRun = _testRuns[index];
-      final reporter = File(p.join(reporterDirectory.path, '$index.json'));
+    // Group test runs by file path to minimize process launches.
+    final byPath = <String, List<({String path, String name})>>{};
+    for (final testRun in _testRuns) {
+      byPath.putIfAbsent(testRun.path, () => []).add(testRun);
+    }
+    var reporterIndex = 0;
+    for (final entry in byPath.entries) {
+      final filePath = entry.key;
+      final requiredNames = entry.value.map((r) => r.name).toSet();
+      final reporter = File(
+        p.join(reporterDirectory.path, '${reporterIndex++}.json'),
+      );
       final result = await Process.run(Platform.resolvedExecutable, [
         'test',
         '--reporter=silent',
         '--file-reporter=json:${reporter.path}',
-        '--name',
-        '^${RegExp.escape(testRun.name)}\$',
-        testRun.path,
+        filePath,
       ], workingDirectory: options.root.path);
-      final status = reporter.existsSync()
-          ? _observedTest(await reporter.readAsString(), testRun.name)
-          : 'missing';
-      if (result.exitCode != 0 || status != 'passed') {
-        stderr.writeln(
-          '${testRun.path} :: ${testRun.name} was $status '
-          '(exit ${result.exitCode}).',
-        );
+      if (result.exitCode != 0) {
+        stderr.writeln('$filePath failed to run (exit ${result.exitCode}).');
         exitCode = 3;
         return;
       }
-      observed.add({
-        'platform': 'windows',
-        'path': testRun.path,
-        'name': testRun.name,
-        'status': 'passed',
-      });
+      if (!reporter.existsSync()) {
+        stderr.writeln('$filePath produced no reporter output.');
+        exitCode = 3;
+        return;
+      }
+      final passed = _observedTests(
+        await reporter.readAsString(),
+        requiredNames,
+      );
+      for (final name in requiredNames) {
+        final status = passed[name];
+        if (status != 'passed') {
+          stderr.writeln('$filePath :: $name was ${status ?? 'missing'}.');
+          exitCode = 3;
+          return;
+        }
+        observed.add({
+          'platform': 'windows',
+          'path': filePath,
+          'name': name,
+          'status': 'passed',
+        });
+      }
     }
   } finally {
     if (reporterDirectory.existsSync()) {
@@ -136,9 +154,9 @@ Future<void> main(List<String> arguments) async {
   stdout.writeln(output.path);
 }
 
-String _observedTest(String output, String expectedName) {
+Map<String, String> _observedTests(String output, Set<String> expectedNames) {
   final namesById = <int, String>{};
-  String? status;
+  final statuses = <String, String>{};
   for (final line in const LineSplitter().convert(output)) {
     final decoded = jsonDecode(line);
     if (decoded is! Map<String, Object?>) continue;
@@ -151,15 +169,19 @@ String _observedTest(String output, String expectedName) {
       }
     }
     if (decoded['type'] != 'testDone' || decoded['testID'] is! int) continue;
-    if (namesById[decoded['testID']] != expectedName) continue;
-    if (status != null) return 'duplicate';
-    status = decoded['skipped'] == true
+    final name = namesById[decoded['testID']];
+    if (name == null || !expectedNames.contains(name)) continue;
+    if (statuses.containsKey(name)) {
+      statuses[name] = 'duplicate';
+      continue;
+    }
+    statuses[name] = decoded['skipped'] == true
         ? 'skipped'
         : decoded['result'] == 'success'
         ? 'passed'
         : 'failed';
   }
-  return status ?? 'missing';
+  return statuses;
 }
 
 final class _Options {

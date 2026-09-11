@@ -12,6 +12,7 @@ import 'confidence.dart';
 import 'confidence_classifier.dart';
 import 'finding.dart';
 import 'finding_assessment.dart';
+import 'promotion_index.dart';
 
 /// Converts graph reachability results into actionable findings.
 ///
@@ -25,6 +26,10 @@ class FindingGenerator {
   ///
   /// Returns findings sorted by confidence (protected first, safe last) then
   /// by node id for stability.
+  ///
+  /// If [actionReadinessIndex] is provided, it is used to determine family-level
+  /// action capabilities during finding classification. If null or empty, all
+  /// findings use the existing core allowlist (preserves Stage 1 behavior).
   List<Finding> generate({
     required ReachabilityGraph graph,
     required ProjectContext project,
@@ -32,6 +37,7 @@ class FindingGenerator {
     List<BuildTarget>? targets,
     Set<String>? reportingNodeSchemes,
     Map<String, AdapterReportDefinition> adapterReportDefinitions = const {},
+    ActionReadinessIndex? actionReadinessIndex,
   }) {
     final findings = <Finding>[];
     final effectiveTargets = targets ?? project.targets;
@@ -88,6 +94,7 @@ class FindingGenerator {
         adapterReportDefinitions: adapterReportDefinitions,
         graphIntegrityComplete: graphIntegrityComplete,
         analysisCoverageComplete: analysisCoverageComplete,
+        actionReadinessIndex: actionReadinessIndex,
       );
 
       findings.add(finding);
@@ -156,6 +163,7 @@ class FindingGenerator {
     required Map<String, AdapterReportDefinition> adapterReportDefinitions,
     required bool graphIntegrityComplete,
     required bool analysisCoverageComplete,
+    ActionReadinessIndex? actionReadinessIndex,
   }) {
     final protectionReasons = graph.protectionReasons(node.id);
     final isProtected = protectionReasons.isNotEmpty;
@@ -183,6 +191,7 @@ class FindingGenerator {
     final capability = ActionCapability.forFinding(
       adapterId: reportingAdapterId,
       node: node,
+      actionReadinessIndex: actionReadinessIndex,
     );
 
     // Gather evidence (incoming edges)

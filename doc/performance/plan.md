@@ -173,5 +173,5 @@ names, or absolute paths.
 - [Dart analyzer package](https://pub.dev/packages/analyzer)
 - [Dart DevTools](https://dart.dev/tools/devtools)
 - [Dart formatter](https://dart.dev/tools/dart-format)
-- [Flutter Pruner architecture](../architecture.md)
-- [Flutter Pruner graph model](../graph-model.md)
+- [Flutter Pruner architecture](../advanced/architecture.md)
+- [Flutter Pruner graph model](../advanced/graph-model.md)

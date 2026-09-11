@@ -621,6 +621,9 @@ class CliProcessInvocation {
   /// Completion includes raw stream closure, not merely root exit.
   Future<CliProcessResult> get result => _active.completion;
 
+  /// OS PID of the CLI process, for signal delivery in tests.
+  int get processId => _active.process.pid;
+
   /// Terminates the tracked root/tree and confirms its disappearance.
   Future<void> close() => _active.terminate();
 }
@@ -1252,7 +1255,7 @@ Future<PosixProcessTableSnapshot?> _readPosixProcessTable() async {
   try {
     final result = await Process.run('ps', const [
       '-axo',
-      'pid=,ppid=,lstart=,state=',
+      'pid=,ppid=,lstart=,state=,rss=',
     ]).timeout(const Duration(seconds: 2));
     if (result.exitCode != 0) return null;
     return PosixProcessTableSnapshot.parse(result.stdout as String);

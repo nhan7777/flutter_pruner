@@ -535,7 +535,7 @@ Future<void> main(List<String> arguments) async {
       const <int, PosixProcessIdentity>{5201: oldIdentity},
     );
     final reusedSnapshot = PosixProcessTableSnapshot.parse(
-      '5201 1 Mon Aug 27 10:02:00 2026 S\n',
+      '5201 1 Mon Aug 27 10:02:00 2026 S 0\n',
     );
 
     final acquired = await ProjectOperationLock.acquire(
@@ -577,7 +577,7 @@ Future<void> main(List<String> arguments) async {
         },
       );
       final childOnly = PosixProcessTableSnapshot.parse(
-        '5302 1 Mon Aug 27 10:03:01 2026 S\n',
+        '5302 1 Mon Aug 27 10:03:01 2026 S 0\n',
       );
 
       await expectLater(
@@ -1017,9 +1017,9 @@ PosixProcessTableSnapshot _snapshotWithChildren(
   List<PosixProcessIdentity> children = const <PosixProcessIdentity>[],
 }) => PosixProcessTableSnapshot.parse(
   <String>[
-    '${rootIdentity.pid} 1 ${rootIdentity.startFingerprint} S',
+    '${rootIdentity.pid} 1 ${rootIdentity.startFingerprint} S 0',
     for (final child in children)
-      '${child.pid} ${rootIdentity.pid} ${child.startFingerprint} S',
+      '${child.pid} ${rootIdentity.pid} ${child.startFingerprint} S 0',
   ].join('\n'),
 );
 

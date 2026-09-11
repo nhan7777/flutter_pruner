@@ -1,0 +1,8 @@
+name: l10n_config_fixture
+environment:
+  sdk: ^3.9.0
+dependencies:
+  flutter:
+    sdk: flutter
+flutter:
+  generate: true

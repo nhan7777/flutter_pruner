@@ -58,6 +58,77 @@ void main() {
     expect(() => matrix.targets.add(android), throwsUnsupportedError);
   });
 
+  test('snapshots immutable excluded application entrypoints', () {
+    const exclusion = ExcludedApplicationEntrypoint(
+      path: 'lib/guard.dart',
+      reason: 'tracked launcher guard is not supported',
+    );
+    final exclusions = [exclusion];
+    final matrix = TargetMatrix(
+      targets: [
+        BuildTarget(
+          name: 'android',
+          platform: 'android',
+          entrypoint: 'lib/main.dart',
+        ),
+      ],
+      status: TargetMatrixStatus.declaredComplete,
+      source: 'test config',
+      excludedEntrypoints: exclusions,
+    );
+
+    exclusions.clear();
+
+    expect(matrix.excludedEntrypoints, [exclusion]);
+    expect(() => matrix.excludedEntrypoints.clear(), throwsUnsupportedError);
+  });
+
+  test('rejects unsafe excluded application entrypoints', () {
+    final target = BuildTarget(
+      name: 'android',
+      platform: 'android',
+      entrypoint: 'lib/main.dart',
+    );
+
+    for (final exclusions in [
+      const [
+        ExcludedApplicationEntrypoint(path: 'lib/guard.dart', reason: '   '),
+      ],
+      const [
+        ExcludedApplicationEntrypoint(path: 'lib/guard.dart', reason: 'first'),
+        ExcludedApplicationEntrypoint(path: 'lib/guard.dart', reason: 'second'),
+      ],
+      const [
+        ExcludedApplicationEntrypoint(path: 'lib/main.dart', reason: 'overlap'),
+      ],
+    ]) {
+      expect(
+        () => TargetMatrix(
+          targets: [target],
+          status: TargetMatrixStatus.declaredComplete,
+          source: 'test config',
+          excludedEntrypoints: exclusions,
+        ),
+        throwsArgumentError,
+      );
+    }
+
+    expect(
+      () => TargetMatrix(
+        targets: [target],
+        status: TargetMatrixStatus.declaredPartial,
+        source: 'test config',
+        excludedEntrypoints: const [
+          ExcludedApplicationEntrypoint(
+            path: 'lib/guard.dart',
+            reason: 'owner evidence',
+          ),
+        ],
+      ),
+      throwsArgumentError,
+    );
+  });
+
   test('rejects configured names that derive the same context identity', () {
     final web = BuildTarget(
       name: 'web',

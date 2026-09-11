@@ -5046,6 +5046,8 @@ class _UnconfirmedAfterSuccessfulLink implements ProcessExecutionRunner {
     required String workingDirectory,
     required Duration timeout,
     required int maxOutputBytesPerStream,
+    Map<String, String> environmentOverrides = const {},
+    bool includeParentEnvironment = true,
   }) async {
     invocationCount++;
     final result = await _delegate.run(
@@ -5054,6 +5056,8 @@ class _UnconfirmedAfterSuccessfulLink implements ProcessExecutionRunner {
       workingDirectory: workingDirectory,
       timeout: timeout,
       maxOutputBytesPerStream: maxOutputBytesPerStream,
+      environmentOverrides: environmentOverrides,
+      includeParentEnvironment: includeParentEnvironment,
     );
     if (invocationCount == failAt) {
       throw const ProcessTerminationUnconfirmedException(
@@ -5085,6 +5089,8 @@ class _CancellationAtLink implements ProcessExecutionRunner {
     required String workingDirectory,
     required Duration timeout,
     required int maxOutputBytesPerStream,
+    Map<String, String> environmentOverrides = const {},
+    bool includeParentEnvironment = true,
   }) async {
     invocationCount++;
     if (invocationCount == failAt && !afterSuccessfulLink) {
@@ -5123,6 +5129,8 @@ class _CancellationAtPermission implements ProcessExecutionRunner {
     required String workingDirectory,
     required Duration timeout,
     required int maxOutputBytesPerStream,
+    Map<String, String> environmentOverrides = const {},
+    bool includeParentEnvironment = true,
   }) async {
     invocationCount++;
     final result = await _delegate.run(

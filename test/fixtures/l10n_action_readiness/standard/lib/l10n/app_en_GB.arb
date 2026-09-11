@@ -1,0 +1,6 @@
+{
+  "@@locale": "en_GB",
+  "live": "Live GB",
+  "dead": "Dead GB",
+  "welcome": "Welcome {name}"
+}

@@ -220,7 +220,9 @@ Writes configuration and .gitignore''';
         );
       }
     } on InitCancelledException {
-      _InitWizardPresentation(_prompt).warning('Cancelled.');
+      _InitWizardPresentation(
+        _prompt,
+      ).warning('Cancelled; no files were written.');
       return CliExitCode.success;
     } on ProjectSourcePathException catch (error) {
       throw commandUsageError(this, error.message);
@@ -276,7 +278,9 @@ Writes configuration and .gitignore''';
           'true.',
         );
       }
-      stdout.writeln('Next: ${projectCommandFor(workspace, 'scan')}');
+      stdout.writeln(
+        'Next: ${projectCommandFor(workspace, 'scan', preferBareCurrentProject: true)}',
+      );
     }
     return 0;
   }
@@ -310,7 +314,7 @@ Writes configuration and .gitignore''';
     }
     ui.field(
       'Next',
-      projectCommandFor(workspace, 'scan'),
+      projectCommandFor(workspace, 'scan', preferBareCurrentProject: true),
       tone: _WizardTone.success,
     );
   }
@@ -1070,6 +1074,12 @@ target_matrix:
           );
         }
       }
+    }
+    if (projectType == 'application') {
+      buffer.write('''
+  # Declare only tracked main() files that are not supported launch targets.
+  excluded_entrypoints: []
+''');
     }
     buffer.write('''
 

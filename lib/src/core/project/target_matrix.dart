@@ -13,6 +13,30 @@ enum TargetMatrixStatus {
   inferredDefault,
 }
 
+/// An application entrypoint the owner explicitly declares unsupported.
+final class ExcludedApplicationEntrypoint {
+  /// Creates an immutable unsupported application entrypoint declaration.
+  const ExcludedApplicationEntrypoint({
+    required this.path,
+    required this.reason,
+  });
+
+  /// Canonical project-relative Dart source path.
+  final String path;
+
+  /// Owner assertion explaining why this is not a supported launch target.
+  final String reason;
+
+  @override
+  bool operator ==(Object other) =>
+      other is ExcludedApplicationEntrypoint &&
+      other.path == path &&
+      other.reason == reason;
+
+  @override
+  int get hashCode => Object.hash(path, reason);
+}
+
 /// The concrete build targets and the evidence that the list is complete.
 class TargetMatrix {
   /// Creates a target matrix.
@@ -24,6 +48,7 @@ class TargetMatrix {
     required TargetMatrixStatus status,
     required String source,
     List<String> issues = const [],
+    List<ExcludedApplicationEntrypoint> excludedEntrypoints = const [],
   }) {
     final snapshots = targets.map(BuildTarget.snapshot).toList(growable: false);
     final contextIds = <String>{};
@@ -38,11 +63,49 @@ class TargetMatrix {
         );
       }
     }
+    if (excludedEntrypoints.any((entry) => entry.reason.trim().isEmpty)) {
+      throw ArgumentError.value(
+        excludedEntrypoints,
+        'excludedEntrypoints',
+        'Excluded application entrypoint reasons must not be blank.',
+      );
+    }
+    final excludedPaths = excludedEntrypoints
+        .map((entry) => entry.path)
+        .toSet();
+    if (excludedPaths.length != excludedEntrypoints.length) {
+      throw ArgumentError.value(
+        excludedEntrypoints,
+        'excludedEntrypoints',
+        'Excluded application entrypoint paths must be unique.',
+      );
+    }
+    final targetEntrypoints = snapshots
+        .map((target) => target.entrypoint)
+        .toSet();
+    if (excludedPaths.any(targetEntrypoints.contains)) {
+      throw ArgumentError.value(
+        excludedEntrypoints,
+        'excludedEntrypoints',
+        'Excluded application entrypoints must not overlap build targets.',
+      );
+    }
+    if (excludedEntrypoints.isNotEmpty &&
+        status != TargetMatrixStatus.declaredComplete) {
+      throw ArgumentError.value(
+        excludedEntrypoints,
+        'excludedEntrypoints',
+        'Excluded application entrypoints require a declared-complete matrix.',
+      );
+    }
     return TargetMatrix._(
       targets: List<BuildTarget>.unmodifiable(snapshots),
       status: status,
       source: source,
       issues: List<String>.unmodifiable(issues),
+      excludedEntrypoints: List<ExcludedApplicationEntrypoint>.unmodifiable(
+        excludedEntrypoints,
+      ),
     );
   }
 
@@ -51,13 +114,18 @@ class TargetMatrix {
     required this.status,
     required this.source,
     required this.issues,
+    required this.excludedEntrypoints,
   });
 
   /// Creates an explicitly complete matrix supplied through the public API.
-  factory TargetMatrix.declared(List<BuildTarget> targets) => TargetMatrix(
+  factory TargetMatrix.declared(
+    List<BuildTarget> targets, {
+    List<ExcludedApplicationEntrypoint> excludedEntrypoints = const [],
+  }) => TargetMatrix(
     targets: targets,
     status: TargetMatrixStatus.declaredComplete,
     source: 'api',
+    excludedEntrypoints: excludedEntrypoints,
   );
 
   /// Concrete configurations evaluated by the graph.
@@ -71,6 +139,9 @@ class TargetMatrix {
 
   /// Reasons the matrix is incomplete or otherwise conservative.
   final List<String> issues;
+
+  /// Owner-declared project entrypoints that are not supported launch targets.
+  final List<ExcludedApplicationEntrypoint> excludedEntrypoints;
 
   /// Whether the owner asserted that every supported target is represented.
   bool get isComplete => status == TargetMatrixStatus.declaredComplete;

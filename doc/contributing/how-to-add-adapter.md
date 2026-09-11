@@ -207,7 +207,7 @@ deliberately and record a blocker for each. The failure mode to avoid is
 concluding "no reference found, therefore dead" when the real situation is
 "I could not see the reference".
 
-Read [`doc/flutter-facts.md`](../flutter-facts.md) before writing this part.
+Read [`doc/flutter-facts.md`](../advanced/flutter-facts.md) before writing this part.
 It lists the verified hazards: deep links activating routes with no in-app
 caller, plugin background handlers invoked through opaque callback handles,
 `--dart-define` changing which branches exist, string-identified platform
@@ -355,7 +355,7 @@ Document the patterns you protect and their limitations clearly. Users must
 understand that `SAFE` findings still require review when their codebase uses
 uncommon conventions.
 
-See [`doc/confidence-model.md`](../confidence-model.md#framework-protection-rules)
+See [`doc/confidence-model.md`](../advanced/confidence-model.md#framework-protection-rules)
 for the full list of built-in patterns.
 
 ---

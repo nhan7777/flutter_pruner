@@ -1,5 +1,6 @@
 import '../core/confidence/confidence.dart';
 import '../core/confidence/finding.dart';
+import '../core/confidence/promotion_index.dart';
 import '../core/graph/blocker_identity.dart';
 import '../core/graph/evidence.dart';
 import '../core/graph/node.dart';
@@ -22,6 +23,7 @@ class AnalysisSnapshot {
     required this.elapsedMicros,
     this.findingElapsedMicros = 0,
     required this.exclusions,
+    this.actionReadinessIndex = ActionReadinessIndex.empty,
   });
 
   /// Project and declared coverage used for this pass.
@@ -50,6 +52,9 @@ class AnalysisSnapshot {
 
   /// Tool-owned and out-of-bound paths observed during this pass.
   final PathExclusionSummary exclusions;
+
+  /// Action readiness index built during static analysis.
+  final ActionReadinessIndex actionReadinessIndex;
 
   /// Builds the stable reporting projection for this analysis pass.
   AnalysisPassReport toPassReport({

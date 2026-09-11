@@ -13,6 +13,8 @@ abstract interface class ProcessExecutionRunner {
     required String workingDirectory,
     required Duration timeout,
     required int maxOutputBytesPerStream,
+    Map<String, String> environmentOverrides = const {},
+    bool includeParentEnvironment = true,
   });
 }
 
@@ -113,11 +115,12 @@ class ManagedProcessRunner implements ProcessExecutionRunner {
     this.cancellationController,
     ManagedProcessStarter? processStarter,
     ManagedProcessTreeTerminator? processTreeTerminator,
-    ProcessIdentityInspector processIdentityInspector =
-        const ManagedProcessIdentityInspector(),
+    ProcessIdentityInspector? processIdentityInspector,
+    String posixProcessTableExecutable = '/bin/ps',
   }) : _processStarter = processStarter,
        _processTreeTerminator = processTreeTerminator,
-       _processIdentityInspector = processIdentityInspector;
+       _processIdentityInspector = processIdentityInspector,
+       _posixProcessTableExecutable = posixProcessTableExecutable;
 
   /// Shared cancellation authority, or `null` for embedding/tests that do not
   /// participate in CLI signal coordination.
@@ -125,7 +128,13 @@ class ManagedProcessRunner implements ProcessExecutionRunner {
 
   final ManagedProcessStarter? _processStarter;
   final ManagedProcessTreeTerminator? _processTreeTerminator;
-  final ProcessIdentityInspector _processIdentityInspector;
+  final ProcessIdentityInspector? _processIdentityInspector;
+  ProcessIdentityInspector get _resolvedProcessIdentityInspector =>
+      _processIdentityInspector ??
+      ManagedProcessIdentityInspector(
+        posixProcessTableExecutable: _posixProcessTableExecutable,
+      );
+  final String _posixProcessTableExecutable;
 
   @override
   Future<ManagedProcessResult> run(
@@ -134,6 +143,8 @@ class ManagedProcessRunner implements ProcessExecutionRunner {
     required String workingDirectory,
     required Duration timeout,
     required int maxOutputBytesPerStream,
+    Map<String, String> environmentOverrides = const {},
+    bool includeParentEnvironment = true,
   }) async {
     if (timeout <= Duration.zero) {
       throw ArgumentError.value(timeout, 'timeout', 'must be positive');
@@ -145,6 +156,9 @@ class ManagedProcessRunner implements ProcessExecutionRunner {
         'must not be negative',
       );
     }
+    final environment = Map<String, String>.unmodifiable(
+      Map<String, String>.of(environmentOverrides),
+    );
 
     final reservation = cancellationController?._reserveLaunch();
     late final Process process;
@@ -160,6 +174,8 @@ class ManagedProcessRunner implements ProcessExecutionRunner {
                 executable,
                 immutableArguments,
                 workingDirectory: workingDirectory,
+                environment: environment,
+                includeParentEnvironment: includeParentEnvironment,
                 mode: ProcessStartMode.normal,
               ));
     } catch (_) {
@@ -184,7 +200,8 @@ class ManagedProcessRunner implements ProcessExecutionRunner {
     );
     final observer = _ProcessTreeObserver(
       process.pid,
-      identityInspector: _processIdentityInspector,
+      identityInspector: _resolvedProcessIdentityInspector,
+      posixProcessTableExecutable: _posixProcessTableExecutable,
     );
 
     try {
@@ -215,6 +232,7 @@ class ManagedProcessRunner implements ProcessExecutionRunner {
             exitCode: completed[0] as int,
             stdout: completed[1] as BoundedProcessOutput,
             stderr: completed[2] as BoundedProcessOutput,
+            resourceObservation: observer.resourceObservation,
           );
         }
       } else {
@@ -233,7 +251,7 @@ class ManagedProcessRunner implements ProcessExecutionRunner {
                 exitCode,
                 observedProcesses: observer.observedProcesses,
                 observationReliable: observationReliable,
-                identityInspector: _processIdentityInspector,
+                identityInspector: _resolvedProcessIdentityInspector,
               ));
       final cancellationSignal =
           outcome.signal ??
@@ -270,6 +288,7 @@ class ManagedProcessRunner implements ProcessExecutionRunner {
           stdout: output[0],
           stderr: output[1],
           timedOut: true,
+          resourceObservation: observer.resourceObservation,
         );
       } on TimeoutException {
         throw ProcessTerminationUnconfirmedException(
@@ -359,6 +378,7 @@ class ManagedProcessResult {
     required this.stdout,
     required this.stderr,
     this.timedOut = false,
+    this.resourceObservation = ProcessTreeResourceObservation.unsupported,
   });
 
   /// Process exit code, or -1 for a confirmed timeout.
@@ -373,21 +393,81 @@ class ManagedProcessResult {
   /// Whether the process hit the deadline and its observed tree was stopped.
   final bool timedOut;
 
+  /// Best-effort process-tree resource evidence collected while running.
+  final ProcessTreeResourceObservation resourceObservation;
+
   /// Whether either stream exceeded its configured capture limit.
   bool get outputTruncated => stdout.truncated || stderr.truncated;
+}
+
+/// Reliability of process-tree resource sampling.
+enum ProcessResourceObservationStatus {
+  /// Process-tree samples were collected successfully.
+  measured,
+
+  /// Process-tree sampling is unavailable on this platform.
+  unsupported,
+
+  /// An inspection or sampling attempt failed.
+  unreliable,
+}
+
+/// Best-effort process tree resource usage collected during execution.
+final class ProcessTreeResourceObservation {
+  /// Creates process-tree resource evidence.
+  const ProcessTreeResourceObservation({
+    required this.status,
+    required this.sampleCount,
+    this.sampledPeakRssBytes,
+  });
+
+  /// Evidence used when process-tree sampling is unavailable.
+  static const unsupported = ProcessTreeResourceObservation(
+    status: ProcessResourceObservationStatus.unsupported,
+    sampleCount: 0,
+  );
+
+  /// Whether samples were measured, unsupported, or unreliable.
+  final ProcessResourceObservationStatus status;
+
+  /// Number of valid live-tree samples collected.
+  final int sampleCount;
+
+  /// Highest sampled sum of live tree RSS, in bytes.
+  final int? sampledPeakRssBytes;
+
+  /// Peak resident set size in KiB across the observed process tree.
+  ///
+  /// Value is -1 when observation is unsupported (Windows, etc).
+  int get peakRssKiB {
+    if (status == ProcessResourceObservationStatus.unsupported) return -1;
+    final bytes = sampledPeakRssBytes;
+    return bytes == null ? -1 : (bytes / 1024).round();
+  }
 }
 
 /// Bounded output captured while the complete stream was drained.
 class BoundedProcessOutput {
   /// Creates captured process output.
-  const BoundedProcessOutput({
-    required this.text,
-    required this.capturedBytes,
+  BoundedProcessOutput({
+    required List<int> capturedPayload,
     required this.omittedBytes,
-  });
+  }) : _capturedPayload = Uint8List.fromList(capturedPayload),
+       capturedBytes = capturedPayload.length;
+
+  final Uint8List _capturedPayload;
+
+  /// Exact payload prefix retained in memory.
+  Uint8List get capturedPayload => Uint8List.fromList(_capturedPayload);
 
   /// Decoded captured prefix plus a truncation notice when applicable.
-  final String text;
+  String get text {
+    final decoded = utf8.decode(_capturedPayload, allowMalformed: true);
+    if (omittedBytes > 0) {
+      return '$decoded\n...[output truncated; $omittedBytes bytes omitted]';
+    }
+    return decoded;
+  }
 
   /// Number of payload bytes retained in memory.
   final int capturedBytes;
@@ -462,7 +542,7 @@ final class ProcessCancellationConfirmedException implements Exception {
 }
 
 const _processTerminationTimeout = Duration(seconds: 5);
-const _processInspectionTimeout = Duration(seconds: 2);
+const _processInspectionTimeout = Duration(seconds: 10);
 const _processObservationInterval = Duration(milliseconds: 100);
 const _inspectionOutputLimit = 4 * 1024 * 1024;
 
@@ -484,13 +564,8 @@ Future<BoundedProcessOutput> _collectBounded(
   }
   final capturedBytes = captured.length;
   final omittedBytes = totalBytes - capturedBytes;
-  final decoded = utf8.decode(captured.takeBytes(), allowMalformed: true);
-  final text = omittedBytes == 0
-      ? decoded
-      : '$decoded\n...[output truncated; $omittedBytes bytes omitted]';
   return BoundedProcessOutput(
-    text: text,
-    capturedBytes: capturedBytes,
+    capturedPayload: captured.takeBytes(),
     omittedBytes: omittedBytes,
   );
 }
@@ -500,18 +575,36 @@ class _ProcessTreeObserver {
     this.rootPid, {
     ProcessIdentityInspector identityInspector =
         const ManagedProcessIdentityInspector(),
+    required this.posixProcessTableExecutable,
   }) : _identityInspector = identityInspector;
 
   final int rootPid;
   final ProcessIdentityInspector _identityInspector;
+  final String posixProcessTableExecutable;
   final Map<int, PosixProcessIdentity> _observedProcesses = {};
-  var _inspectionReliable = true;
+  var _resourceObservationReliable = true;
+  var _terminationObservationReliable = true;
   var _capturedRootIdentity = false;
   var _stopping = false;
   Future<void>? _task;
+  var _sampleCount = 0;
+  int? _sampledPeakRssBytes;
 
   Map<int, PosixProcessIdentity> get observedProcesses =>
       Map.unmodifiable(_observedProcesses);
+
+  ProcessTreeResourceObservation get resourceObservation {
+    if (!Platform.isLinux && !Platform.isMacOS) {
+      return ProcessTreeResourceObservation.unsupported;
+    }
+    return ProcessTreeResourceObservation(
+      status: _resourceObservationReliable
+          ? ProcessResourceObservationStatus.measured
+          : ProcessResourceObservationStatus.unreliable,
+      sampleCount: _sampleCount,
+      sampledPeakRssBytes: _sampledPeakRssBytes,
+    );
+  }
 
   Future<void> captureInitialIdentityAndStart() async {
     if (!Platform.isLinux && !Platform.isMacOS) return;
@@ -522,7 +615,7 @@ class _ProcessTreeObserver {
   Future<bool> stop() async {
     _stopping = true;
     await _task;
-    return _inspectionReliable;
+    return _terminationObservationReliable;
   }
 
   Future<void> _observe() async {
@@ -538,7 +631,7 @@ class _ProcessTreeObserver {
     try {
       final processTable = await _identityInspector.snapshot();
       if (processTable == null) {
-        _inspectionReliable = false;
+        _markObservationUnreliable();
         return;
       }
       final rootIdentity = processTable.identityFor(rootPid);
@@ -550,27 +643,26 @@ class _ProcessTreeObserver {
         } else if (previousRoot != rootIdentity) {
           // Do not replace the original lifetime with a reused root PID. The
           // missing interval could also have hidden a detached descendant.
-          _inspectionReliable = false;
+          _markObservationUnreliable();
         }
       } else if (!_capturedRootIdentity) {
         // Missing the root before its identity was captured leaves a gap in
         // which descendants could have detached unobserved.
-        _inspectionReliable = false;
+        _markObservationUnreliable();
       }
 
       for (final identity in _observedProcesses.values) {
         if (!processTable.containsIdentity(identity)) {
-          // Historical identities are monotonic evidence. Disappearance
-          // between snapshots is an observation gap: the process may have
-          // forked and reparented a child before exiting.
-          _inspectionReliable = false;
+          // Disappearance after a valid sample is normal for RSS, but remains
+          // an observation gap for timeout or cancellation termination proof.
+          _terminationObservationReliable = false;
         }
       }
       final liveRoots = processTable.matchingPids(_observedProcesses.values);
       for (final pid in processTable.descendantsOf(liveRoots)) {
         final identity = processTable.identityFor(pid);
         if (identity == null) {
-          _inspectionReliable = false;
+          _markObservationUnreliable();
           continue;
         }
         final previousIdentity = _observedProcesses[pid];
@@ -579,12 +671,28 @@ class _ProcessTreeObserver {
         } else if (previousIdentity != identity) {
           // A reused descendant PID cannot replace its historical identity or
           // become a traversal root for the new, unrelated lifetime.
-          _inspectionReliable = false;
+          _markObservationUnreliable();
+        }
+      }
+
+      final liveTrackedProcesses = _observedProcesses.values.where(
+        processTable.containsIdentity,
+      );
+      if (liveTrackedProcesses.isNotEmpty) {
+        final rssBytes = processTable.sumRssBytes(liveTrackedProcesses);
+        _sampleCount++;
+        if (_sampledPeakRssBytes == null || rssBytes > _sampledPeakRssBytes!) {
+          _sampledPeakRssBytes = rssBytes;
         }
       }
     } catch (_) {
-      _inspectionReliable = false;
+      _markObservationUnreliable();
     }
+  }
+
+  void _markObservationUnreliable() {
+    _resourceObservationReliable = false;
+    _terminationObservationReliable = false;
   }
 }
 
@@ -834,11 +942,13 @@ class _ProcessExitEvidence {
   final bool inspectionReliable;
 }
 
-Future<PosixProcessTableSnapshot?> _readPosixProcessTable() async {
+Future<PosixProcessTableSnapshot?> _readPosixProcessTable(
+  String executable,
+) async {
   try {
-    final result = await _runInspectionCommand('ps', const [
+    final result = await _runInspectionCommand(executable, const [
       '-axo',
-      'pid=,ppid=,lstart=,state=',
+      'pid=,ppid=,lstart=,state=,rss=',
     ]);
     if (result == null || result.exitCode != 0) return null;
     return PosixProcessTableSnapshot.parse(result.stdout);
@@ -859,10 +969,16 @@ abstract interface class ProcessIdentityInspector {
 final class ManagedProcessIdentityInspector
     implements ProcessIdentityInspector {
   /// Creates the system inspector.
-  const ManagedProcessIdentityInspector();
+  const ManagedProcessIdentityInspector({
+    this.posixProcessTableExecutable = '/bin/ps',
+  });
+
+  /// Executable used to read the POSIX process table.
+  final String posixProcessTableExecutable;
 
   @override
-  Future<PosixProcessTableSnapshot?> snapshot() => _readPosixProcessTable();
+  Future<PosixProcessTableSnapshot?> snapshot() =>
+      _readPosixProcessTable(posixProcessTableExecutable);
 }
 
 Future<_InspectionResult?> _runInspectionCommand(
@@ -871,7 +987,14 @@ Future<_InspectionResult?> _runInspectionCommand(
 ) async {
   Process process;
   try {
-    process = await Process.start(executable, arguments);
+    process = await (Platform.isLinux || Platform.isMacOS
+        ? Process.start(
+            executable,
+            arguments,
+            environment: const {'LANG': 'C', 'LC_ALL': 'C'},
+            includeParentEnvironment: false,
+          )
+        : Process.start(executable, arguments));
   } catch (_) {
     return null;
   }
@@ -944,7 +1067,7 @@ class PosixProcessTableSnapshot {
     : _processes = const <int, _PosixProcessRecord>{},
       _childrenByParent = const <int, Set<int>>{};
 
-  /// Parses `ps -axo pid=,ppid=,lstart=,state=` output.
+  /// Parses `ps -axo pid=,ppid=,lstart=,state=,rss=` output.
   factory PosixProcessTableSnapshot.parse(String output) {
     final processes = <int, _PosixProcessRecord>{};
     final childrenByParent = <int, Set<int>>{};
@@ -952,7 +1075,7 @@ class PosixProcessTableSnapshot {
       final line = rawLine.trim();
       if (line.isEmpty) continue;
       final match = RegExp(
-        r'^(\d+)\s+(\d+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)$',
+        r'^(\d+)\s+(\d+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\d+)$',
       ).firstMatch(line);
       if (match == null) {
         throw FormatException('Unrecognized POSIX process table row.');
@@ -968,6 +1091,7 @@ class PosixProcessTableSnapshot {
       processes[pid] = _PosixProcessRecord(
         identity: identity,
         state: match.group(8)!,
+        rssKiB: int.parse(match.group(9)!),
       );
       childrenByParent.putIfAbsent(parentPid, () => <int>{}).add(pid);
     }
@@ -997,6 +1121,15 @@ class PosixProcessTableSnapshot {
   bool isStopped(int pid) =>
       _processes[pid]?.state.toUpperCase().contains('T') ?? false;
 
+  /// Computes the sum of RSS in bytes for all tracked processes.
+  int sumRssBytes(Iterable<PosixProcessIdentity> identities) {
+    var rssKiB = 0;
+    for (final pid in matchingPids(identities)) {
+      rssKiB += _processes[pid]!.rssKiB;
+    }
+    return rssKiB * 1024;
+  }
+
   /// Returns descendants of [roots] in this snapshot.
   Set<int> descendantsOf(Set<int> roots) {
     final descendants = <int>{};
@@ -1015,8 +1148,13 @@ class PosixProcessTableSnapshot {
 }
 
 class _PosixProcessRecord {
-  const _PosixProcessRecord({required this.identity, required this.state});
+  const _PosixProcessRecord({
+    required this.identity,
+    required this.state,
+    required this.rssKiB,
+  });
 
   final PosixProcessIdentity identity;
   final String state;
+  final int rssKiB;
 }

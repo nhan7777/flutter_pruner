@@ -4,10 +4,12 @@ import 'package:path/path.dart' as p;
 
 import '../core/confidence/action_capability.dart';
 import '../core/confidence/finding.dart';
+import '../core/confidence/promotion_index.dart';
 import '../core/graph/edge.dart';
 import '../core/graph/node.dart';
 import '../core/graph/reachability_graph.dart';
 import '../core/project/project_context.dart';
+import '../quarantine/quarantine_manager.dart';
 
 /// Mechanical operation represented by one reversible file snapshot.
 enum FindingActionOperation {
@@ -63,7 +65,13 @@ class FindingActionDescriptor {
 /// Converts classified findings into explicit reversible file operations.
 class FindingActionBuilder {
   /// Creates the stateless builder.
-  const FindingActionBuilder();
+  const FindingActionBuilder({this.quarantine, this.actionReadinessIndex});
+
+  /// Optional quarantine manager for l10n family mutations.
+  final QuarantineManager? quarantine;
+
+  /// Optional readiness index for l10n family-level mutations.
+  final ActionReadinessIndex? actionReadinessIndex;
 
   /// Builds every operation owned by one planner atomic unit.
   List<FindingActionDescriptor> build({
@@ -72,6 +80,24 @@ class FindingActionBuilder {
     required ProjectContext project,
     required String atomicGroup,
   }) {
+    // Check if all findings are l10n localizationKey nodes
+    final allL10nKeys = findings.every(
+      (f) => f.node.kind == NodeKind.localizationKey,
+    );
+
+    // If l10n family mutation is available and all are l10n keys, delegate
+    if (allL10nKeys &&
+        findings.isNotEmpty &&
+        quarantine != null &&
+        actionReadinessIndex != null) {
+      return _buildL10nFamilyMutation(
+        findings: findings,
+        project: project,
+        atomicGroup: atomicGroup,
+      );
+    }
+
+    // Standard core-owned operations
     final actions = <FindingActionDescriptor>[];
     final scheduledLibraryPaths = findings
         .where((finding) => finding.node.kind == NodeKind.dartLibrary)
@@ -212,6 +238,18 @@ class FindingActionBuilder {
       );
     }
     return actions;
+  }
+
+  /// Builds l10n family mutation operation.
+  List<FindingActionDescriptor> _buildL10nFamilyMutation({
+    required List<Finding> findings,
+    required ProjectContext project,
+    required String atomicGroup,
+  }) {
+    // L10n family mutations are handled by L10nMutationExecutor
+    // Return empty list - actual mutation happens in executor
+    // This signals to the apply layer that this unit is handled separately
+    return [];
   }
 
   /// Resolves a graph library ID back to an in-project physical file.
