@@ -90,3 +90,13 @@ GEMINI.md
 .github/copilot-instructions.md
 .github/instructions/
 .github/prompts/
+
+# Root-level session artifacts
+PHASE*.md
+$CLAUDE_JOB_DIR/
+
+# Internal planning and implementation evidence
+docs/
+
+# Benchmark backups
+*.backup

@@ -1097,11 +1097,11 @@ Map<String, Directory> _retainedRepositories(Directory corpusRoot) {
   });
 }
 
-Future<String> _coverageIdentity(Directory repositoryRoot) =>
-    _fileSetIdentity(repositoryRoot, const [
-      'docs/superpowers/plans/2026-08-22-safe-l10n-removal-v3-1-stage-1.md',
-      'docs/superpowers/specs/2026-08-22-safe-l10n-removal-v3-1-design.md',
-    ], schema: 'l10n-readiness-coverage-spec-v1');
+Future<String> _coverageIdentity(Directory repositoryRoot) => _fileSetIdentity(
+  repositoryRoot,
+  const ['ROADMAP.md'],
+  schema: 'l10n-readiness-coverage-spec-v1',
+);
 
 Future<String> _implementationIdentity(Directory repositoryRoot) async {
   final root = _canonicalExistingDirectory(repositoryRoot);
