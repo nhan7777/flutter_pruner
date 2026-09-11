@@ -478,34 +478,37 @@ Failure report saved: /workspace/failed-scan.json
         'lib/main.dart': 'void main() {}\n',
       });
 
-      final noninteractive = await harness.run([
+      // --- In-process scenarios (no fake entrypoints needed) ---
+      final runner = FlutterPrunerCommandRunner();
+
+      final noninteractive = await _runCaptured(runner, [
         'init',
         '--yes',
         '--project',
         fixture.root.path,
       ]);
       expect(noninteractive.exitCode, 0);
-      expect(noninteractive.stderrBytes, isEmpty);
+      expect(noninteractive.stderr, isEmpty);
       expect(fixture.file('.flutter_pruner/config.yaml').existsSync(), isTrue);
       _expectExactTranscript(
         inventory,
         transcriptFixtures,
         'init-noninteractive',
-        noninteractive,
+        _toCliProcessResult(noninteractive, const ['init', '--yes']),
       );
-      final zeroFindings = await harness.run([
+      final zeroFindings = await _runCaptured(runner, [
         'scan',
         '--project',
         fixture.root.path,
-      ], timeout: const Duration(seconds: 90));
+      ]);
       _expectExactTranscript(
         inventory,
         transcriptFixtures,
         'scan-zero',
-        zeroFindings,
+        _toCliProcessResult(zeroFindings, const ['scan']),
       );
       final missingProject = fixture.file('missing-project');
-      final operationalFailure = await harness.run([
+      final operationalFailure = await _runCaptured(runner, [
         'scan',
         '--project',
         missingProject.path,
@@ -514,8 +517,10 @@ Failure report saved: /workspace/failed-scan.json
         inventory,
         transcriptFixtures,
         'scan-operational-failure',
-        operationalFailure,
+        _toCliProcessResult(operationalFailure, const ['scan']),
       );
+
+      // --- Real-process scenarios (fake entrypoints inject test seams) ---
       final internalFailure = await harness.run(
         [
           'apply',
@@ -576,7 +581,7 @@ void unusedFunction() {}
 ''',
       });
       final oneReport = safeStopFixture.file('one-finding.json');
-      final oneFinding = await harness.run([
+      final oneFinding = await _runCaptured(runner, [
         'scan',
         '--adapter',
         'dart',
@@ -586,20 +591,20 @@ void unusedFunction() {}
         oneReport.path,
         '--project',
         safeStopFixture.root.path,
-      ], timeout: const Duration(seconds: 90));
-      expect(oneFinding.exitCode, 0, reason: oneFinding.stderrText);
+      ]);
+      expect(oneFinding.exitCode, 0, reason: oneFinding.stderr);
       _expectFindingCount(oneReport, 1);
       _expectExactTranscript(
         inventory,
         transcriptFixtures,
         'scan-one',
-        oneFinding,
+        _toCliProcessResult(oneFinding, const ['scan']),
       );
       await safeStopFixture.writeText(<String, String>{
         'lib/src/other.dart': 'void unusedTwo() {}\n',
       });
       final manyReport = safeStopFixture.file('many-findings.json');
-      final manyFindings = await harness.run([
+      final manyFindings = await _runCaptured(runner, [
         'scan',
         '--adapter',
         'dart',
@@ -609,14 +614,14 @@ void unusedFunction() {}
         manyReport.path,
         '--project',
         safeStopFixture.root.path,
-      ], timeout: const Duration(seconds: 90));
-      expect(manyFindings.exitCode, 0, reason: manyFindings.stderrText);
+      ]);
+      expect(manyFindings.exitCode, 0, reason: manyFindings.stderr);
       _expectFindingCount(manyReport, 3);
       _expectExactTranscript(
         inventory,
         transcriptFixtures,
         'scan-many',
-        manyFindings,
+        _toCliProcessResult(manyFindings, const ['scan']),
       );
       final safeStop = await harness.run(
         [
@@ -718,7 +723,8 @@ void unusedFunction() {}
         initCancellation,
       );
 
-      final empty = await harness.runQuarantineOnly([
+      // --- In-process quarantine scenarios ---
+      final empty = await _runCaptured(runner, [
         'quarantine',
         'list',
         '--project',
@@ -728,7 +734,7 @@ void unusedFunction() {}
         inventory,
         transcriptFixtures,
         'quarantine-empty',
-        empty,
+        _toCliProcessResult(empty, const ['quarantine', 'list']),
       );
 
       final corruptOnlyFixture = CliFixture.create(prefix: 'c3 corrupt only ');
@@ -736,7 +742,7 @@ void unusedFunction() {}
       await corruptOnlyFixture.writeText(<String, String>{
         '.flutter_pruner/quarantine/broken/manifest.json': '{broken',
       });
-      final corruptOnly = await harness.runQuarantineOnly([
+      final corruptOnly = await _runCaptured(runner, [
         'quarantine',
         'list',
         '--project',
@@ -746,12 +752,12 @@ void unusedFunction() {}
         inventory,
         transcriptFixtures,
         'quarantine-corrupt-only',
-        corruptOnly,
+        _toCliProcessResult(corruptOnly, const ['quarantine', 'list']),
       );
 
       final manager = QuarantineManager(fixture.root);
       await manager.createQuarantine(runId: 'preview-run', entries: const []);
-      final preview = await harness.runQuarantineOnly([
+      final preview = await _runCaptured(runner, [
         'quarantine',
         'clean',
         '--project',
@@ -763,9 +769,10 @@ void unusedFunction() {}
         inventory,
         transcriptFixtures,
         'quarantine-clean-preview',
-        preview,
+        _toCliProcessResult(preview, const ['quarantine', 'clean']),
       );
 
+      // --- Real-process quarantine cancelled (stdin + TTY) ---
       final cancelled = await harness.runQuarantineCleanFake(
         ['quarantine', 'clean', '--project', fixture.root.path, '--all'],
         stdinText: 'n\n',
@@ -778,10 +785,11 @@ void unusedFunction() {}
         cancelled,
       );
 
+      // --- In-process quarantine mixed ---
       await fixture.writeText(<String, String>{
         '.flutter_pruner/quarantine/broken/manifest.json': '{broken',
       });
-      final corrupt = await harness.runQuarantineOnly([
+      final corrupt = await _runCaptured(runner, [
         'quarantine',
         'list',
         '--project',
@@ -791,10 +799,11 @@ void unusedFunction() {}
         inventory,
         transcriptFixtures,
         'quarantine-mixed',
-        corrupt,
+        _toCliProcessResult(corrupt, const ['quarantine', 'list']),
       );
 
-      final rollback = await harness.run([
+      // --- In-process rollback ---
+      final rollback = await _runCaptured(runner, [
         'rollback',
         '--project',
         fixture.root.path,
@@ -804,13 +813,13 @@ void unusedFunction() {}
         inventory,
         transcriptFixtures,
         'rollback-recovery',
-        rollback,
+        _toCliProcessResult(rollback, const ['rollback']),
       );
     },
-    // This matrix launches 16 real CLI subprocess scenarios. Under full-suite
-    // contention, its healthy late cases exceeded 3 minutes; each subprocess
-    // retains its own bounded timeout and early-failure assertions.
-    timeout: const Timeout(Duration(minutes: 5)),
+    // 6 real-process scenarios (fake entrypoints) + 10 in-process scenarios.
+    // The real-process scenarios are the expensive ones; in-process scenarios
+    // add negligible overhead.
+    timeout: const Timeout(Duration(minutes: 3)),
   );
 }
 
@@ -1527,4 +1536,119 @@ final class _RecordingPrompt implements InitPrompt {
 
   @override
   void writeln([String value = '']) => _output.writeln(value);
+}
+
+Future<_CapturedRun> _runCaptured(
+  CommandRunner<int> runner,
+  List<String> arguments,
+) async {
+  final capturedStdout = _RecordingStdout();
+  final capturedStderr = _RecordingStdout();
+  final exitCode =
+      await IOOverrides.runZoned(
+        () => runner.run(arguments),
+        stdout: () => capturedStdout,
+        stderr: () => capturedStderr,
+      ) ??
+      0;
+  await capturedStdout.close();
+  await capturedStderr.close();
+  return _CapturedRun(
+    exitCode: exitCode,
+    stdout: capturedStdout.text,
+    stderr: capturedStderr.text,
+  );
+}
+
+CliProcessResult _toCliProcessResult(
+  _CapturedRun captured,
+  List<String> arguments,
+) => CliProcessResult(
+  argv: arguments,
+  processId: 0,
+  exitCode: captured.exitCode,
+  timedOut: false,
+  elapsed: Duration.zero,
+  stdoutBytes: utf8.encode(captured.stdout),
+  stderrBytes: utf8.encode(captured.stderr),
+  readyFile: null,
+  releaseFile: null,
+);
+
+final class _CapturedRun {
+  const _CapturedRun({
+    required this.exitCode,
+    required this.stdout,
+    required this.stderr,
+  });
+
+  final int exitCode;
+  final String stdout;
+  final String stderr;
+}
+
+final class _RecordingStdout implements Stdout {
+  final _buffer = StringBuffer();
+
+  String get text => _buffer.toString();
+
+  @override
+  Encoding encoding = utf8;
+
+  @override
+  String lineTerminator = '\n';
+
+  @override
+  bool get hasTerminal => false;
+
+  @override
+  bool get supportsAnsiEscapes => false;
+
+  @override
+  int get terminalColumns => throw const StdoutException('not a terminal');
+
+  @override
+  int get terminalLines => throw const StdoutException('not a terminal');
+
+  @override
+  IOSink get nonBlocking => this;
+
+  @override
+  void add(List<int> data) => _buffer.write(encoding.decode(data));
+
+  @override
+  void addError(Object error, [StackTrace? stackTrace]) => _buffer.write(error);
+
+  @override
+  Future<void> addStream(Stream<List<int>> stream) async {
+    await for (final data in stream) {
+      add(data);
+    }
+  }
+
+  @override
+  Future<void> close() async {}
+
+  @override
+  Future<void> get done => Future.value();
+
+  @override
+  Future<void> flush() async {}
+
+  @override
+  void write(Object? object) => _buffer.write(object);
+
+  @override
+  void writeAll(Iterable<Object?> objects, [String separator = '']) =>
+      _buffer.writeAll(objects, separator);
+
+  @override
+  void writeCharCode(int charCode) => _buffer.writeCharCode(charCode);
+
+  @override
+  void writeln([Object? object = '']) {
+    _buffer
+      ..write(object)
+      ..write(lineTerminator);
+  }
 }

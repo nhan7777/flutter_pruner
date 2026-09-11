@@ -1,7 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-
+import 'package:args/command_runner.dart' as args;
+import 'package:flutter_pruner/src/cli/command_runner.dart';
 import 'package:flutter_pruner/src/core/process/managed_process_runner.dart'
     show PosixProcessTableSnapshot;
 import 'package:flutter_pruner/src/core/project/project_operation_lock.dart';
@@ -293,28 +294,36 @@ void main() {
   ];
 
   for (final helpCase in helpCases) {
+    // Real-process smoke for the root and scan help paths verifies the
+    // executable, exit code, and stdout/stderr separation. The remaining
+    // help paths run in-process; help returns before any project resolution.
+    final isSmoke =
+        (helpCase.$1.length == 1 && helpCase.$1.single == '--help') ||
+        (helpCase.$1.length == 2 &&
+            helpCase.$1[0] == 'scan' &&
+            helpCase.$1[1] == '--help');
     test(
       'baseline: ${helpCase.$1.join(' ')} stays a stdout-only help path',
       () async {
-        final isInitHelp =
-            helpCase.$1.length == 2 &&
-            helpCase.$1[0] == 'init' &&
-            helpCase.$1[1] == '--help';
-        // The generic 45-second harness bound remains in force for all other
-        // CLI contracts. This specific real process took 50+ seconds when 12
-        // Dart VMs compiled concurrently, while retaining its exact stdout and
-        // empty stderr contract. Match only this invocation to its enclosing
-        // two-minute process-test deadline; early exit still resolves at once.
-        final timeout = isInitHelp ? const Duration(minutes: 2) : null;
-        final result = helpCase.$1.first == 'quarantine'
-            ? await harness.runQuarantineOnly(helpCase.$1, timeout: timeout)
-            : await harness.run(helpCase.$1, timeout: timeout);
+        if (isSmoke) {
+          final result = await harness.run(helpCase.$1);
 
-        expect(result.timedOut, isFalse);
-        expect(result.exitCode, 0);
-        expect(result.stdoutBytes, utf8.encode(helpCase.$2));
-        expect(result.stderrBytes, isEmpty);
-        expectNoAnsi(result);
+          expect(result.timedOut, isFalse);
+          expect(result.exitCode, 0);
+          expect(result.stdoutBytes, utf8.encode(helpCase.$2));
+          expect(result.stderrBytes, isEmpty);
+          expectNoAnsi(result);
+        } else {
+          final result = await _runCaptured(
+            FlutterPrunerCommandRunner(),
+            helpCase.$1,
+          );
+
+          expect(result.exitCode, 0);
+          expect(result.stdout, helpCase.$2);
+          expect(result.stderr, isEmpty);
+          _expectNoAnsiText('${result.stdout}${result.stderr}');
+        }
       },
       timeout: processTestTimeout,
     );
@@ -454,12 +463,17 @@ void main() {
     test(
       'baseline: ${failure.$1.join(' ')} preserves stderr and exit status',
       () async {
-        final result = await harness.run(failure.$1);
+        // Usage failures return before any project resolution or filesystem
+        // access, so in-process captures the same exit code and stderr.
+        final result = await _runCaptured(
+          FlutterPrunerCommandRunner(),
+          failure.$1,
+        );
 
         expect(result.exitCode, failure.$2);
-        expect(result.stdoutBytes, isEmpty);
-        expect(result.stderrBytes, utf8.encode(failure.$3));
-        expectNoAnsi(result);
+        expect(result.stdout, isEmpty);
+        expect(result.stderr, failure.$3);
+        _expectNoAnsiText('${result.stdout}${result.stderr}');
       },
       timeout: processTestTimeout,
     );
@@ -564,20 +578,22 @@ void main() {
         '.gitignore',
       ]);
 
-      final result = await harness.run(
+      // Usage errors return before project resolution or filesystem access.
+      // The in-process runner captures the same exit code and stderr; the
+      // fixture still guards against any side effects.
+      final result = await _runCaptured(
+        FlutterPrunerCommandRunner(),
         misuse.$2(fixture),
-        workingDirectory: fixture.root,
-        timeout: const Duration(seconds: 90),
       );
 
       expect(result.exitCode, 64);
-      expect(result.stdoutBytes, isEmpty);
-      expect(result.stderrText, startsWith('Error: ${misuse.$3}\n\n'));
+      expect(result.stdout, isEmpty);
+      expect(result.stderr, startsWith('Error: ${misuse.$3}\n\n'));
       if (misuse.$1.startsWith('scan') || misuse.$1.startsWith('apply')) {
-        expect(result.stderrText, isNot(contains('--only')));
+        expect(result.stderr, isNot(contains('--only')));
       }
-      expect(result.stderrText, contains(misuse.$4));
-      expectNoAnsi(result);
+      expect(result.stderr, contains(misuse.$4));
+      _expectNoAnsiText('${result.stdout}${result.stderr}');
       expect(fixture.file('.flutter_pruner').existsSync(), isFalse);
       expect(fixture.file('flutter_pruner.yaml').existsSync(), isFalse);
       expect(fixture.file('.gitignore').existsSync(), isFalse);
@@ -3051,4 +3067,109 @@ List<String> _snapshotEntity(Directory root, String relativePath) {
           .toList(growable: false)
         ..sort();
   return snapshots;
+}
+
+Future<_CapturedRun> _runCaptured(
+  args.CommandRunner<int> runner,
+  List<String> arguments,
+) async {
+  final capturedStdout = _RecordingStdout();
+  final capturedStderr = _RecordingStdout();
+  final exitCode =
+      await IOOverrides.runZoned(
+        () => runner.run(arguments),
+        stdout: () => capturedStdout,
+        stderr: () => capturedStderr,
+      ) ??
+      0;
+  await capturedStdout.close();
+  await capturedStderr.close();
+  return _CapturedRun(
+    exitCode: exitCode,
+    stdout: capturedStdout.text,
+    stderr: capturedStderr.text,
+  );
+}
+
+void _expectNoAnsiText(String output) {
+  final ansiIntroducer = RegExp(r'[\x1b\x90\x98\x9b\x9d-\x9f]');
+  expect(output, isNot(contains(ansiIntroducer)));
+}
+
+final class _CapturedRun {
+  const _CapturedRun({
+    required this.exitCode,
+    required this.stdout,
+    required this.stderr,
+  });
+
+  final int exitCode;
+  final String stdout;
+  final String stderr;
+}
+
+final class _RecordingStdout implements Stdout {
+  final _buffer = StringBuffer();
+
+  String get text => _buffer.toString();
+
+  @override
+  Encoding encoding = utf8;
+
+  @override
+  String lineTerminator = '\n';
+
+  @override
+  bool get hasTerminal => false;
+
+  @override
+  bool get supportsAnsiEscapes => false;
+
+  @override
+  int get terminalColumns => throw const StdoutException('not a terminal');
+
+  @override
+  int get terminalLines => throw const StdoutException('not a terminal');
+
+  @override
+  IOSink get nonBlocking => this;
+
+  @override
+  void add(List<int> data) => _buffer.write(encoding.decode(data));
+
+  @override
+  void addError(Object error, [StackTrace? stackTrace]) => _buffer.write(error);
+
+  @override
+  Future<void> addStream(Stream<List<int>> stream) async {
+    await for (final data in stream) {
+      add(data);
+    }
+  }
+
+  @override
+  Future<void> close() async {}
+
+  @override
+  Future<void> get done => Future.value();
+
+  @override
+  Future<void> flush() async {}
+
+  @override
+  void write(Object? object) => _buffer.write(object);
+
+  @override
+  void writeAll(Iterable<Object?> objects, [String separator = '']) =>
+      _buffer.writeAll(objects, separator);
+
+  @override
+  void writeCharCode(int charCode) => _buffer.writeCharCode(charCode);
+
+  @override
+  void writeln([Object? object = '']) {
+    _buffer
+      ..write(object)
+      ..write(lineTerminator);
+  }
 }
