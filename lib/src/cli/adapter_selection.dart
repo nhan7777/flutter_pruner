@@ -136,7 +136,9 @@ final class AdapterSelection {
       );
       buffer.writeln(
         styledFrameLine(
-          frameLine('[x] selected    [ ] available    detected = project match'),
+          frameLine(
+            '[x] selected    [ ] available    detected = project match',
+          ),
           '1;36',
         ),
       );
