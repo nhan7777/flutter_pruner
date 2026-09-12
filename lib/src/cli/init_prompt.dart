@@ -18,6 +18,27 @@ abstract class InitPrompt {
   String? readLine();
 }
 
+/// Raw keys supported by the adapter picker.
+enum PickerKey {
+  /// Move selection upward.
+  up,
+
+  /// Move selection downward.
+  down,
+
+  /// Toggle the focused adapter.
+  space,
+
+  /// Confirm the current selection.
+  enter,
+}
+
+/// Optional capability for reading terminal keys without line buffering.
+abstract interface class RawKeyInitPrompt {
+  /// Reads one key, or `null` for an unrecognized key.
+  PickerKey? readPickerKey();
+}
+
 /// Optional capability for prompts that can render semantic ANSI styling.
 abstract interface class AnsiInitPrompt {
   /// Whether ANSI color and text-weight escapes can be rendered.
@@ -25,7 +46,7 @@ abstract interface class AnsiInitPrompt {
 }
 
 /// Production prompt backed by process stdin/stdout.
-class StdioInitPrompt implements InitPrompt, AnsiInitPrompt {
+class StdioInitPrompt implements InitPrompt, AnsiInitPrompt, RawKeyInitPrompt {
   /// Creates a stdio-backed prompt.
   const StdioInitPrompt();
 
@@ -37,6 +58,32 @@ class StdioInitPrompt implements InitPrompt, AnsiInitPrompt {
 
   @override
   String? readLine() => stdin.readLineSync();
+
+  @override
+  PickerKey? readPickerKey() {
+    final previousLineMode = stdin.lineMode;
+    final previousEchoMode = stdin.echoMode;
+    try {
+      stdin.lineMode = false;
+      stdin.echoMode = false;
+      final first = stdin.readByteSync();
+      if (first < 0) throw const InitCancelledException();
+      if (first == 0x20) return PickerKey.space;
+      if (first == 0x0a || first == 0x0d) return PickerKey.enter;
+      if (first != 0x1b) return null;
+      final second = stdin.readByteSync();
+      if (second < 0) throw const InitCancelledException();
+      if (second != 0x5b) return null;
+      final third = stdin.readByteSync();
+      if (third < 0) throw const InitCancelledException();
+      if (third == 0x41) return PickerKey.up;
+      if (third == 0x42) return PickerKey.down;
+      return null;
+    } finally {
+      stdin.lineMode = previousLineMode;
+      stdin.echoMode = previousEchoMode;
+    }
+  }
 
   @override
   void write(String value) => stdout.write(value);

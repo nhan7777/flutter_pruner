@@ -4,6 +4,18 @@ import 'package:flutter_pruner/src/core/process/managed_process_runner.dart';
 import 'package:test/test.dart';
 
 void main() {
+  test('formats one colored large-project analysis notice', () {
+    final rendered = analysisDurationNotice();
+
+    expect(rendered, startsWith('\x1B[1m\x1B[36m◇  ANALYSIS'));
+    expect(
+      _stripAnsi(rendered),
+      equals(
+        '◇  ANALYSIS\n'
+        '┃ Large projects may take several minutes to scan.',
+      ),
+    );
+  });
   test('highlights package-internal scope and external-consumer risk', () {
     final rendered = packageInternalWarning('khlc_product');
 

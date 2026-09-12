@@ -74,6 +74,51 @@ void unusedFunction() {}
   tearDown(() {
     if (tempDir.existsSync()) tempDir.deleteSync(recursive: true);
   });
+  test('prompts for adapters before dry-run analysis when omitted', () async {
+    final prompt = _FakeApplyPrompt(['duplicates']);
+    Set<String>? selectedAdapters;
+    final output = File(p.join(tempDir.path, 'selection.json'));
+    final result = await _runApplyCaptured(
+      FlutterPrunerCommandRunner(
+        applyCommandFactory: () => ApplyCommand(
+          prompt: prompt,
+          analyzerFactory: (context, only) {
+            selectedAdapters = only;
+            return ProjectAnalyzer(project: context, only: only);
+          },
+        ),
+      ),
+      [
+        'apply',
+        '--dry-run',
+        '--report-format',
+        'json',
+        '--report-output',
+        output.path,
+        tempDir.path,
+      ],
+    );
+
+    expect(result.exitCode, 0);
+    expect(prompt.transcript, contains('Adapters:'));
+    expect(prompt.transcript, contains('Duplicate file detector (duplicates)'));
+    expect(selectedAdapters, {'duplicates'});
+    expect(
+      'Large projects may take several minutes to scan.'.allMatches(
+        result.stderr,
+      ),
+      hasLength(1),
+    );
+    expect(
+      result.stderr.indexOf('Large projects may take several minutes to scan.'),
+      lessThan(result.stderr.indexOf('Scanning Duplicate file detector')),
+    );
+    final report =
+        jsonDecode(output.readAsStringSync()) as Map<String, dynamic>;
+    expect((report['execution'] as Map<String, dynamic>)['requestedAdapters'], [
+      'duplicates',
+    ]);
+  });
 
   for (final variant in ReportOutputAliasVariant.values) {
     for (final invocation in _ReportCollisionApplyInvocation.values) {

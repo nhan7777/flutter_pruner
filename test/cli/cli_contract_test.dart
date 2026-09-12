@@ -107,6 +107,7 @@ Usage: flutter_pruner scan [arguments] [project-path]
     --format     Saved report format; defaults to self-contained interactive HTML
                  [human, json, html (default)]
 -o, --output     Override automatic .flutter_pruner/reports destination; absolute paths remain supported
+    --adapter    Adapter IDs to run; repeat or comma-separate; prompts on terminals when omitted
     --config     Configuration path; relative paths start at selected project
 -p, --project    Dart or Flutter project root; defaults to current directory
 
@@ -126,6 +127,7 @@ Usage: flutter_pruner apply [arguments] [project-path]
 -h, --help             Print this usage information.
 -n, --dry-run          Preview dependency-closed plan without changing files
     --yes              Accept package-internal external-consumer risk without prompting
+    --adapter          Adapter IDs to run; repeat or comma-separate; prompts on terminals when omitted
     --finding-id       Apply only these exact, case-sensitive finding IDs; repeat for an atomic batch
     --config           Configuration path; relative paths start at selected project
     --report-output    Override automatic .flutter_pruner/reports destination; absolute paths remain supported

@@ -11,11 +11,12 @@ class RunRecorder {
   /// Starts a run recorder.
   RunRecorder({
     required this.command,
-    required this.requestedAdapters,
+    required Iterable<String> requestedAdapters,
     required this.toolVersion,
     RunClock? clock,
     RunIdGenerator? idGenerator,
-  }) : _clock = clock ?? SystemRunClock(),
+  }) : _requestedAdapters = List.unmodifiable(requestedAdapters),
+       _clock = clock ?? SystemRunClock(),
        _idGenerator = idGenerator ?? SecureRunIdGenerator() {
     _startedAtUtc = _clock.nowUtc();
     _startedMicros = _clock.monotonicMicros();
@@ -25,8 +26,9 @@ class RunRecorder {
   /// Command whose lifecycle is being recorded.
   final RunCommand command;
 
-  /// Adapter IDs explicitly requested by the user, or every reporting adapter.
-  final List<String> requestedAdapters;
+  /// Adapter IDs selected for this run by CLI, prompt, or auto-detection.
+  List<String> get requestedAdapters => _requestedAdapters;
+  List<String> _requestedAdapters;
 
   /// Flutter Pruner package version recorded in the report.
   final String toolVersion;
@@ -46,6 +48,11 @@ class RunRecorder {
   ApplyInitialPlanReport? _applyInitialPlan;
   List<String> _acceptedRiskCodes = const [];
   RiskAcceptanceSource _riskAcceptanceSource = RiskAcceptanceSource.notRequired;
+
+  /// Records the project-aware adapter selection resolved after startup.
+  void recordRequestedAdapters(Iterable<String> adapterIds) {
+    _requestedAdapters = List.unmodifiable(adapterIds.toSet().toList()..sort());
+  }
 
   /// Records the explicit authorization used for allowlisted manual risks.
   void recordRiskAcceptance({
