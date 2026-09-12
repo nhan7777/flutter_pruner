@@ -77,17 +77,18 @@ class ProjectOperationLock {
             !unresolved.observationReliable;
         if (isStaleArmed) {
           throw ProjectOperationLockException(
-            'Flutter Pruner operation "${unresolved.phase}" for '
+            '\x1B[1;31mFlutter Pruner operation "${unresolved.phase}" for '
             '${workspace.projectRoot.path} was interrupted and did not complete '
-            'cleanup (incident ${unresolved.incidentId}).\n\n'
-            'Recovery:\n'
-            '1. Verify no flutter_pruner processes are running:\n'
-            '   ps aux | grep flutter_pruner\n'
-            '2. If none found, remove the stale lock:\n'
-            '   rm "${lockFile.path}"\n'
-            '3. Retry your command.\n\n'
-            'If flutter_pruner processes are still running, wait for them to '
-            'exit or terminate them before removing the lock.',
+            'cleanup\x1B[0m \x1B[2m(incident ${unresolved.incidentId})\x1B[0m\n\n'
+            '\x1B[1;33mRecovery:\x1B[0m\n'
+            '\x1B[1m1. Verify no flutter_pruner processes are running:\x1B[0m\n'
+            '   \x1B[36mps aux | grep flutter_pruner\x1B[0m\n'
+            '\x1B[1m2. If none found, remove the stale lock:\x1B[0m\n'
+            '   \x1B[1;36mrm "${lockFile.path}"\x1B[0m\n'
+            '\x1B[1m3. Retry your command.\x1B[0m\n\n'
+          '\x1B[2mIf flutter_pruner processes are still running, wait for them to '
+          'exit or terminate them before removing the lock.\x1B[0m\n'
+          '   \x1B[33mpkill -f flutter_pruner\x1B[0m',
           );
         }
         if (!unresolved.hasCompleteIdentityEvidence) {

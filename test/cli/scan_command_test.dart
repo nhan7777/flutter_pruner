@@ -8,9 +8,11 @@ import 'package:flutter_pruner/src/adapters/analyzer_adapter.dart';
 import 'package:flutter_pruner/src/adapters/dart/dart_package_ownership.dart';
 import 'package:flutter_pruner/src/analysis/analysis_snapshot.dart';
 import 'package:flutter_pruner/src/analysis/project_analyzer.dart';
+import 'package:flutter_pruner/src/cli/adapter_selection.dart';
 import 'package:flutter_pruner/src/cli/command_runner.dart';
 import 'package:flutter_pruner/src/cli/commands/scan_command.dart';
 import 'package:flutter_pruner/src/cli/formatters/json_formatter.dart';
+import 'package:flutter_pruner/src/cli/init_prompt.dart';
 import 'package:flutter_pruner/src/core/process/managed_process_runner.dart';
 import 'package:flutter_pruner/src/core/project/project_context.dart';
 import 'package:flutter_pruner/src/reporting/io_report_object_backend.dart';
@@ -60,6 +62,44 @@ target_matrix:
 
   tearDown(() {
     if (project.existsSync()) project.deleteSync(recursive: true);
+  });
+  test('prompts before analysis and prints the duration notice once', () async {
+    final events = <String>[];
+    final prompt = _AdapterSelectionPrompt(['dart'], events);
+    Set<String>? selectedAdapters;
+    final output = File(p.join(project.path, 'selection.json'));
+    final result = await _runCaptured(
+      FlutterPrunerCommandRunner(
+        scanCommandFactory: () => ScanCommand(
+          adapterSelection: AdapterSelection(prompt: prompt),
+          analyzerFactory: (context, only) {
+            events.add('analyzer');
+            selectedAdapters = only;
+            return ProjectAnalyzer(project: context, only: only);
+          },
+        ),
+      ),
+      ['scan', '--format', 'json', '--output', output.path, project.path],
+    );
+
+    expect(result.exitCode, 0);
+    expect(prompt.output.toString(), contains('Adapters:'));
+    expect(
+      prompt.output.toString(),
+      contains('Dart declaration analyzer (dart)'),
+    );
+    expect(events.indexOf('prompt'), lessThan(events.indexOf('analyzer')));
+    expect(selectedAdapters, {'dart'});
+    expect(
+      'Large projects may take several minutes to scan.'.allMatches(
+        result.stderr,
+      ),
+      hasLength(1),
+    );
+    expect(
+      result.stderr.indexOf('Large projects may take several minutes to scan.'),
+      lessThan(result.stderr.indexOf('Scanning Dart declaration analyzer')),
+    );
   });
 
   for (final variant in ReportOutputAliasVariant.values) {
@@ -2094,7 +2134,8 @@ target_matrix:
       expect(
         _stripAnsi(progress),
         '◆ PROJECT  ${project.path}\n'
-        'Note: Analysis may take 30-60 seconds on large projects.\n'
+        '◇  ANALYSIS\n'
+        '┃ Large projects may take several minutes to scan.\n'
         '• Scanning Duplicate file detector…\n',
       );
 
@@ -2392,6 +2433,36 @@ final class _CapturedRun {
   final int exitCode;
   final String stdout;
   final String stderr;
+}
+
+final class _AdapterSelectionPrompt implements InitPrompt {
+  _AdapterSelectionPrompt(Iterable<String?> responses, this.events)
+    : _responses = responses.iterator;
+
+  final Iterator<String?> _responses;
+  final List<String> events;
+  final output = StringBuffer();
+
+  @override
+  bool get isInteractive => true;
+
+  @override
+  String? readLine() {
+    if (!_responses.moveNext()) return null;
+    return _responses.current;
+  }
+
+  @override
+  void write(String value) {
+    events.add('prompt');
+    output.write(value);
+  }
+
+  @override
+  void writeln([String value = '']) {
+    events.add('prompt');
+    output.writeln(value);
+  }
 }
 
 final class _WriteToOnlyJsonFormatter extends JsonFormatter {

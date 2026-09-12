@@ -38,6 +38,7 @@ import '../../reporting/run_recorder.dart';
 import '../../reporting/run_report.dart';
 import '../../verification/verification_runner.dart';
 import '../../version.dart';
+import '../adapter_selection.dart';
 import '../cli_exit_code.dart';
 import '../cli_signal_coordinator.dart';
 import '../formatters/html_formatter.dart';
@@ -66,6 +67,7 @@ class ApplyCommand extends Command<int> {
   ApplyCommand({
     VerificationRunner Function(Directory)? verifierFactory,
     ProjectAnalyzer Function(ProjectContext, Set<String>?)? analyzerFactory,
+    AdapterSelection? adapterSelection,
     ImportCleanupRunner Function(Directory)? cleanupRunnerFactory,
     QuarantineManager Function(Directory)? quarantineManagerFactory,
     ReportObjectBackend? reportBackend,
@@ -121,6 +123,7 @@ class ApplyCommand extends Command<int> {
        _sourceSnapshotFirstReadHookForTesting =
            sourceSnapshotFirstReadHookForTesting,
        _signalCoordinator = signalCoordinator,
+       _adapterSelection = adapterSelection ?? AdapterSelection(prompt: prompt),
        _prompt = prompt {
     argParser
       ..addFlag(
@@ -137,8 +140,8 @@ class ApplyCommand extends Command<int> {
       )
       ..addMultiOption(
         'adapter',
-        help: 'Run only these adapter IDs; defaults to all registered',
-        hide: true,
+        help:
+            'Adapter IDs to run; repeat or comma-separate; prompts on terminals when omitted',
       )
       ..addMultiOption(
         'finding-id',
@@ -186,6 +189,7 @@ class ApplyCommand extends Command<int> {
 
   final VerificationRunner Function(Directory) _verifierFactory;
   final ProjectAnalyzer Function(ProjectContext, Set<String>?) _analyzerFactory;
+  final AdapterSelection _adapterSelection;
   final ImportCleanupRunner Function(Directory) _cleanupRunnerFactory;
   final QuarantineManager Function(Directory) _quarantineManagerFactory;
   final ReportObjectBackend _reportBackend;
@@ -240,7 +244,9 @@ Apply, including --dry-run, may persist tool state and reports
     final reportFormat = _ReportOutputFormat.values.byName(
       args.option('report-format')!,
     );
-    final only = args.multiOption('adapter').toSet();
+    final requestedAdapters = args.wasParsed('adapter')
+        ? args.multiOption('adapter').toSet()
+        : null;
     final FindingSelection findingSelection;
     try {
       findingSelection = FindingSelection.fromCli(
@@ -276,14 +282,19 @@ Apply, including --dry-run, may persist tool state and reports
         'Pass the project once, using either --project or [project-path].',
       );
     }
+    if (requestedAdapters != null &&
+        (requestedAdapters.isEmpty ||
+            requestedAdapters.any((id) => id.trim().isEmpty))) {
+      throw commandUsageError(this, '--adapter requires at least one ID.');
+    }
     try {
-      validateRequestedAdapterIds(only);
+      validateRequestedAdapterIds(requestedAdapters ?? const <String>{});
     } on UnknownAdapterIdUsageException catch (e) {
       throw commandUsageError(this, e.message);
     }
     final recorder = RunRecorder(
       command: RunCommand.apply,
-      requestedAdapters: only.toList()..sort(),
+      requestedAdapters: requestedAdapters ?? const <String>{},
       toolVersion: packageVersion,
     );
 
@@ -327,8 +338,9 @@ Apply, including --dry-run, may persist tool state and reports
       return 1;
     }
 
+    late final ProjectContext preflightProject;
     try {
-      await _loadProjectForApply(
+      preflightProject = await _loadProjectForApply(
         workspace: workspace,
         quarantineBaseDir: quarantineBaseDir,
         reportOutput: reportOutput,
@@ -338,6 +350,18 @@ Apply, including --dry-run, may persist tool state and reports
       stderr.writeln(e.message);
       return 1;
     }
+
+    late final Set<String> selectedAdapters;
+    try {
+      selectedAdapters = _adapterSelection.resolve(
+        preflightProject,
+        requested: requestedAdapters,
+      );
+    } on InitCancelledException {
+      stderr.writeln('Cancelled.');
+      return CliExitCode.success;
+    }
+    recorder.recordRequestedAdapters(selectedAdapters);
 
     late final _ApplyReportPersistence reportPersistence;
     try {
@@ -383,7 +407,7 @@ Apply, including --dry-run, may persist tool state and reports
           dryRun: dryRun,
           assumeYes: assumeYes,
           reportFormat: reportFormat,
-          only: only,
+          only: selectedAdapters,
           findingSelection: findingSelection,
           expectedPreviewFingerprint: expectedPreviewFingerprint,
           recorder: recorder,
@@ -505,7 +529,7 @@ Apply, including --dry-run, may persist tool state and reports
       );
     }
 
-    final analyzer = _analyzerFactory(project, only.isEmpty ? null : only);
+    final analyzer = _analyzerFactory(project, only);
 
     if (analyzer.adapters.isEmpty) {
       throw StateError('No matching adapters were selected.');
@@ -513,6 +537,7 @@ Apply, including --dry-run, may persist tool state and reports
     recorder.registerAdapterReportDefinitions(
       analyzer.adapterReportDefinitions,
     );
+    stderr.writeln(analysisDurationNotice());
 
     late AnalysisSnapshot snapshot;
     var analysisSucceeded = false;

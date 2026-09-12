@@ -3,6 +3,12 @@ import 'dart:async';
 import 'cli_signal_coordinator.dart';
 import 'formatters/quarantine_formatter.dart';
 
+/// Formats the one-time analysis duration notice shown before adapter progress.
+String analysisDurationNotice() =>
+    '$_bold$_cyan◇  ANALYSIS$_reset\n'
+    '$_cyan┃$_reset $_dim'
+    'Large projects may take several minutes to scan.$_reset';
+
 /// Formats the package-internal analysis warning as a prominent terminal rail.
 String packageInternalWarning(String packageName) {
   final displayPackageName = QuarantineFormatter.terminalSafe(packageName);
@@ -146,10 +152,8 @@ class TerminalProgress {
   static const _frames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
   static const _spinnerColors = [_cyan, _magenta, _yellow];
   static const _clearLine = '\x1B[2K';
-  static const _dim = '\x1B[2m';
   static const _italic = '\x1B[3m';
   static const _green = '\x1B[32m';
-  static const _cyan = '\x1B[36m';
 }
 
 enum _ProgressActivityState { active, finished }
@@ -166,3 +170,5 @@ const _reset = '\x1B[0m';
 const _bold = '\x1B[1m';
 const _yellow = '\x1B[33m';
 const _magenta = '\x1B[35m';
+const _dim = '\x1B[2m';
+const _cyan = '\x1B[36m';

@@ -17,12 +17,14 @@ import '../../reporting/reportable_command_failure.dart';
 import '../../reporting/run_recorder.dart';
 import '../../reporting/run_report.dart';
 import '../../version.dart';
+import '../adapter_selection.dart';
 import '../cli_exit_code.dart';
 import '../cli_signal_coordinator.dart';
 import '../formatters/html_formatter.dart';
 import '../formatters/human_formatter.dart';
 import '../formatters/json_formatter.dart';
 import '../formatters/report_formatter.dart';
+import '../init_prompt.dart';
 import '../project_command_support.dart';
 import '../terminal_progress.dart';
 import '../usage_error.dart';
@@ -44,12 +46,16 @@ class ScanCommand extends Command<int> {
     ReportObjectBackend? reportBackend,
     JsonFormatterFactory? jsonFormatterFactory,
     ScanProjectAnalyzerFactory? analyzerFactory,
+    AdapterSelection? adapterSelection,
     CliSignalCoordinator? signalCoordinator,
     ManagedProcessCancellationController? processCancellation,
     ManagedProcessStarter? analyzerProcessStarter,
     ManagedProcessTreeTerminator? analyzerProcessTreeTerminator,
   }) : _reportBackend = reportBackend,
        _signalCoordinator = signalCoordinator,
+       _adapterSelection =
+           adapterSelection ??
+           AdapterSelection(prompt: const StdioInitPrompt()),
        _jsonFormatterFactory =
            jsonFormatterFactory ?? _defaultJsonFormatterFactory,
        _analyzerFactory =
@@ -87,8 +93,8 @@ class ScanCommand extends Command<int> {
       )
       ..addMultiOption(
         'adapter',
-        help: 'Run only these adapter IDs; defaults to all registered',
-        hide: true,
+        help:
+            'Adapter IDs to run; repeat or comma-separate; prompts on terminals when omitted',
       )
       ..addOption(
         'config',
@@ -101,6 +107,7 @@ class ScanCommand extends Command<int> {
   final CliSignalCoordinator? _signalCoordinator;
   final JsonFormatterFactory _jsonFormatterFactory;
   final ScanProjectAnalyzerFactory _analyzerFactory;
+  final AdapterSelection _adapterSelection;
 
   @override
   String get invocation => '${super.invocation} [project-path]';
@@ -124,7 +131,9 @@ Scan may persist tool state and reports''';
   Future<int> run() async {
     final args = argResults!;
     final outputPath = args.option('output');
-    final only = args.multiOption('adapter').toSet();
+    final requestedAdapters = args.wasParsed('adapter')
+        ? args.multiOption('adapter').toSet()
+        : null;
 
     if (args.wasParsed('json-version') && args.option('format') != 'json') {
       throw commandUsageError(this, '--json-version requires --format json.');
@@ -140,8 +149,13 @@ Scan may persist tool state and reports''';
         'Pass the project once, using either --project or [project-path].',
       );
     }
+    if (requestedAdapters != null &&
+        (requestedAdapters.isEmpty ||
+            requestedAdapters.any((id) => id.trim().isEmpty))) {
+      throw commandUsageError(this, '--adapter requires at least one ID.');
+    }
     try {
-      validateRequestedAdapterIds(only);
+      validateRequestedAdapterIds(requestedAdapters ?? const <String>{});
     } on UnknownAdapterIdUsageException catch (e) {
       throw commandUsageError(this, e.message);
     }
@@ -209,12 +223,22 @@ Scan may persist tool state and reports''';
       animated: stderr.hasTerminal,
       signalCoordinator: _signalCoordinator,
     )..writeProject(project.root.path);
+    late final Set<String> selectedAdapters;
+    try {
+      selectedAdapters = _adapterSelection.resolve(
+        project,
+        requested: requestedAdapters,
+      );
+    } on InitCancelledException {
+      stderr.writeln('Cancelled.');
+      return CliExitCode.success;
+    }
     if (project.analysisMode == AnalysisMode.packageInternal) {
       stderr.writeln(packageInternalWarning(project.packageName));
     }
 
     final verbose = globalResults?.flag('verbose') ?? false;
-    final analyzer = _analyzerFactory(project, only.isEmpty ? null : only);
+    final analyzer = _analyzerFactory(project, selectedAdapters);
 
     if (analyzer.adapters.isEmpty) {
       throw StateError('No matching adapters were selected.');
@@ -222,11 +246,7 @@ Scan may persist tool state and reports''';
 
     final recorder = RunRecorder(
       command: RunCommand.scan,
-      requestedAdapters:
-          only.isEmpty
-                ? analyzer.adapters.map((adapter) => adapter.id).toList()
-                : only.toList()
-            ..sort(),
+      requestedAdapters: selectedAdapters.toList()..sort(),
       toolVersion: packageVersion,
     );
     final format = args.option('format')!;
@@ -299,6 +319,7 @@ Scan may persist tool state and reports''';
       var analysisSucceeded = false;
       String? currentAdapterId;
       String? currentAdapterName;
+      stderr.writeln(analysisDurationNotice());
       try {
         recorder.registerAdapterReportDefinitions(
           analyzer.adapterReportDefinitions,
@@ -314,9 +335,6 @@ Scan may persist tool state and reports''';
               );
               currentAdapterId = context?.id;
               currentAdapterName = context?.name;
-              stderr.writeln(
-                'Note: Analysis may take 30-60 seconds on large projects.',
-              );
               progress.start(context?.name ?? 'adapter analysis');
             },
             onAdapterFinished: (adapter, status) {
