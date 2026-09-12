@@ -86,9 +86,9 @@ class ProjectOperationLock {
             '\x1B[1m2. If none found, remove the stale lock:\x1B[0m\n'
             '   \x1B[1;36mrm "${lockFile.path}"\x1B[0m\n'
             '\x1B[1m3. Retry your command.\x1B[0m\n\n'
-          '\x1B[2mIf flutter_pruner processes are still running, wait for them to '
-          'exit or terminate them before removing the lock.\x1B[0m\n'
-          '   \x1B[33mpkill -f flutter_pruner\x1B[0m',
+            '\x1B[2mIf flutter_pruner processes are still running, wait for them to '
+            'exit or terminate them before removing the lock.\x1B[0m\n'
+            '   \x1B[33mpkill -f flutter_pruner\x1B[0m',
           );
         }
         if (!unresolved.hasCompleteIdentityEvidence) {

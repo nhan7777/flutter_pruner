@@ -275,7 +275,7 @@ void main() {
       expect(result.exitCode, 0);
       expect(
         result.stdoutText,
-        'flutter_pruner 1.7.0${Platform.isWindows ? '\r\n' : '\n'}',
+        'flutter_pruner 1.8.0${Platform.isWindows ? '\r\n' : '\n'}',
       );
       expect(result.stderrBytes, isEmpty);
       expectNoAnsi(result);

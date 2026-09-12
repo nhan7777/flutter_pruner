@@ -23,6 +23,13 @@ Override automatic
 destination;
 absolute paths
 remain supported
+    --adapter
+    Adapter IDs to
+    run; repeat or
+    comma-separate;
+    prompts on
+    terminals when
+    omitted
     --config
     Configuration
     path; relative

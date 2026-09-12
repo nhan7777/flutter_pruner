@@ -5,7 +5,7 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.8.0] - 2026-09-12
 
 ### Added
 
@@ -392,7 +392,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Custom runtime callback and asset registries require explicit modeling or
   project policy.
 
-[Unreleased]: https://github.com/nhan7777/flutter_pruner/compare/v1.7.0...main
+[Unreleased]: https://github.com/nhan7777/flutter_pruner/compare/v1.8.0...main
+[1.8.0]: https://github.com/nhan7777/flutter_pruner/compare/v1.7.0...v1.8.0
 [1.7.0]: https://github.com/nhan7777/flutter_pruner/compare/v1.6.0...v1.7.0
 [1.6.0]: https://github.com/nhan7777/flutter_pruner/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/nhan7777/flutter_pruner/compare/v1.4.0...v1.5.0
