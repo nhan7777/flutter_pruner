@@ -151,7 +151,7 @@ final class DefaultDartExecutionReachabilityService
         continue;
       }
       final resolvedLibrary = result;
-      final libraryPath = _canonical(
+      final libraryPath = ownership.canonicalPath(
         resolvedLibrary.element.firstFragment.source.fullName,
       );
       librariesByPath.putIfAbsent(libraryPath, () => resolvedLibrary);
@@ -214,7 +214,7 @@ final class DefaultDartExecutionReachabilityService
         for (final unit in library.units)
           if (ownership.ownerOf(unit.path).ownership ==
               DartSourceOwnership.selectedPackage)
-            _canonical(unit.path),
+            ownership.canonicalPath(unit.path),
       };
       for (final unit in library.units) {
         final owner = ownership.ownerOf(unit.path);
@@ -231,7 +231,7 @@ final class DefaultDartExecutionReachabilityService
         }
         for (final directive
             in unit.unit.directives.whereType<PartDirective>()) {
-          final partPath = _partPath(unit, directive);
+          final partPath = _partPath(ownership, unit, directive);
           if (partPath == null || !File(partPath).existsSync()) {
             issues.add(
               'selected Dart library contains an unresolved part: '
@@ -252,7 +252,7 @@ final class DefaultDartExecutionReachabilityService
               '${project.relative(partPath)}',
             );
           } else if (!(unitPathsByLibraryPath[entry.key] ?? const {}).contains(
-            _canonical(partPath),
+            ownership.canonicalPath(partPath),
           )) {
             issues.add(
               'selected Dart library contains an unresolved part: '
@@ -484,27 +484,24 @@ String _fingerprint(DartExecutionReachabilitySnapshot snapshot) {
       .toString();
 }
 
-String? _partPath(ResolvedUnitResult unit, PartDirective directive) {
+String? _partPath(
+  DartPackageOwnership ownership,
+  ResolvedUnitResult unit,
+  PartDirective directive,
+) {
   final resolved = directive.uri.stringValue;
   if (resolved == null || resolved.isEmpty) return null;
   final uri = Uri.tryParse(resolved);
   if (uri == null || uri.hasQuery || uri.hasFragment) return null;
   if (uri.scheme.isEmpty) {
-    return _canonical(p.join(p.dirname(unit.path), uri.toFilePath()));
+    return ownership.canonicalPath(
+      p.join(p.dirname(unit.path), uri.toFilePath()),
+    );
   }
-  if (uri.scheme == 'file') return _canonical(uri.toFilePath());
+  if (uri.scheme == 'file') return ownership.canonicalPath(uri.toFilePath());
   if (uri.scheme == 'package') {
     final path = unit.session.uriConverter.uriToPath(uri);
-    return path == null ? null : _canonical(path);
+    return path == null ? null : ownership.canonicalPath(path);
   }
   return null;
-}
-
-String _canonical(String path) {
-  final absolute = p.normalize(p.absolute(path));
-  try {
-    return p.normalize(File(absolute).resolveSymbolicLinksSync());
-  } on FileSystemException {
-    return absolute;
-  }
 }

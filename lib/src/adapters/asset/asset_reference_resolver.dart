@@ -1,4 +1,3 @@
-import 'dart:io';
 
 import 'package:analyzer/dart/analysis/results.dart';
 import 'package:analyzer/dart/ast/ast.dart';
@@ -54,20 +53,21 @@ class AssetReferenceResolver {
   }) async {
     final analysisWorkspace = workspace ?? DartAnalysisWorkspace(project);
     final units = <String, ResolvedUnitResult>{};
+    final canonical = ownership.canonicalPath;
 
     final selectedPaths =
         reachability?.globalUsageUnitPaths ?? analysisWorkspace.dartFiles;
     if (reachability != null) {
       for (final library in reachability.resolvedLibraries) {
         for (final unit in library.units) {
-          if (selectedPaths.contains(_canonicalDartPath(unit.path))) {
-            units[_canonicalDartPath(unit.path)] = unit;
+          if (selectedPaths.contains(canonical(unit.path))) {
+            units[canonical(unit.path)] = unit;
           }
         }
       }
     }
     for (final filePath in selectedPaths) {
-      if (units.containsKey(_canonicalDartPath(filePath))) continue;
+      if (units.containsKey(canonical(filePath))) continue;
       if (ownership.ownerOf(filePath).ownership !=
           DartSourceOwnership.selectedPackage) {
         continue;
@@ -77,7 +77,7 @@ class AssetReferenceResolver {
         final result = await analysisWorkspace.resolveLibrary(filePath);
         if (result is ResolvedLibraryResult) {
           for (final unit in result.units) {
-            units[_canonicalDartPath(unit.path)] = unit;
+            units[canonical(unit.path)] = unit;
           }
         } else if (result is! NotLibraryButPartResult) {
           blockers.add(
@@ -104,7 +104,7 @@ class AssetReferenceResolver {
     if (reachability != null) {
       final librariesByPath = {
         for (final library in reachability.resolvedLibraries)
-          _canonicalDartPath(library.element.firstFragment.source.fullName):
+          canonical(library.element.firstFragment.source.fullName):
               library.element,
       };
       final externalEdges =
@@ -128,7 +128,7 @@ class AssetReferenceResolver {
         final targetPath = edge.targetPath;
         if (!inspectedTargets.add(targetPath)) continue;
         final sourceLibrary =
-            librariesByPath[_canonicalDartPath(edge.sourcePath)];
+            librariesByPath[canonical(edge.sourcePath)];
         if (sourceLibrary == null) {
           _blockUninspectableExternalTarget(targetPath);
           continue;
@@ -172,7 +172,7 @@ class AssetReferenceResolver {
     final boundedClosure = await analysisWorkspace.boundedClosureSnapshot();
     for (final result in boundedClosure.libraries) {
       for (final unit in result.units) {
-        units[_canonicalDartPath(unit.path)] = unit;
+        units[canonical(unit.path)] = unit;
       }
     }
     for (final issue in boundedClosure.issues) {
@@ -356,14 +356,6 @@ bool _edgeSourceIsRetained(
   return false;
 }
 
-String _canonicalDartPath(String path) {
-  final absolute = p.normalize(p.absolute(path));
-  try {
-    return p.normalize(File(absolute).resolveSymbolicLinksSync());
-  } on FileSystemException {
-    return absolute;
-  }
-}
 
 bool _canHideAssetConsumer(String issue) =>
     !issue.startsWith('test-environment-incomplete:') &&

@@ -321,18 +321,19 @@ _GeneratedOutputProtection _generatedOutputProtection(
   ProjectContext project,
   L10nConfig config,
 ) {
+  final resolvedRoot = _tryCanonicalExistingPath(project.root.path);
+  final canonicalRoot = resolvedRoot ?? _canonicalPath(project.root.path);
+  var isIncomplete = resolvedRoot == null;
+
   final exactNamespaces = <String>{
-    _dartNamespaceForPath(project, config.generatedLibraryPath),
+    _dartNamespaceForPath(canonicalRoot, project, config.generatedLibraryPath),
   };
   final family = _GeneratedOutputFamily(config.outputLocalizationFile);
   final familyNamespace = _dartNamespaceForPath(
+    canonicalRoot,
     project,
     p.join(config.outputDir, '${family.stem}_'),
   );
-  var isIncomplete = false;
-  final resolvedRoot = _tryCanonicalExistingPath(project.root.path);
-  final canonicalRoot = resolvedRoot ?? _canonicalPath(project.root.path);
-  if (resolvedRoot == null) isIncomplete = true;
   final outputDirectory = Directory(config.outputDir);
 
   try {
@@ -360,7 +361,9 @@ _GeneratedOutputProtection _generatedOutputProtection(
           isIncomplete = true;
           continue;
         }
-        exactNamespaces.add(_dartNamespaceForPath(project, canonicalCandidate));
+        exactNamespaces.add(
+          _dartNamespaceForPath(canonicalRoot, project, canonicalCandidate),
+        );
       }
     }
   } on FileSystemException {
@@ -373,12 +376,16 @@ _GeneratedOutputProtection _generatedOutputProtection(
   );
 }
 
-String _dartNamespaceForPath(ProjectContext project, String path) {
-  final root = _canonicalPath(project.root.path);
+String _dartNamespaceForPath(
+  String canonicalRoot,
+  ProjectContext project,
+  String path,
+) {
   final candidate = _canonicalPath(path);
-  final relative = p.relative(candidate, from: root).replaceAll(r'\', '/');
+  final relative = p.relative(candidate, from: canonicalRoot).replaceAll(r'\', '/');
   return 'dart:${project.packageName}/$relative';
 }
+
 
 String? _sourcePathFromLocation(ProjectContext project, String location) {
   final columnSeparator = location.lastIndexOf(':');

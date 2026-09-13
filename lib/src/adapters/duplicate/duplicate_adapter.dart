@@ -124,7 +124,7 @@ class DuplicateAdapter extends AnalyzerAdapter {
 
       final hash = entry.key;
       final files = entry.value;
-      final sizePerFile = await files.first.length();
+      final sizePerFile = files.first.lengthSync();
       final waste = sizePerFile * (files.length - 1);
 
       final paths = files.map((f) => project.relative(f.path)).toList()..sort();
@@ -200,7 +200,7 @@ class DuplicateAdapter extends AnalyzerAdapter {
     final bySize = <int, List<File>>{};
     for (final file in files) {
       try {
-        final size = await file.length();
+        final size = file.lengthSync();
         (bySize[size] ??= []).add(file);
       } on FileSystemException {
         continue;
@@ -208,11 +208,12 @@ class DuplicateAdapter extends AnalyzerAdapter {
     }
 
     final byHash = <String, List<File>>{};
-    for (final sameSizeFiles in bySize.values) {
+    for (final entry in bySize.entries) {
+      final sameSizeFiles = entry.value;
       if (sameSizeFiles.length < 2) continue;
       for (final file in sameSizeFiles) {
         try {
-          final hash = await _computeSha256(file);
+          final hash = await _computeSha256(file, entry.key);
           (byHash[hash] ??= []).add(file);
         } on FileSystemException {
           continue;
@@ -223,9 +224,18 @@ class DuplicateAdapter extends AnalyzerAdapter {
     return byHash;
   }
 
-  Future<String> _computeSha256(File file) async =>
-      _fileDigestComputer?.call(file) ??
-      (await sha256.bind(file.openRead()).first).toString();
+  /// Files at or below this size are hashed from one bounded read; larger
+  /// files stream so peak allocation never scales with the largest file.
+  static const _inlineDigestMaxBytes = 1 << 20;
+
+  Future<String> _computeSha256(File file, int sizeBytes) async {
+    final computer = _fileDigestComputer;
+    if (computer != null) return computer(file);
+    if (sizeBytes <= _inlineDigestMaxBytes) {
+      return sha256.convert(file.readAsBytesSync()).toString();
+    }
+    return (await sha256.bind(file.openRead()).first).toString();
+  }
 
   bool _hasPackageOwnedFile(List<File> files) {
     return files.any((f) => f.path.contains('/.pub-cache/'));
