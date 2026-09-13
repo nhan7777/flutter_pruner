@@ -3,7 +3,9 @@
 # fixture. Prints METRIC lines; exits non-zero on failure or when the
 # graph/finding shape drifts from the pinned expectation (correctness guard).
 set -euo pipefail
-cd "$(dirname "$0")/.."
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" >/dev/null 2>&1 && pwd)"
+REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null || dirname -- "$SCRIPT_DIR")"
+cd "$REPO_ROOT"
 
 PROFILE="${BENCH_PROFILE:-medium}"
 WARMUP="${BENCH_WARMUP:-1}"
