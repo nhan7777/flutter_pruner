@@ -63,16 +63,33 @@ class ReferenceCollector extends RecursiveAstVisitor<void> {
   /// Visit a library unit and collect semantic references once.
   void visitLibrary(CompilationUnit unit) => unit.visitChildren(this);
 
+  /// Depth inside `library` directives or doc-comment references, whose
+  /// identifiers are not runtime uses. Tracking the depth replaces two
+  /// ancestor walks per identifier while keeping other node kinds visited
+  /// exactly as before.
+  int _nonRuntimeSyntaxDepth = 0;
+
+  @override
+  void visitLibraryDirective(LibraryDirective node) {
+    _nonRuntimeSyntaxDepth++;
+    super.visitLibraryDirective(node);
+    _nonRuntimeSyntaxDepth--;
+  }
+
+  @override
+  void visitCommentReference(CommentReference node) {
+    _nonRuntimeSyntaxDepth++;
+    super.visitCommentReference(node);
+    _nonRuntimeSyntaxDepth--;
+  }
+
   @override
   void visitSimpleIdentifier(SimpleIdentifier node) {
     super.visitSimpleIdentifier(node);
 
-    final parent = node.parent;
-    final isNonRuntimeSyntax =
-        node.thisOrAncestorOfType<LibraryDirective>() != null ||
-        node.thisOrAncestorOfType<CommentReference>() != null;
-    if (isNonRuntimeSyntax) return;
+    if (_nonRuntimeSyntaxDepth > 0) return;
 
+    final parent = node.parent;
     final element = node.element;
     if (element == null) {
       final isHandledByParent =
@@ -600,11 +617,20 @@ class ReferenceCollector extends RecursiveAstVisitor<void> {
           declaredFragment,
         _ => null,
       };
-      if (fragment != null) return DartIds.declaration(project, fragment);
+      if (fragment != null) {
+        // Every reference inside one top-level declaration shares its
+        // caller id; the fragment is a stable analyzer object for the unit.
+        return _callerIdsByFragment[fragment] ??= DartIds.declaration(
+          project,
+          fragment,
+        );
+      }
       current = current.parent;
     }
     return libraryId;
   }
+
+  final Map<Fragment, String> _callerIdsByFragment = {};
 }
 
 /// Finds source declarations referenced by generated part files.

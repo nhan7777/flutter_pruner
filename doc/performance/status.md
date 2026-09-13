@@ -6,6 +6,33 @@ the fail-closed safety model and are covered by regression tests.
 
 ## Implemented
 
+- Per-pass path memoization: `DartPackageOwnership.ownerOf` and
+  `canonicalPath`, `ProjectPathPolicy.shouldExclude`, `ProjectContext.relative`,
+  and the workspace symlink-component walk are cached for the lifetime of one
+  snapshot or analysis pass. CPU profiles on the Medium fixture showed
+  `resolveSymbolicLinksSync` and `typeSync` being re-issued for every
+  declaration and reference; removing that took median analysis from 6.8 s to
+  2.2 s with identical node, edge, blocker, and finding counts. The five
+  per-resolver `_canonical` helpers now share the ownership memo.
+  `resetObservations()` also clears the path-policy cache, and ownership
+  snapshots are keyed by `ProjectContext` identity, so apply rounds that
+  reload the project never observe stale filesystem facts.
+- Redundant analyzer round-trips removed: per-unit `session.getErrors` is
+  replaced by `ResolvedUnitResult.diagnostics` (the driver completes both
+  from the same list); the analyzer context-root enumeration is walked once
+  per workspace; paths the analyzer already includes skip the
+  analyzer-excluded admissibility probe.
+- Visitor pruning: the unresolved-reference index skips function bodies
+  (Dart forbids indexable declarations there), and `ReferenceCollector`
+  tracks `library`/doc-comment depth instead of two ancestor walks per
+  identifier and memoizes the caller ID per enclosing fragment.
+- Duplicate detector hashes files of at most 1 MiB from one bounded read and
+  streams only larger files; `GraphNode` is no longer deep-frozen a second
+  time on insertion, and unconditional `BuildCondition` short-circuits
+  equality and hashing.
+  `tool/benchmark_scan.sh` regenerates the medium fixture under `/tmp`, runs
+  the scan benchmark, and fails on graph-shape drift; it is the repeatable
+  before/after harness for these changes.
 - Baseline tooling: deterministic generators for Small, Medium, Large, and XL;
   a repeatable JSON scan benchmark; profiling instructions; and one measured
   Small baseline on macOS arm64 with Dart 3.9.2.

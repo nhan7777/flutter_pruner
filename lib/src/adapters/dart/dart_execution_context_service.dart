@@ -367,11 +367,7 @@ final class DefaultDartExecutionContextService
     }
 
     final workspaceDartFiles = workspace.dartFiles;
-    final visiblePaths = {
-      for (final context in workspace.collection.contexts)
-        for (final path in context.contextRoot.analyzedFiles())
-          if (path.endsWith('.dart')) p.normalize(p.absolute(path)),
-    };
+    final visiblePaths = workspace.analyzerVisibleDartFiles;
     final standardExecutablePaths = _standardExecutableEntrypoints(
       project,
       ownership,

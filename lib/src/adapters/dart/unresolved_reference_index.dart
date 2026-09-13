@@ -104,6 +104,16 @@ final class _UnresolvedReferenceIndexVisitor extends RecursiveAstVisitor<void> {
 
   final UnresolvedReferenceIndex index;
 
+  /// Dart permits no class, mixin, enum, extension, typedef, or top-level
+  /// declaration inside a function body, and local functions are never
+  /// indexed, so bodies contribute nothing. Skipping them avoids walking
+  /// every expression in the project a second time.
+  @override
+  void visitBlockFunctionBody(BlockFunctionBody node) {}
+
+  @override
+  void visitExpressionFunctionBody(ExpressionFunctionBody node) {}
+
   @override
   void visitFunctionDeclaration(FunctionDeclaration node) {
     if (node.parent is CompilationUnit) {

@@ -96,10 +96,11 @@ class ReachabilityGraph {
   /// graph-integrity failure: it is retained deterministically and receives a
   /// node-scoped blocker, so it can never produce a `SAFE` finding.
   void addNode(GraphNode node, {String? producer}) {
-    final frozenNode = _freezeNode(node);
+    // GraphNode's factory already deep-snapshots metadata into unmodifiable
+    // JSON-only collections, so the instance is immutable as received.
     final existing = _nodes[node.id];
     if (existing == null) {
-      _nodes[node.id] = frozenNode;
+      _nodes[node.id] = node;
       for (final blocker in _blockers) {
         if (blocker.couldAddress(node.id)) {
           (_blockersByNode[node.id] ??= []).add(blocker);
@@ -107,10 +108,9 @@ class ReachabilityGraph {
         }
       }
       _markMutated();
-    } else if (!_sameNodeDefinition(existing, frozenNode)) {
-      if (_nodeFingerprint(frozenNode).compareTo(_nodeFingerprint(existing)) <
-          0) {
-        _nodes[node.id] = frozenNode;
+    } else if (!_sameNodeDefinition(existing, node)) {
+      if (_nodeFingerprint(node).compareTo(_nodeFingerprint(existing)) < 0) {
+        _nodes[node.id] = node;
       }
       _recordNodeConflict(node.id);
       _markMutated();
@@ -130,39 +130,6 @@ class ReachabilityGraph {
         affectedNodeIds: {nodeId},
       ),
     );
-  }
-
-  GraphNode _freezeNode(GraphNode node) => GraphNode(
-    id: node.id,
-    kind: node.kind,
-    origin: node.origin,
-    sizeBytes: node.sizeBytes,
-    sha256: node.sha256,
-    displayName: node.displayName,
-    metadata: Map<String, Object?>.unmodifiable({
-      for (final entry in node.metadata.entries)
-        entry.key: _freezeMetadataValue(entry.value),
-    }),
-  );
-
-  Object? _freezeMetadataValue(Object? value) {
-    if (value is Map) {
-      return Map<Object?, Object?>.unmodifiable({
-        for (final entry in value.entries)
-          entry.key: _freezeMetadataValue(entry.value),
-      });
-    }
-    if (value is List) {
-      return List<Object?>.unmodifiable(
-        value.map<Object?>(_freezeMetadataValue),
-      );
-    }
-    if (value is Set) {
-      return Set<Object?>.unmodifiable(
-        value.map<Object?>(_freezeMetadataValue),
-      );
-    }
-    return value;
   }
 
   bool _sameNodeDefinition(GraphNode left, GraphNode right) =>

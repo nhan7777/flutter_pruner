@@ -182,11 +182,32 @@ final class DartPackageOwnership {
   final List<_PhysicalPackageRoot> _physicalRoots;
   final Set<String> _duplicateRoots;
   final String? _configurationIssue;
+  final Map<String, DartSourceOwner> _ownerCache = {};
+  final Map<String, String> _canonicalCache = {};
+
+  /// Canonical (symlink-resolved, normalized) form of a file [path].
+  ///
+  /// Shared pass memo: every Dart resolver keys its maps by canonical path,
+  /// and each `resolveSymbolicLinksSync` is a syscall chain. Unresolvable
+  /// paths canonicalize to their normalized absolute form, matching the
+  /// historical per-resolver helpers.
+  String canonicalPath(String path) {
+    final absolutePath = p.normalize(p.absolute(path));
+    return _canonicalCache[absolutePath] ??= _canonicalFilePath(absolutePath);
+  }
 
   /// Resolves the physical owner of [path] without falling back to containment.
+  ///
+  /// Results are memoized for the snapshot lifetime: package roots and
+  /// physical pubspec facts are already frozen at discovery, so a path's
+  /// disposition cannot change without a new snapshot.
   DartSourceOwner ownerOf(String path) {
     final absolutePath = p.normalize(p.absolute(path));
-    final canonicalPath = _canonicalFilePath(absolutePath);
+    return _ownerCache[absolutePath] ??= _ownerOf(absolutePath);
+  }
+
+  DartSourceOwner _ownerOf(String absolutePath) {
+    final canonicalPath = this.canonicalPath(absolutePath);
     final lexicalInsideSelected =
         _contains(_selectedLexicalRoot, absolutePath) ||
         _contains(_selectedRoot, absolutePath);

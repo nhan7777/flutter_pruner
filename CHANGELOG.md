@@ -5,6 +5,19 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- Scan is roughly 3x faster on medium projects (synthetic 1000-file fixture:
+  6.8 s to 2.2 s median). Package ownership, path-policy exclusion, canonical
+  path resolution, and project-relative paths are memoized per analysis pass
+  instead of repeating symlink and stat syscalls for every reference; the
+  duplicate detector hashes small files from one bounded read; the Dart
+  adapter reuses resolved-unit diagnostics instead of a second analyzer
+  round-trip per unit; and the unresolved-reference index skips function
+  bodies. Graph nodes, edges, blockers, and findings are unchanged.
+
 ## [1.8.0] - 2026-09-12
 
 ### Added

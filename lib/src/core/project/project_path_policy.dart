@@ -76,11 +76,18 @@ class ProjectPathPolicy {
   final String _canonicalRootPath;
   final Set<String> _additionalExcludedPaths;
   final Map<String, Set<String>> _observedByReason = {};
+  final Map<String, String?> _reasonCache = {};
 
   /// Whether [path] is outside the declared analysis boundary.
   bool shouldExclude(String path) {
     final normalized = p.normalize(p.absolute(path));
-    final reason = _reasonFor(normalized);
+    final String? reason;
+    if (_reasonCache.containsKey(normalized)) {
+      reason = _reasonCache[normalized];
+    } else {
+      reason = _reasonFor(normalized);
+      _reasonCache[normalized] = reason;
+    }
     return _record(normalized, reason);
   }
 
@@ -101,8 +108,13 @@ class ProjectPathPolicy {
     return false;
   }
 
-  /// Clears observations before a fresh analysis pass.
-  void resetObservations() => _observedByReason.clear();
+  /// Clears observations and the per-pass exclusion cache before a fresh
+  /// analysis pass. Apply rounds mutate the tree between passes, so cached
+  /// filesystem facts must not outlive one pass.
+  void resetObservations() {
+    _observedByReason.clear();
+    _reasonCache.clear();
+  }
 
   /// Returns immutable counts for the current analysis pass.
   PathExclusionSummary snapshot() {

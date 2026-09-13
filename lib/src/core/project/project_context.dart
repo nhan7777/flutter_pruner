@@ -261,8 +261,13 @@ class ProjectContext {
   ///
   /// Node ids must be stable across machines and operating systems, so always
   /// use this rather than an absolute path when constructing an id.
-  String relative(String absolutePath) =>
-      p.relative(absolutePath, from: root.path).replaceAll(r'\', '/');
+  ///
+  /// Memoized: [root] is immutable and this runs once per reference edge.
+  String relative(String absolutePath) => _relativeCache[absolutePath] ??= p
+      .relative(absolutePath, from: root.path)
+      .replaceAll(r'\', '/');
+
+  final Map<String, String> _relativeCache = {};
 
   /// Dart files under selected standard Dart execution surfaces.
   ///

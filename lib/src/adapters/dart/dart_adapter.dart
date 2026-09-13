@@ -1,5 +1,4 @@
 import 'dart:collection';
-import 'dart:io';
 
 import 'package:analyzer/dart/analysis/results.dart';
 import 'package:analyzer/dart/analysis/utilities.dart';
@@ -7,7 +6,6 @@ import 'package:analyzer/dart/ast/ast.dart';
 import 'package:analyzer/dart/ast/visitor.dart';
 import 'package:analyzer/dart/element/element.dart';
 import 'package:analyzer/error/error.dart';
-import 'package:path/path.dart' as p;
 
 import '../../core/graph/build_condition.dart';
 import '../../core/graph/edge.dart';
@@ -260,7 +258,7 @@ class DartAdapter extends AnalyzerAdapter {
         generatedUnresolvedReferences,
         externalClosureSeeds: externalClosureSeeds,
         affectedSelectedLibraryIds:
-            selectedLibraryClosureIds[_canonicalDartPath(filePath)] ??
+            selectedLibraryClosureIds[ownership.canonicalPath(filePath)] ??
             {_selectedLibraryNodeId(project, library.element, ownership)},
         selectedNodeIdsByLibraryId: selectedNodeIdsByLibraryId,
         workspace: workspace,
@@ -425,7 +423,7 @@ class DartAdapter extends AnalyzerAdapter {
   ) {
     final libraryIdsByCanonicalPath = <String, String>{
       for (final library in snapshot.resolvedLibraries)
-        _canonicalDartPath(library.element.firstFragment.source.fullName):
+        ownership.canonicalPath(library.element.firstFragment.source.fullName):
             _selectedLibraryNodeId(project, library.element, ownership),
     };
     for (final edge in snapshot.directives.edges) {
@@ -548,7 +546,7 @@ class DartAdapter extends AnalyzerAdapter {
   ) async {
     final selectedLibrariesByPath = <String, LibraryElement>{
       for (final library in snapshot.resolvedLibraries)
-        _canonicalDartPath(library.element.firstFragment.source.fullName):
+        ownership.canonicalPath(library.element.firstFragment.source.fullName):
             library.element,
     };
     final admittedDirectives = <String>{};
@@ -558,8 +556,8 @@ class DartAdapter extends AnalyzerAdapter {
           DartSourceOwnership.externalPackage) {
         continue;
       }
-      final sourcePath = _canonicalDartPath(edge.sourcePath);
-      final targetPath = _canonicalDartPath(edge.targetPath);
+      final sourcePath = ownership.canonicalPath(edge.sourcePath);
+      final targetPath = ownership.canonicalPath(edge.targetPath);
       if (!admittedDirectives.add('$sourcePath|$targetPath')) continue;
       final affectedSelectedLibraryIds = selectedLibraryClosureIds[sourcePath];
       if (affectedSelectedLibraryIds == null ||
@@ -906,7 +904,7 @@ class DartAdapter extends AnalyzerAdapter {
           DartSourceOwnership.selectedPackage) {
         continue;
       }
-      libraryIdsByPath[_canonicalDartPath(path)] = _selectedLibraryNodeId(
+      libraryIdsByPath[ownership.canonicalPath(path)] = _selectedLibraryNodeId(
         project,
         library.element,
         ownership,
@@ -917,8 +915,8 @@ class DartAdapter extends AnalyzerAdapter {
       for (final path in libraryIdsByPath.keys) path: <String>{},
     };
     for (final edge in snapshot.directives.edges) {
-      final sourcePath = _canonicalDartPath(edge.sourcePath);
-      final targetPath = _canonicalDartPath(edge.targetPath);
+      final sourcePath = ownership.canonicalPath(edge.sourcePath);
+      final targetPath = ownership.canonicalPath(edge.targetPath);
       if (!libraryIdsByPath.containsKey(sourcePath) ||
           !libraryIdsByPath.containsKey(targetPath)) {
         continue;
@@ -1445,9 +1443,10 @@ class DartAdapter extends AnalyzerAdapter {
     GraphBuilder graph,
     ResolvedUnitResult unit,
   ) async {
-    final errors = await unit.session.getErrors(unit.path);
-    if (errors is! ErrorsResult) return;
-    for (final diagnostic in errors.diagnostics) {
+    // The resolved unit already carries the same `unitResult.diagnostics`
+    // that `session.getErrors` would complete with for this path; asking the
+    // driver again only round-trips the scheduler and byte store.
+    for (final diagnostic in unit.diagnostics) {
       final code = AnalyzerDiagnosticCollector.normalizeCode(
         diagnostic.diagnosticCode.lowerCaseUniqueName,
       );
@@ -1562,15 +1561,6 @@ bool _edgeSourceIsRetained(
     }
   }
   return false;
-}
-
-String _canonicalDartPath(String path) {
-  final absolute = p.normalize(p.absolute(path));
-  try {
-    return p.normalize(File(absolute).resolveSymbolicLinksSync());
-  } on FileSystemException {
-    return absolute;
-  }
 }
 
 bool _hasConditionalDirective(Directive directive) =>

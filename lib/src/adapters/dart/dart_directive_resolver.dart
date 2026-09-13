@@ -125,7 +125,8 @@ final class DartDirectiveResolver {
     final issues = <_MutableIssueKey, _MutableIssue>{};
     final knownLibraries = <String, ResolvedLibraryResult>{
       for (final library in libraries)
-        _canonical(library.element.firstFragment.source.fullName): library,
+        ownership.canonicalPath(library.element.firstFragment.source.fullName):
+            library,
     };
 
     void addIssue(
@@ -174,7 +175,7 @@ final class DartDirectiveResolver {
     }
 
     for (final library in libraries) {
-      final sourcePath = _canonical(
+      final sourcePath = ownership.canonicalPath(
         library.element.firstFragment.source.fullName,
       );
       if (ownership.ownerOf(sourcePath).ownership !=
@@ -362,7 +363,7 @@ final class DartDirectiveResolver {
       final value = configuration.uri.stringValue;
       final resolvedUri = configuration.resolvedUri;
       final path = resolvedUri is DirectiveUriWithSource
-          ? _canonical(resolvedUri.source.fullName)
+          ? ownership.canonicalPath(resolvedUri.source.fullName)
           : _resolveUri(unit, value);
       result.add(_DirectiveAlternative(path, isSdk: _isSdkUri(value)));
     }
@@ -375,12 +376,14 @@ final class DartDirectiveResolver {
     if (uri == null || uri.hasQuery || uri.hasFragment) return null;
     if (uri.scheme == 'dart') return null;
     if (uri.scheme.isEmpty) {
-      return _canonical(p.join(p.dirname(unit.path), uri.toFilePath()));
+      return ownership.canonicalPath(
+        p.join(p.dirname(unit.path), uri.toFilePath()),
+      );
     }
-    if (uri.scheme == 'file') return _canonical(uri.toFilePath());
+    if (uri.scheme == 'file') return ownership.canonicalPath(uri.toFilePath());
     if (uri.scheme == 'package') {
       final path = unit.session.uriConverter.uriToPath(uri);
-      return path == null ? null : _canonical(path);
+      return path == null ? null : ownership.canonicalPath(path);
     }
     return null;
   }
@@ -426,15 +429,6 @@ _Environment _configuredEnvironment(BuildTarget target) {
     values[entry.key] = entry.value;
   }
   return _Environment(values: values, complete: sdkEnvironment != null);
-}
-
-String _canonical(String path) {
-  final absolute = p.normalize(p.absolute(path));
-  try {
-    return p.normalize(File(absolute).resolveSymbolicLinksSync());
-  } on FileSystemException {
-    return absolute;
-  }
 }
 
 enum _Truth { yes, no, unknown }
