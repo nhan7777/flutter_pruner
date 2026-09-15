@@ -1,11 +1,12 @@
 
+import 'dart:collection';
+
 import 'package:analyzer/dart/analysis/results.dart';
 import 'package:analyzer/dart/ast/ast.dart';
 import 'package:analyzer/dart/ast/visitor.dart';
 import 'package:analyzer/dart/element/element.dart';
 import 'package:analyzer/error/error.dart';
 import 'package:path/path.dart' as p;
-
 import '../../core/graph/evidence.dart';
 import '../../core/project/project_context.dart';
 import '../dart/analyzer_ast_compat.dart';
@@ -235,12 +236,11 @@ class AssetReferenceResolver {
     DartAnalysisWorkspace workspace,
     Map<String, LibraryElement> pending,
   ) async {
+    final orderedPending = SplayTreeMap<String, LibraryElement>.from(pending);
     final visited = <String>{};
-    while (pending.isNotEmpty) {
-      final identity = pending.keys.reduce(
-        (left, right) => left.compareTo(right) <= 0 ? left : right,
-      );
-      final element = pending.remove(identity)!;
+    while (orderedPending.isNotEmpty) {
+      final identity = orderedPending.firstKey()!;
+      final element = orderedPending.remove(identity)!;
       if (!visited.add(identity)) continue;
 
       final SomeResolvedLibraryResult result;
@@ -312,7 +312,7 @@ class AssetReferenceResolver {
           case DartSourceOwnership.externalPackage:
             final dependencyIdentity = workspace.libraryIdentity(dependency);
             if (!visited.contains(dependencyIdentity)) {
-              pending.putIfAbsent(dependencyIdentity, () => dependency);
+              orderedPending.putIfAbsent(dependencyIdentity, () => dependency);
             }
           case DartSourceOwnership.unknown:
             workspace.recordUnknownOwnershipBoundary(source.fullName);
