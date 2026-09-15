@@ -19,6 +19,8 @@ import 'asset_inventory.dart';
 import 'asset_sink_registry.dart';
 import 'asset_string_evaluator.dart';
 import 'flutter_gen_index.dart';
+/// Maximum external libraries inspected per asset analysis pass.
+const _maxExternalClosureLibraries = 2000;
 
 /// Resolves asset references in Dart code through semantic analysis.
 class AssetReferenceResolver {
@@ -238,7 +240,12 @@ class AssetReferenceResolver {
   ) async {
     final orderedPending = SplayTreeMap<String, LibraryElement>.from(pending);
     final visited = <String>{};
+    var truncated = false;
     while (orderedPending.isNotEmpty) {
+      if (visited.length >= _maxExternalClosureLibraries) {
+        truncated = true;
+        break;
+      }
       final identity = orderedPending.firstKey()!;
       final element = orderedPending.remove(identity)!;
       if (!visited.add(identity)) continue;
@@ -318,6 +325,17 @@ class AssetReferenceResolver {
             workspace.recordUnknownOwnershipBoundary(source.fullName);
         }
       }
+    }
+    if (truncated) {
+      blockers.add(
+        BlockerInfo(
+          reason:
+              'external Dart closure fan-out truncated at $_maxExternalClosureLibraries libraries',
+          location: project.root.path,
+          affectedNamespace: 'asset:${project.packageName}/',
+          affectedNodeIds: const {},
+        ),
+      );
     }
   }
 
