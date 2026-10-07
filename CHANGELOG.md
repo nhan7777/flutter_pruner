@@ -7,6 +7,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [1.9.0] - 2026-10-07
+
 ### Fixed
 
 - Asset scan no longer stalls on code that reassigns locals from each other
@@ -27,7 +29,16 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   round-trip per unit; declaration-scoped caller IDs are memoized per fragment;
   the reference collector tracks non-runtime syntax depth instead of two
   ancestor walks per identifier; and the unresolved-reference index skips
-  function bodies. Graph nodes, edges, blockers, and findings are unchanged.
+  function bodies. Graph nodes, edges, and findings on the synthetic fixtures
+  are unchanged.
+- Asset analysis inspects at most 2,000 external Dart libraries reachable
+  from selected execution roots. Past that bound it adds the fail-closed
+  blocker `external Dart closure fan-out truncated at 2000 libraries` for
+  the selected package's asset namespace instead of resolving the rest.
+  On very large dependency graphs, unused assets are therefore reported as
+  `REVIEW` instead of `SAFE`.
+- Asset analysis memoizes string evaluation per unit, pattern matches per
+  pattern, and package ownership lookups by nearest root path.
 
 ## [1.8.0] - 2026-09-12
 
@@ -416,7 +427,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Custom runtime callback and asset registries require explicit modeling or
   project policy.
 
-[Unreleased]: https://github.com/nhan7777/flutter_pruner/compare/v1.8.0...main
+[Unreleased]: https://github.com/nhan7777/flutter_pruner/compare/v1.9.0...main
+[1.9.0]: https://github.com/nhan7777/flutter_pruner/compare/v1.8.0...v1.9.0
 [1.8.0]: https://github.com/nhan7777/flutter_pruner/compare/v1.7.0...v1.8.0
 [1.7.0]: https://github.com/nhan7777/flutter_pruner/compare/v1.6.0...v1.7.0
 [1.6.0]: https://github.com/nhan7777/flutter_pruner/compare/v1.5.0...v1.6.0
