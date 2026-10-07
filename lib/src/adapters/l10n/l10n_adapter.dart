@@ -382,10 +382,11 @@ String _dartNamespaceForPath(
   String path,
 ) {
   final candidate = _canonicalPath(path);
-  final relative = p.relative(candidate, from: canonicalRoot).replaceAll(r'\', '/');
+  final relative = p
+      .relative(candidate, from: canonicalRoot)
+      .replaceAll(r'\', '/');
   return 'dart:${project.packageName}/$relative';
 }
-
 
 String? _sourcePathFromLocation(ProjectContext project, String location) {
   final columnSeparator = location.lastIndexOf(':');

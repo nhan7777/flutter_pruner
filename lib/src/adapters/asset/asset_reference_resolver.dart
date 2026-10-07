@@ -1,4 +1,3 @@
-
 import 'dart:collection';
 
 import 'package:analyzer/dart/analysis/results.dart';
@@ -19,6 +18,7 @@ import 'asset_inventory.dart';
 import 'asset_sink_registry.dart';
 import 'asset_string_evaluator.dart';
 import 'flutter_gen_index.dart';
+
 /// Maximum external libraries inspected per asset analysis pass.
 const _maxExternalClosureLibraries = 2000;
 
@@ -130,8 +130,7 @@ class AssetReferenceResolver {
       for (final edge in externalEdges) {
         final targetPath = edge.targetPath;
         if (!inspectedTargets.add(targetPath)) continue;
-        final sourceLibrary =
-            librariesByPath[canonical(edge.sourcePath)];
+        final sourceLibrary = librariesByPath[canonical(edge.sourcePath)];
         if (sourceLibrary == null) {
           _blockUninspectableExternalTarget(targetPath);
           continue;
@@ -374,7 +373,6 @@ bool _edgeSourceIsRetained(
   return false;
 }
 
-
 bool _canHideAssetConsumer(String issue) =>
     !issue.startsWith('test-environment-incomplete:') &&
     !issue.startsWith('callback-environment-incomplete:') &&
@@ -613,6 +611,7 @@ class _AssetVisitor extends RecursiveAstVisitor<void> {
       ),
     );
   }
+
   Set<String> _matchedNodeIdsForPattern(RegExp pattern) {
     final cached = _patternMatchCache[pattern.pattern];
     if (cached != null) return {...cached};
@@ -627,7 +626,6 @@ class _AssetVisitor extends RecursiveAstVisitor<void> {
     _patternMatchCache[pattern.pattern] = matched;
     return {...matched};
   }
-
 
   void _addExactReference(
     String rawLogicalKey, {
