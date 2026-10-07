@@ -398,6 +398,7 @@ class _AssetVisitor extends RecursiveAstVisitor<void> {
   final ResolvedUnitResult unit;
   final AssetStringEvaluator evaluator;
   final bool canCreateCallerIds;
+  final Map<String, Set<String>> _patternMatchCache = {};
 
   @override
   void visitSimpleIdentifier(SimpleIdentifier node) {
@@ -553,14 +554,7 @@ class _AssetVisitor extends RecursiveAstVisitor<void> {
   Set<String> _matchingPatternNodeIds(Expression expression) {
     final pattern = evaluator.pattern(expression);
     if (pattern == null) return const {};
-    return {
-      for (final entry in resolver.inventory.assets.values)
-        if (pattern.hasMatch(entry.logicalKey) ||
-            pattern.hasMatch(
-              'packages/${resolver.project.packageName}/${entry.logicalKey}',
-            ))
-          entry.nodeId,
-    };
+    return _matchedNodeIdsForPattern(pattern);
   }
 
   void _resolveAssetArgument(Expression arg, AstNode context) {
@@ -586,15 +580,7 @@ class _AssetVisitor extends RecursiveAstVisitor<void> {
 
     final pattern = evaluator.pattern(arg);
     if (pattern != null) {
-      final affectedNodeIds = <String>{};
-      for (final entry in resolver.inventory.assets.values) {
-        final packageKey =
-            'packages/${resolver.project.packageName}/${entry.logicalKey}';
-        if (pattern.hasMatch(entry.logicalKey) ||
-            pattern.hasMatch(packageKey)) {
-          affectedNodeIds.add(entry.nodeId);
-        }
-      }
+      final affectedNodeIds = _matchedNodeIdsForPattern(pattern);
       if (affectedNodeIds.isEmpty) return;
       final callerId = _getCallerId(context);
       resolver.blockers.add(
@@ -627,6 +613,21 @@ class _AssetVisitor extends RecursiveAstVisitor<void> {
       ),
     );
   }
+  Set<String> _matchedNodeIdsForPattern(RegExp pattern) {
+    final cached = _patternMatchCache[pattern.pattern];
+    if (cached != null) return {...cached};
+    final matched = {
+      for (final entry in resolver.inventory.assets.values)
+        if (pattern.hasMatch(entry.logicalKey) ||
+            pattern.hasMatch(
+              'packages/${resolver.project.packageName}/${entry.logicalKey}',
+            ))
+          entry.nodeId,
+    };
+    _patternMatchCache[pattern.pattern] = matched;
+    return {...matched};
+  }
+
 
   void _addExactReference(
     String rawLogicalKey, {
@@ -764,9 +765,9 @@ class BlockerInfo {
     required this.reason,
     required this.location,
     required this.affectedNamespace,
-    required this.affectedNodeIds,
+    required Set<String> affectedNodeIds,
     this.sourceNodeId,
-  });
+  }) : affectedNodeIds = Set.unmodifiable(affectedNodeIds);
 
   /// Why the construct could not be resolved.
   final String reason;

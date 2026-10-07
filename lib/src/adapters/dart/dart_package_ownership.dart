@@ -55,8 +55,10 @@ final class DartPackageOwnership {
   }) : _project = project,
        _selectedLexicalRoot = selectedLexicalRoot,
        _selectedRoot = selectedRoot,
-       _packageRoots = packageRoots,
-       _physicalRoots = physicalRoots,
+       _packageRootsByPath = {for (final root in packageRoots) root.path: root},
+       _physicalRootsByPath = {
+         for (final root in physicalRoots) root.path: root,
+       },
        _duplicateRoots = duplicateRoots,
        _configurationIssue = configurationIssue;
 
@@ -178,8 +180,8 @@ final class DartPackageOwnership {
   final ProjectContext _project;
   final String _selectedLexicalRoot;
   final String _selectedRoot;
-  final List<_PackageRoot> _packageRoots;
-  final List<_PhysicalPackageRoot> _physicalRoots;
+  final Map<String, _PackageRoot> _packageRootsByPath;
+  final Map<String, _PhysicalPackageRoot> _physicalRootsByPath;
   final Set<String> _duplicateRoots;
   final String? _configurationIssue;
   final Map<String, DartSourceOwner> _ownerCache = {};
@@ -239,10 +241,7 @@ final class DartPackageOwnership {
       );
     }
 
-    final matchingRoots = _packageRoots
-        .where((root) => _contains(root.path, canonicalPath))
-        .toList(growable: false);
-    final configOwner = matchingRoots.firstOrNull;
+    final configOwner = _nearestRoot(canonicalPath, _packageRootsByPath);
     if (configOwner != null && _duplicateRoots.contains(configOwner.path)) {
       return const DartSourceOwner(
         ownership: DartSourceOwnership.unknown,
@@ -263,13 +262,11 @@ final class DartPackageOwnership {
         reason: 'source is outside every admitted package root',
       );
     }
-    final physicalOwner = _physicalRoots
-        .where(
-          (root) =>
-              _contains(searchFloor, root.path) &&
-              _contains(root.path, canonicalPath),
-        )
-        .firstOrNull;
+    final physicalOwner = _nearestRoot(
+      canonicalPath,
+      _physicalRootsByPath,
+      floor: searchFloor,
+    );
     if (physicalOwner == null || physicalOwner.name == null) {
       return const DartSourceOwner(
         ownership: DartSourceOwnership.unknown,
@@ -465,6 +462,19 @@ String _canonicalFilePath(String path) {
   } on FileSystemException {
     return absolute;
   }
+}
+
+T? _nearestRoot<T>(String path, Map<String, T> roots, {String? floor}) {
+  var current = path;
+  while (floor == null || _contains(floor, current)) {
+    final root = roots[current];
+    if (root != null) return root;
+    if (floor != null && p.equals(current, floor)) return null;
+    final parent = p.dirname(current);
+    if (p.equals(parent, current)) return null;
+    current = parent;
+  }
+  return null;
 }
 
 bool _contains(String root, String path) =>

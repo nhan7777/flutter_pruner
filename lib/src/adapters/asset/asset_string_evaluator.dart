@@ -17,6 +17,9 @@ class AssetStringEvaluator {
   static const int _maxProvenanceExpressions = 1024;
   final Map<Element, List<Expression>> _definitions = {};
   final Set<Element> _unboundedVariables = {};
+  final Map<Expression, Set<String>?> _exactValuesCache = Map.identity();
+  final Map<Expression, Set<String>> _possibleExactValuesCache = Map.identity();
+  final Map<Expression, RegExp?> _patternCache = Map.identity();
 
   /// Indexes local/top-level assignments before evaluating sink arguments.
   ///
@@ -30,9 +33,17 @@ class AssetStringEvaluator {
         unboundedVariables: _unboundedVariables,
       ),
     );
+    _exactValuesCache.clear();
+    _possibleExactValuesCache.clear();
+    _patternCache.clear();
   }
 
   /// Evaluates [expression] to a finite exact set, or `null` when unbounded.
+  ///
+  /// Results are memoized by expression identity for the indexed unit and
+  /// must be treated as read-only: mutating a returned set would corrupt the
+  /// shared cache. The possible-values cache holds its own copy even when the
+  /// value set is fully resolved.
   Set<String>? exactValues(Expression expression) =>
       _exactValues(expression, const {});
 
@@ -84,6 +95,18 @@ class AssetStringEvaluator {
   }
 
   Set<String>? _exactValues(Expression expression, Set<Element> visiting) {
+    if (visiting.isEmpty && _exactValuesCache.containsKey(expression)) {
+      return _exactValuesCache[expression];
+    }
+    final values = _computeExactValues(expression, visiting);
+    if (visiting.isEmpty) _exactValuesCache[expression] = values;
+    return values;
+  }
+
+  Set<String>? _computeExactValues(
+    Expression expression,
+    Set<Element> visiting,
+  ) {
     if (expression is StringLiteral) {
       final value = expression.stringValue;
       return value == null ? null : {value};
@@ -173,8 +196,21 @@ class AssetStringEvaluator {
     Expression expression,
     Set<Element> visiting,
   ) {
+    if (visiting.isEmpty) {
+      final cached = _possibleExactValuesCache[expression];
+      if (cached != null) return cached;
+    }
+    final values = _computePossibleExactValues(expression, visiting);
+    if (visiting.isEmpty) _possibleExactValuesCache[expression] = values;
+    return values;
+  }
+
+  Set<String> _computePossibleExactValues(
+    Expression expression,
+    Set<Element> visiting,
+  ) {
     final exact = _exactValues(expression, visiting);
-    if (exact != null) return exact;
+    if (exact != null) return {...exact};
 
     if (expression is ParenthesizedExpression) {
       return _possibleExactValues(expression.expression, visiting);
@@ -214,10 +250,18 @@ class AssetStringEvaluator {
   }
 
   /// Returns an anchored regular expression for a partially-known string.
+  ///
+  /// Identity-memoized for the unit: only caches the entry-point call with an
+  /// empty visiting set. Recursive invocations that carry a non-empty visiting
+  /// set still compute directly to preserve cycle semantics.
   RegExp? pattern(Expression expression) {
+    if (_patternCache.containsKey(expression)) return _patternCache[expression];
     final source = _patternSource(expression, const {});
-    if (source == null || source == '.*') return null;
-    return RegExp('^$source\$');
+    final pattern = source == null || source == '.*'
+        ? null
+        : RegExp('^$source\$');
+    _patternCache[expression] = pattern;
+    return pattern;
   }
 
   Set<String>? _identifierValues(Element? element, Set<Element> visiting) {
