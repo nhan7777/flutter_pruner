@@ -5,6 +5,41 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [1.9.0] - 2026-10-07
+
+### Fixed
+
+- Asset scan no longer stalls on code that reassigns locals from each other
+  (for example the hash routines in `syncfusion_flutter_pdf`). Opaque-call
+  asset provenance is now collected as one path-independent union that expands
+  each expression and assigned variable once, instead of re-expanding every
+  assignment path, which was exponential and made real-project scans run for
+  hours. Retained assets and blockers are unchanged.
+
+### Changed
+
+- Scan is roughly 3× faster on medium projects (synthetic 1000-file fixture:
+  7.3 s to 2.4 s median, −67%). Package ownership, path-policy exclusion, canonical
+  path resolution, and project-relative paths are memoized per analysis pass
+  instead of repeating symlink and stat syscalls for every reference; the
+  duplicate detector hashes small files from one bounded read; the Dart
+  adapter reuses resolved-unit diagnostics instead of a second analyzer
+  round-trip per unit; declaration-scoped caller IDs are memoized per fragment;
+  the reference collector tracks non-runtime syntax depth instead of two
+  ancestor walks per identifier; and the unresolved-reference index skips
+  function bodies. Graph nodes, edges, and findings on the synthetic fixtures
+  are unchanged.
+- Asset analysis inspects at most 2,000 external Dart libraries reachable
+  from selected execution roots. Past that bound it adds the fail-closed
+  blocker `external Dart closure fan-out truncated at 2000 libraries` for
+  the selected package's asset namespace instead of resolving the rest.
+  On very large dependency graphs, unused assets are therefore reported as
+  `REVIEW` instead of `SAFE`.
+- Asset analysis memoizes string evaluation per unit, pattern matches per
+  pattern, and package ownership lookups by nearest root path.
+
 ## [1.8.0] - 2026-09-12
 
 ### Added
@@ -392,7 +427,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Custom runtime callback and asset registries require explicit modeling or
   project policy.
 
-[Unreleased]: https://github.com/nhan7777/flutter_pruner/compare/v1.8.0...main
+[Unreleased]: https://github.com/nhan7777/flutter_pruner/compare/v1.9.0...main
+[1.9.0]: https://github.com/nhan7777/flutter_pruner/compare/v1.8.0...v1.9.0
 [1.8.0]: https://github.com/nhan7777/flutter_pruner/compare/v1.7.0...v1.8.0
 [1.7.0]: https://github.com/nhan7777/flutter_pruner/compare/v1.6.0...v1.7.0
 [1.6.0]: https://github.com/nhan7777/flutter_pruner/compare/v1.5.0...v1.6.0

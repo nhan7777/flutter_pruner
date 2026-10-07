@@ -17,6 +17,9 @@ class AssetStringEvaluator {
   static const int _maxProvenanceExpressions = 1024;
   final Map<Element, List<Expression>> _definitions = {};
   final Set<Element> _unboundedVariables = {};
+  final Map<Expression, Set<String>?> _exactValuesCache = Map.identity();
+  final Map<Expression, Set<String>> _possibleExactValuesCache = Map.identity();
+  final Map<Expression, RegExp?> _patternCache = Map.identity();
 
   /// Indexes local/top-level assignments before evaluating sink arguments.
   ///
@@ -30,9 +33,16 @@ class AssetStringEvaluator {
         unboundedVariables: _unboundedVariables,
       ),
     );
+    _exactValuesCache.clear();
+    _possibleExactValuesCache.clear();
+    _patternCache.clear();
   }
 
   /// Evaluates [expression] to a finite exact set, or `null` when unbounded.
+  ///
+  /// Results are memoized by expression identity for the indexed unit and
+  /// must be treated as read-only: mutating a returned set would corrupt the
+  /// shared cache.
   Set<String>? exactValues(Expression expression) =>
       _exactValues(expression, const {});
 
@@ -42,8 +52,14 @@ class AssetStringEvaluator {
   /// This provenance view is used only to retain declared assets at opaque
   /// call boundaries. It must not be used as proof that an exact asset sink is
   /// fully resolved.
+  ///
+  /// The result is a path-independent union, so every reachable expression
+  /// and assigned element is expanded once. Re-expanding per path is
+  /// exponential for locals that are reassigned from each other (hash code).
   Set<String> possibleExactValues(Expression expression) =>
-      _possibleExactValues(expression, const {});
+      _possibleExactValuesCache[expression] ??= _collectPossibleExactValues(
+        expression,
+      );
 
   /// Returns the bounded expression tree that can carry opaque-call payloads.
   ///
@@ -84,6 +100,18 @@ class AssetStringEvaluator {
   }
 
   Set<String>? _exactValues(Expression expression, Set<Element> visiting) {
+    if (visiting.isEmpty && _exactValuesCache.containsKey(expression)) {
+      return _exactValuesCache[expression];
+    }
+    final values = _computeExactValues(expression, visiting);
+    if (visiting.isEmpty) _exactValuesCache[expression] = values;
+    return values;
+  }
+
+  Set<String>? _computeExactValues(
+    Expression expression,
+    Set<Element> visiting,
+  ) {
     if (expression is StringLiteral) {
       final value = expression.stringValue;
       return value == null ? null : {value};
@@ -169,55 +197,63 @@ class AssetStringEvaluator {
     return null;
   }
 
-  Set<String> _possibleExactValues(
-    Expression expression,
-    Set<Element> visiting,
-  ) {
-    final exact = _exactValues(expression, visiting);
-    if (exact != null) return exact;
-
-    if (expression is ParenthesizedExpression) {
-      return _possibleExactValues(expression.expression, visiting);
-    }
-    if (expression is ConditionalExpression) {
-      return {
-        ..._possibleExactValues(expression.thenExpression, visiting),
-        ..._possibleExactValues(expression.elseExpression, visiting),
-      };
-    }
-    if (expression is MethodInvocation ||
-        expression is FunctionExpressionInvocation ||
-        expression is InstanceCreationExpression ||
-        expression is FunctionExpression) {
-      return const {};
-    }
-    final element = switch (expression) {
-      SimpleIdentifier(:final element) => element,
-      PrefixedIdentifier(:final identifier) => identifier.element,
-      PropertyAccess(:final propertyName) => propertyName.element,
-      _ => null,
-    };
-    final base = element?.baseElement;
+  Set<String> _collectPossibleExactValues(Expression root) {
     final values = <String>{};
-    if (base != null && !visiting.contains(base)) {
-      final definitions = _definitions[base];
-      if (definitions != null) {
-        for (final definition in definitions) {
-          values.addAll(_possibleExactValues(definition, {...visiting, base}));
-        }
+    final seenExpressions = Set<Expression>.identity();
+    final expandedElements = <Element>{};
+    final stack = <Expression>[root];
+    while (stack.isNotEmpty) {
+      final expression = stack.removeLast();
+      if (!seenExpressions.add(expression)) continue;
+      final exact = _exactValues(expression, const {});
+      if (exact != null) {
+        values.addAll(exact);
+        continue;
       }
-    }
-    for (final child in _directNestedExpressions(expression)) {
-      values.addAll(_possibleExactValues(child, visiting));
+      if (expression is ParenthesizedExpression) {
+        stack.add(expression.expression);
+        continue;
+      }
+      if (expression is ConditionalExpression) {
+        stack
+          ..add(expression.elseExpression)
+          ..add(expression.thenExpression);
+        continue;
+      }
+      if (expression is MethodInvocation ||
+          expression is FunctionExpressionInvocation ||
+          expression is InstanceCreationExpression ||
+          expression is FunctionExpression) {
+        continue;
+      }
+      final element = switch (expression) {
+        SimpleIdentifier(:final element) => element,
+        PrefixedIdentifier(:final identifier) => identifier.element,
+        PropertyAccess(:final propertyName) => propertyName.element,
+        _ => null,
+      };
+      final base = element?.baseElement;
+      if (base != null && expandedElements.add(base)) {
+        stack.addAll(_definitions[base] ?? const []);
+      }
+      stack.addAll(_directNestedExpressions(expression));
     }
     return values;
   }
 
   /// Returns an anchored regular expression for a partially-known string.
+  ///
+  /// Identity-memoized for the unit: only caches the entry-point call with an
+  /// empty visiting set. Recursive invocations that carry a non-empty visiting
+  /// set still compute directly to preserve cycle semantics.
   RegExp? pattern(Expression expression) {
+    if (_patternCache.containsKey(expression)) return _patternCache[expression];
     final source = _patternSource(expression, const {});
-    if (source == null || source == '.*') return null;
-    return RegExp('^$source\$');
+    final pattern = source == null || source == '.*'
+        ? null
+        : RegExp('^$source\$');
+    _patternCache[expression] = pattern;
+    return pattern;
   }
 
   Set<String>? _identifierValues(Element? element, Set<Element> visiting) {

@@ -1,4 +1,4 @@
-import 'dart:io';
+import 'dart:collection';
 
 import 'package:analyzer/dart/analysis/results.dart';
 import 'package:analyzer/dart/ast/ast.dart';
@@ -6,7 +6,6 @@ import 'package:analyzer/dart/ast/visitor.dart';
 import 'package:analyzer/dart/element/element.dart';
 import 'package:analyzer/error/error.dart';
 import 'package:path/path.dart' as p;
-
 import '../../core/graph/evidence.dart';
 import '../../core/project/project_context.dart';
 import '../dart/analyzer_ast_compat.dart';
@@ -19,6 +18,9 @@ import 'asset_inventory.dart';
 import 'asset_sink_registry.dart';
 import 'asset_string_evaluator.dart';
 import 'flutter_gen_index.dart';
+
+/// Maximum external libraries inspected per asset analysis pass.
+const _maxExternalClosureLibraries = 2000;
 
 /// Resolves asset references in Dart code through semantic analysis.
 class AssetReferenceResolver {
@@ -54,20 +56,21 @@ class AssetReferenceResolver {
   }) async {
     final analysisWorkspace = workspace ?? DartAnalysisWorkspace(project);
     final units = <String, ResolvedUnitResult>{};
+    final canonical = ownership.canonicalPath;
 
     final selectedPaths =
         reachability?.globalUsageUnitPaths ?? analysisWorkspace.dartFiles;
     if (reachability != null) {
       for (final library in reachability.resolvedLibraries) {
         for (final unit in library.units) {
-          if (selectedPaths.contains(_canonicalDartPath(unit.path))) {
-            units[_canonicalDartPath(unit.path)] = unit;
+          if (selectedPaths.contains(canonical(unit.path))) {
+            units[canonical(unit.path)] = unit;
           }
         }
       }
     }
     for (final filePath in selectedPaths) {
-      if (units.containsKey(_canonicalDartPath(filePath))) continue;
+      if (units.containsKey(canonical(filePath))) continue;
       if (ownership.ownerOf(filePath).ownership !=
           DartSourceOwnership.selectedPackage) {
         continue;
@@ -77,7 +80,7 @@ class AssetReferenceResolver {
         final result = await analysisWorkspace.resolveLibrary(filePath);
         if (result is ResolvedLibraryResult) {
           for (final unit in result.units) {
-            units[_canonicalDartPath(unit.path)] = unit;
+            units[canonical(unit.path)] = unit;
           }
         } else if (result is! NotLibraryButPartResult) {
           blockers.add(
@@ -104,7 +107,7 @@ class AssetReferenceResolver {
     if (reachability != null) {
       final librariesByPath = {
         for (final library in reachability.resolvedLibraries)
-          _canonicalDartPath(library.element.firstFragment.source.fullName):
+          canonical(library.element.firstFragment.source.fullName):
               library.element,
       };
       final externalEdges =
@@ -127,8 +130,7 @@ class AssetReferenceResolver {
       for (final edge in externalEdges) {
         final targetPath = edge.targetPath;
         if (!inspectedTargets.add(targetPath)) continue;
-        final sourceLibrary =
-            librariesByPath[_canonicalDartPath(edge.sourcePath)];
+        final sourceLibrary = librariesByPath[canonical(edge.sourcePath)];
         if (sourceLibrary == null) {
           _blockUninspectableExternalTarget(targetPath);
           continue;
@@ -172,7 +174,7 @@ class AssetReferenceResolver {
     final boundedClosure = await analysisWorkspace.boundedClosureSnapshot();
     for (final result in boundedClosure.libraries) {
       for (final unit in result.units) {
-        units[_canonicalDartPath(unit.path)] = unit;
+        units[canonical(unit.path)] = unit;
       }
     }
     for (final issue in boundedClosure.issues) {
@@ -235,12 +237,16 @@ class AssetReferenceResolver {
     DartAnalysisWorkspace workspace,
     Map<String, LibraryElement> pending,
   ) async {
+    final orderedPending = SplayTreeMap<String, LibraryElement>.from(pending);
     final visited = <String>{};
-    while (pending.isNotEmpty) {
-      final identity = pending.keys.reduce(
-        (left, right) => left.compareTo(right) <= 0 ? left : right,
-      );
-      final element = pending.remove(identity)!;
+    var truncated = false;
+    while (orderedPending.isNotEmpty) {
+      if (visited.length >= _maxExternalClosureLibraries) {
+        truncated = true;
+        break;
+      }
+      final identity = orderedPending.firstKey()!;
+      final element = orderedPending.remove(identity)!;
       if (!visited.add(identity)) continue;
 
       final SomeResolvedLibraryResult result;
@@ -312,12 +318,23 @@ class AssetReferenceResolver {
           case DartSourceOwnership.externalPackage:
             final dependencyIdentity = workspace.libraryIdentity(dependency);
             if (!visited.contains(dependencyIdentity)) {
-              pending.putIfAbsent(dependencyIdentity, () => dependency);
+              orderedPending.putIfAbsent(dependencyIdentity, () => dependency);
             }
           case DartSourceOwnership.unknown:
             workspace.recordUnknownOwnershipBoundary(source.fullName);
         }
       }
+    }
+    if (truncated) {
+      blockers.add(
+        BlockerInfo(
+          reason:
+              'external Dart closure fan-out truncated at $_maxExternalClosureLibraries libraries',
+          location: project.root.path,
+          affectedNamespace: 'asset:${project.packageName}/',
+          affectedNodeIds: const {},
+        ),
+      );
     }
   }
 
@@ -356,15 +373,6 @@ bool _edgeSourceIsRetained(
   return false;
 }
 
-String _canonicalDartPath(String path) {
-  final absolute = p.normalize(p.absolute(path));
-  try {
-    return p.normalize(File(absolute).resolveSymbolicLinksSync());
-  } on FileSystemException {
-    return absolute;
-  }
-}
-
 bool _canHideAssetConsumer(String issue) =>
     !issue.startsWith('test-environment-incomplete:') &&
     !issue.startsWith('callback-environment-incomplete:') &&
@@ -388,6 +396,7 @@ class _AssetVisitor extends RecursiveAstVisitor<void> {
   final ResolvedUnitResult unit;
   final AssetStringEvaluator evaluator;
   final bool canCreateCallerIds;
+  final Map<String, Set<String>> _patternMatchCache = {};
 
   @override
   void visitSimpleIdentifier(SimpleIdentifier node) {
@@ -543,14 +552,7 @@ class _AssetVisitor extends RecursiveAstVisitor<void> {
   Set<String> _matchingPatternNodeIds(Expression expression) {
     final pattern = evaluator.pattern(expression);
     if (pattern == null) return const {};
-    return {
-      for (final entry in resolver.inventory.assets.values)
-        if (pattern.hasMatch(entry.logicalKey) ||
-            pattern.hasMatch(
-              'packages/${resolver.project.packageName}/${entry.logicalKey}',
-            ))
-          entry.nodeId,
-    };
+    return _matchedNodeIdsForPattern(pattern);
   }
 
   void _resolveAssetArgument(Expression arg, AstNode context) {
@@ -576,15 +578,7 @@ class _AssetVisitor extends RecursiveAstVisitor<void> {
 
     final pattern = evaluator.pattern(arg);
     if (pattern != null) {
-      final affectedNodeIds = <String>{};
-      for (final entry in resolver.inventory.assets.values) {
-        final packageKey =
-            'packages/${resolver.project.packageName}/${entry.logicalKey}';
-        if (pattern.hasMatch(entry.logicalKey) ||
-            pattern.hasMatch(packageKey)) {
-          affectedNodeIds.add(entry.nodeId);
-        }
-      }
+      final affectedNodeIds = _matchedNodeIdsForPattern(pattern);
       if (affectedNodeIds.isEmpty) return;
       final callerId = _getCallerId(context);
       resolver.blockers.add(
@@ -616,6 +610,21 @@ class _AssetVisitor extends RecursiveAstVisitor<void> {
         sourceNodeId: callerId,
       ),
     );
+  }
+
+  Set<String> _matchedNodeIdsForPattern(RegExp pattern) {
+    final cached = _patternMatchCache[pattern.pattern];
+    if (cached != null) return {...cached};
+    final matched = {
+      for (final entry in resolver.inventory.assets.values)
+        if (pattern.hasMatch(entry.logicalKey) ||
+            pattern.hasMatch(
+              'packages/${resolver.project.packageName}/${entry.logicalKey}',
+            ))
+          entry.nodeId,
+    };
+    _patternMatchCache[pattern.pattern] = matched;
+    return {...matched};
   }
 
   void _addExactReference(
@@ -754,9 +763,9 @@ class BlockerInfo {
     required this.reason,
     required this.location,
     required this.affectedNamespace,
-    required this.affectedNodeIds,
+    required Set<String> affectedNodeIds,
     this.sourceNodeId,
-  });
+  }) : affectedNodeIds = Set.unmodifiable(affectedNodeIds);
 
   /// Why the construct could not be resolved.
   final String reason;

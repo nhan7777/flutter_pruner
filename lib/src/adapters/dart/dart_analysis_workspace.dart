@@ -86,21 +86,43 @@ final class DartAnalysisWorkspace {
   int get resolutionCount => _libraryCache.length;
 
   /// Dart paths known to the analyzer, sorted and de-duplicated.
+  ///
+  /// Project files the analyzer already includes need no admissibility
+  /// probing: that check exists only to admit analyzer-excluded selected
+  /// sources (generated output, dotfiles), and its result for a visible path
+  /// is subsumed by the set union.
   List<String> get dartFiles => _dartFiles ??= List<String>.unmodifiable(
     ({
-      for (final context in collection.contexts)
-        for (final path in context.contextRoot.analyzedFiles())
-          if (path.endsWith('.dart')) path,
+      ...analyzerVisibleDartFiles,
       for (final file in _project.dartFiles)
-        if (_isAdmissibleAnalyzerExcludedProjectPath(file.path))
+        if (!analyzerVisibleDartFiles.contains(
+              p.normalize(p.absolute(file.path)),
+            ) &&
+            _isAdmissibleAnalyzerExcludedProjectPath(file.path))
           p.normalize(p.absolute(file.path)),
       for (final target in _project.targets)
-        if (_isAdmissibleAnalyzerExcludedProjectPath(
-          _project.resolve(target.entrypoint),
-        ))
+        if (!analyzerVisibleDartFiles.contains(
+              p.normalize(p.absolute(_project.resolve(target.entrypoint))),
+            ) &&
+            _isAdmissibleAnalyzerExcludedProjectPath(
+              _project.resolve(target.entrypoint),
+            ))
           p.normalize(p.absolute(_project.resolve(target.entrypoint))),
     }).toList()..sort(),
   );
+
+  /// Normalized Dart paths the analyzer collection itself includes.
+  ///
+  /// Enumerating context roots walks the tree; consumers that need both this
+  /// and [dartFiles] share one traversal per pass.
+  Set<String> get analyzerVisibleDartFiles =>
+      _analyzerVisibleDartFiles ??= Set<String>.unmodifiable({
+        for (final context in collection.contexts)
+          for (final path in context.contextRoot.analyzedFiles())
+            if (path.endsWith('.dart')) p.normalize(p.absolute(path)),
+      });
+
+  Set<String>? _analyzerVisibleDartFiles;
 
   /// Resolves [path] at most once during this project analysis pass.
   Future<SomeResolvedLibraryResult> resolveLibrary(String path) {
@@ -292,7 +314,16 @@ final class DartAnalysisWorkspace {
                     DartSourceOwnership.selectedPackage);
   }
 
-  bool _hasSymlinkComponent(String path) {
+  /// Whether any component of [path] under the project root is a symlink.
+  ///
+  /// Memoized per pass: every resolution and admissibility check walks the
+  /// same directory prefixes, and each segment probe is a syscall.
+  bool _hasSymlinkComponent(String path) =>
+      _symlinkComponentCache[path] ??= _computeHasSymlinkComponent(path);
+
+  final Map<String, bool> _symlinkComponentCache = {};
+
+  bool _computeHasSymlinkComponent(String path) {
     final root = p.normalize(p.absolute(_project.root.path));
     if (!_contains(root, path)) return true;
     var current = root;
@@ -305,15 +336,8 @@ final class DartAnalysisWorkspace {
     }
     return false;
   }
-}
 
-String _canonicalPath(String path) {
-  final absolute = p.normalize(p.absolute(path));
-  try {
-    return p.normalize(File(absolute).resolveSymbolicLinksSync());
-  } on FileSystemException {
-    return absolute;
-  }
+  String _canonicalPath(String path) => _ownership.canonicalPath(path);
 }
 
 String _canonicalDirectoryPath(String path) {

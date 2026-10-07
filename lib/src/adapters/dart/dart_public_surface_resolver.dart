@@ -1,5 +1,4 @@
 import 'dart:collection';
-import 'dart:io';
 
 import 'package:analyzer/dart/analysis/results.dart';
 import 'package:analyzer/dart/ast/ast.dart';
@@ -89,7 +88,8 @@ final class DartPublicSurfaceResolver {
   DartPublicSurfaceResolution resolve() {
     final librariesByPath = <String, ResolvedLibraryResult>{
       for (final library in libraries)
-        _canonical(library.element.firstFragment.source.fullName): library,
+        ownership.canonicalPath(library.element.firstFragment.source.fullName):
+            library,
     };
     final issues = <_IssueKey, _MutablePublicIssue>{};
     final edges = <_PublicEdgeKey, DartPublicSurfaceEdge>{};
@@ -118,7 +118,9 @@ final class DartPublicSurfaceResolver {
     for (final target in externalTargets) {
       final resolvedEntrypoints = <_ResolvedPublicEntrypoint>[];
       for (final relativeEntrypoint in orderedEntrypoints) {
-        final entrypointPath = _canonical(project.resolve(relativeEntrypoint));
+        final entrypointPath = ownership.canonicalPath(
+          project.resolve(relativeEntrypoint),
+        );
         final library = librariesByPath[entrypointPath];
         if (library == null) {
           addIssue(
@@ -403,7 +405,8 @@ final class DartPublicSurfaceResolver {
   bool _hasDirectiveIssue(String sourcePath, String targetId) =>
       directives.issues.any(
         (issue) =>
-            _canonical(issue.sourcePath) == _canonical(sourcePath) &&
+            ownership.canonicalPath(issue.sourcePath) ==
+                ownership.canonicalPath(sourcePath) &&
             issue.affectedAuxiliaryTargetIds.contains(targetId),
       );
 
@@ -417,7 +420,7 @@ final class DartPublicSurfaceResolver {
     for (final configuration in directive.configurations) {
       final resolved = configuration.resolvedUri;
       final path = resolved is DirectiveUriWithSource
-          ? _canonical(resolved.source.fullName)
+          ? ownership.canonicalPath(resolved.source.fullName)
           : _resolveUri(unit, configuration.uri.stringValue);
       if (path != null) paths.add(path);
     }
@@ -429,12 +432,14 @@ final class DartPublicSurfaceResolver {
     final uri = Uri.tryParse(value);
     if (uri == null || uri.hasQuery || uri.hasFragment) return null;
     if (uri.scheme.isEmpty) {
-      return _canonical(p.join(p.dirname(unit.path), uri.toFilePath()));
+      return ownership.canonicalPath(
+        p.join(p.dirname(unit.path), uri.toFilePath()),
+      );
     }
-    if (uri.scheme == 'file') return _canonical(uri.toFilePath());
+    if (uri.scheme == 'file') return ownership.canonicalPath(uri.toFilePath());
     if (uri.scheme == 'package') {
       final path = unit.session.uriConverter.uriToPath(uri);
-      return path == null ? null : _canonical(path);
+      return path == null ? null : ownership.canonicalPath(path);
     }
     return null;
   }
@@ -468,15 +473,6 @@ Map<String, List<_SurfaceDeclaration>> _applyCombinators(
     }
   }
   return result;
-}
-
-String _canonical(String path) {
-  final absolute = p.normalize(p.absolute(path));
-  try {
-    return p.normalize(File(absolute).resolveSymbolicLinksSync());
-  } on FileSystemException {
-    return absolute;
-  }
 }
 
 final class _SurfaceDeclaration {

@@ -141,33 +141,45 @@ class BuildCondition {
   }
 
   @override
-  bool operator ==(Object other) =>
-      other is BuildCondition &&
-      const SetEquality<String>().equals(platforms, other.platforms) &&
-      const SetEquality<String>().equals(flavors, other.flavors) &&
-      const SetEquality<String>().equals(entrypoints, other.entrypoints) &&
-      const MapEquality<String, String>().equals(
-        dartDefines,
-        other.dartDefines,
-      ) &&
-      const SetEquality<BuildTarget>().equals(
-        exactTargets,
-        other.exactTargets,
-      ) &&
-      const SetEquality<AuxiliaryExecutionTarget>().equals(
-        exactAuxiliaryTargets,
-        other.exactAuxiliaryTargets,
-      );
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+    if (other is! BuildCondition) return false;
+    if (isUnconditional || other.isUnconditional) {
+      return isUnconditional && other.isUnconditional;
+    }
+    return const SetEquality<String>().equals(platforms, other.platforms) &&
+        const SetEquality<String>().equals(flavors, other.flavors) &&
+        const SetEquality<String>().equals(entrypoints, other.entrypoints) &&
+        const MapEquality<String, String>().equals(
+          dartDefines,
+          other.dartDefines,
+        ) &&
+        const SetEquality<BuildTarget>().equals(
+          exactTargets,
+          other.exactTargets,
+        ) &&
+        const SetEquality<AuxiliaryExecutionTarget>().equals(
+          exactAuxiliaryTargets,
+          other.exactAuxiliaryTargets,
+        );
+  }
 
   @override
-  int get hashCode => Object.hash(
-    const SetEquality<String>().hash(platforms),
-    const SetEquality<String>().hash(flavors),
-    const SetEquality<String>().hash(entrypoints),
-    const MapEquality<String, String>().hash(dartDefines),
-    const SetEquality<BuildTarget>().hash(exactTargets),
-    const SetEquality<AuxiliaryExecutionTarget>().hash(exactAuxiliaryTargets),
-  );
+  int get hashCode {
+    // Every semantic reference edge carries [unconditional]; hashing six
+    // empty collections per insertion dominated graph construction. Any
+    // constant is consistent with `==` because only unconditional conditions
+    // are equal to an unconditional one.
+    if (isUnconditional) return 0x7f0c0d;
+    return Object.hash(
+      const SetEquality<String>().hash(platforms),
+      const SetEquality<String>().hash(flavors),
+      const SetEquality<String>().hash(entrypoints),
+      const MapEquality<String, String>().hash(dartDefines),
+      const SetEquality<BuildTarget>().hash(exactTargets),
+      const SetEquality<AuxiliaryExecutionTarget>().hash(exactAuxiliaryTargets),
+    );
+  }
 
   @override
   String toString() {
