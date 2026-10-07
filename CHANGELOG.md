@@ -7,6 +7,15 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+### Fixed
+
+- Asset scan no longer stalls on code that reassigns locals from each other
+  (for example the hash routines in `syncfusion_flutter_pdf`). Opaque-call
+  asset provenance is now collected as one path-independent union that expands
+  each expression and assigned variable once, instead of re-expanding every
+  assignment path, which was exponential and made real-project scans run for
+  hours. Retained assets and blockers are unchanged.
+
 ### Changed
 
 - Scan is roughly 3× faster on medium projects (synthetic 1000-file fixture:

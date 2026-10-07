@@ -1373,5 +1373,114 @@ import 'safe.dart'
         expect(finding.proposedAction, 'Move to quarantine');
       },
     );
+
+    test(
+      'opaque-call provenance stays bounded across cross-assigned locals',
+      () async {
+        final root = await Directory.systemTemp.createTemp(
+          'asset_cross_assigned_provenance_',
+        );
+        addTearDown(() => root.delete(recursive: true));
+        File(p.join(root.path, 'pubspec.yaml')).writeAsStringSync('''
+name: provenance_owner
+publish_to: none
+environment:
+  sdk: ^3.9.0
+dependencies:
+  flutter:
+    sdk: flutter
+flutter:
+  assets:
+    - assets/kept.png
+    - assets/unused.png
+''');
+        File(p.join(root.path, '.dart_tool', 'package_config.json'))
+          ..createSync(recursive: true)
+          ..writeAsStringSync('''
+{"configVersion":2,"packages":[
+  {"name":"provenance_owner","rootUri":"../","packageUri":"lib/","languageVersion":"3.9"},
+  {"name":"flutter","rootUri":"../flutter_stub/","packageUri":"lib/","languageVersion":"3.9"}
+]}
+''');
+        File(p.join(root.path, '.flutter_pruner', 'config.yaml'))
+          ..createSync(recursive: true)
+          ..writeAsStringSync('''
+version: 1
+analysis:
+  mode: application
+target_matrix:
+  complete: true
+  targets:
+    - name: android
+      platform: android
+      entrypoint: lib/main.dart
+''');
+        // Hash-style code: every local is reassigned many times from other
+        // locals. Path-sensitive provenance is exponential in this shape.
+        const variableCount = 12;
+        const rounds = 6;
+        final source = StringBuffer()
+          ..writeln('void consume(Object value) {}')
+          ..writeln('void main() => run(true);')
+          ..writeln('void run(bool flag) {')
+          ..writeln('  Object held = 0;')
+          ..writeln("  held = 'assets/kept.png';");
+        for (var i = 0; i < variableCount; i++) {
+          source.writeln('  Object v$i = 0;');
+        }
+        for (var round = 0; round < rounds; round++) {
+          for (var i = 0; i < variableCount; i++) {
+            final left = (i + 1 + round) % variableCount;
+            final right = (i + 2 + round) % variableCount;
+            source.writeln('  v$i = flag ? v$left : v$right;');
+          }
+        }
+        source
+          ..writeln('  v${variableCount - 1} = flag ? held : v0;')
+          ..writeln('  consume(v0);')
+          ..writeln('}');
+        File(p.join(root.path, 'lib', 'main.dart'))
+          ..createSync(recursive: true)
+          ..writeAsStringSync(source.toString());
+        for (final name in ['kept.png', 'unused.png']) {
+          File(p.join(root.path, 'assets', name))
+            ..createSync(recursive: true)
+            ..writeAsStringSync(name);
+        }
+        File(p.join(root.path, 'flutter_stub', 'pubspec.yaml'))
+          ..createSync(recursive: true)
+          ..writeAsStringSync('name: flutter\nenvironment:\n  sdk: ^3.9.0\n');
+        File(p.join(root.path, 'flutter_stub', 'lib', 'widgets.dart'))
+          ..createSync(recursive: true)
+          ..writeAsStringSync('class Widget {}\n');
+
+        final snapshot = await ProjectAnalyzer(
+          project: await ProjectContext.load(root),
+          only: const {'assets'},
+        ).analyze();
+
+        const keptId = 'asset:provenance_owner/assets/kept.png';
+        const unusedId = 'asset:provenance_owner/assets/unused.png';
+        expect(
+          snapshot.graph.blockers.where(
+            (blocker) =>
+                blocker.reason ==
+                    'asset reference passed to an unrecognized asset-loading API' &&
+                blocker.affectedNodeIds.contains(keptId),
+          ),
+          isNotEmpty,
+          reason:
+              'a declared asset reaching an opaque call through reassigned '
+              'locals must retain its provenance',
+        );
+        expect(
+          snapshot.graph
+              .blockersFor(unusedId)
+              .where((blocker) => blocker.producer == 'assets'),
+          isEmpty,
+          reason: 'bounded provenance must not fail closed package-wide',
+        );
+      },
+    );
   });
 }
